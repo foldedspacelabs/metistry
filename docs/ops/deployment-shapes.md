@@ -330,6 +330,16 @@ used to get implicitly (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `HOME`,
 {"op":"start","token":"…","service":"assistant"}
 ```
 
+Each entry in `children` carries `name`, `state`, `pid`, `uptimeMs`, `restarts`,
+`lastExit` and `log`, and — once the supervisor has spawned the child —
+`spawned: {argv, profile}`: the argv it handed to `spawn()` and the Seatbelt
+profile path read off its `sandbox-exec -f` prefix (`null` when there is none).
+That is the only honest source for "is this child confined": `sandbox-exec`
+execs into its target, so the running process's own argv (`ps`) never names the
+profile, and `supervisor.json` is what the *next* start runs. The field is
+optional and additive — a supervisor that predates it, or a child it has not
+spawned, simply omits it, and a reader treats that as "not known".
+
 `metistry restart|stop|start <service>` uses it for the supervisor's children,
 because launchctl cannot address a process launchd has never heard of;
 launchctl stays for the supervisor itself and for the TCC helpers. With no
@@ -1058,6 +1068,14 @@ to one `status` call on the control socket — and a `child:<name>` row for each
 child, with its state, pid, restart count and log path. `launchctl print`
 cannot see those processes, so without this doctor would be blind to
 everything except the agent itself.
+
+The **`sandbox`** row is that `spawned` report too — never `supervisor.json`
+(re-rendered by `up` beside a supervisor still running the old spawn) and never
+the running process's argv (which cannot show confinement). A child the
+supervisor has not spawned, a supervisor that does not answer, and one that
+predates the field read **"could not confirm"** (`degraded`) — not unconfined,
+not confined. When the file's argv differs from what was spawned the row says so
+(`meta.stale`), and `metistry up` restarts the supervisor onto it.
 
 The **`assistant`** row under this shape is the supervisor's answer, not
 compute.yaml's: `failed` unless a child named `assistant` is running — "not

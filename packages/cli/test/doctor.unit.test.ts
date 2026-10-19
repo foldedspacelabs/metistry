@@ -27,6 +27,7 @@ import {
   type DoctorRow,
 } from "../src/doctor.js";
 import { SANDBOX_EXEC } from "../src/sandbox.js";
+import { sandboxProfileOf, type ChildStatus } from "@foldedspacelabs/metistry-core";
 import { cliShimPath, writeCliShim } from "../src/cli-shim.js";
 import { StepRunner } from "../src/steps.js";
 import { parseDotEnv } from "../src/env.js";
@@ -866,48 +867,107 @@ describe("the sandbox row — which children run confined, and where their egres
   const child = (name: string, argv: string[]) => ({ name, argv, env: {}, log: `/tmp/metistry-${name}.log`, stopTimeoutMs: 10_000 });
   const base = { schema: 1 as const, label: "com.foldedspacelabs.metistry", socket: "/s.sock", token: "t".repeat(32), env: {} };
   const confined = (name: string, profile: string) => child(name, [SANDBOX_EXEC, "-f", `/p/ops/sandbox/${profile}`, "-D", "X=1", "/n/bin/node", `/p/apps/${name}/dist/main.js`]);
+  /** the supervisor's `status` entry for a child it spawned from `spec` — what spawn() was handed, and the profile read off it */
+  const ran = (spec: ReturnType<typeof child>): ChildStatus => ({
+    name: spec.name,
+    state: "running",
+    pid: 100,
+    restarts: 0,
+    log: spec.log,
+    spawned: { argv: spec.argv, profile: sandboxProfileOf(spec.argv) },
+  });
+  const statusOf = (specs: ReturnType<typeof child>[]) => specs.map(ran);
 
-  it("reports both confined children, their profiles and the door — from the argv that actually runs", async () => {
-    const row = await confinementRow({
-      ...base,
-      egress: { port: 7814, allow: ["openrouter.ai", "github.com"], tokens: { assistant: "a", reconciler: "r" } },
-      children: [child("db", ["/pg/bin/postgres", "-D", "/d"]), child("console", ["/n/bin/node", "/p/console.js"]), confined("reconciler", "reconciler.sb"), confined("assistant", "assistant.sb")],
-    });
+  it("reports both confined children, their profiles and the door — from what the supervisor spawned", async () => {
+    const specs = [child("db", ["/pg/bin/postgres", "-D", "/d"]), child("console", ["/n/bin/node", "/p/console.js"]), confined("reconciler", "reconciler.sb"), confined("assistant", "assistant.sb")];
+    const row = await confinementRow(
+      { ...base, egress: { port: 7814, allow: ["openrouter.ai", "github.com"], tokens: { assistant: "a", reconciler: "r" } }, children: specs },
+      statusOf(specs),
+    );
     expect(row.kind).toBe("sandbox");
     expect(row.status).toBe("ok");
     expect(row.meta).toMatchObject({
       confined: ["reconciler", "assistant"],
       unconfined: ["db", "console"],
+      unknown: [],
       egress: { port: 7814, allow: ["openrouter.ai", "github.com"] },
     });
     expect((row.meta as { profiles: Record<string, string> }).profiles.reconciler).toBe("/p/ops/sandbox/reconciler.sb");
   });
 
   it("an unconfined.sb profile is NOT confinement — the off switch is visible, not silent", async () => {
-    const row = await confinementRow({
-      ...base,
-      egress: { port: 7814, allow: ["openrouter.ai"], tokens: {} },
-      children: [confined("assistant", "assistant.sb"), confined("reconciler", "unconfined.sb")],
-    });
+    const specs = [confined("assistant", "assistant.sb"), confined("reconciler", "unconfined.sb")];
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: ["openrouter.ai"], tokens: {} }, children: specs }, statusOf(specs));
     expect(row.status).toBe("degraded");
     expect(row.remediation).toMatch(/sole committer/);
     expect(row.meta).toMatchObject({ confined: ["assistant"], unconfined: ["reconciler"] });
   });
 
   it("an empty allowlist is reported: correct for a local-only install, a bug for any other", async () => {
-    const row = await confinementRow({
-      ...base,
-      egress: { port: 7814, allow: [], tokens: {} },
-      children: [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")],
-    });
+    const specs = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: [], tokens: {} }, children: specs }, statusOf(specs));
     expect(row.status).toBe("degraded");
     expect(row.remediation).toMatch(/allowlist is empty/);
   });
 
   it("no profile anywhere is degraded, and says which shape that is legitimate in", async () => {
-    const row = await confinementRow({ ...base, children: [child("console", ["/n/bin/node", "/p/console.js"])] });
+    const specs = [child("console", ["/n/bin/node", "/p/console.js"])];
+    const row = await confinementRow({ ...base, children: specs }, statusOf(specs));
     expect(row.status).toBe("degraded");
     expect(row.remediation).toMatch(/no child runs under a profile/);
     expect(row.remediation).toMatch(/compose shape the container is the boundary/);
+  });
+
+  // THE BUG (X-48). The live instance's row called a confined reconciler
+  // unconfined: supervisor.json no longer matched what the supervisor had
+  // spawned. The row answers for what was SPAWNED, so the file cannot flip it.
+  it("a stale supervisor.json beside a confined running child does not report it unconfined", async () => {
+    const spawnedAs = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const staleFile = [confined("assistant", "assistant.sb"), child("reconciler", ["/n/bin/node", "/p/apps/reconciler/dist/main.js"])];
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: ["github.com"], tokens: {} }, children: staleFile }, statusOf(spawnedAs));
+    expect(row.status).toBe("degraded"); // the file is out of step with what runs, and the row says so …
+    expect(row.meta).toMatchObject({ confined: ["assistant", "reconciler"], unconfined: [], stale: ["reconciler"] });
+    expect(row.remediation).not.toMatch(/NOT confined/); // … but never calls the confined child unconfined
+    expect(row.remediation).toMatch(/spawned from a different argv/);
+  });
+
+  it("the converse: a stale file claiming confinement does not make an unconfined child confined", async () => {
+    const spawnedAs = [confined("assistant", "assistant.sb"), child("reconciler", ["/n/bin/node", "/p/apps/reconciler/dist/main.js"])];
+    const staleFile = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: ["github.com"], tokens: {} }, children: staleFile }, statusOf(spawnedAs));
+    expect(row.meta).toMatchObject({ confined: ["assistant"], unconfined: ["reconciler"] });
+    expect(row.remediation).toMatch(/NOT confined/);
+  });
+
+  it("a status without the field (an older supervisor) reads 'could not confirm' — never confined, never unconfined", async () => {
+    const specs = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const old: ChildStatus[] = specs.map((s) => ({ name: s.name, state: "running", pid: 1, restarts: 0, log: s.log }));
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: ["github.com"], tokens: {} }, children: specs }, old);
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/could not confirm/);
+    expect(row.remediation).not.toMatch(/NOT confined/);
+    expect(row.meta).toMatchObject({ confined: [], unconfined: [], unknown: ["assistant", "reconciler"] });
+  });
+
+  it("a supervisor that did not answer reads 'could not confirm' — supervisor.json alone is not evidence of anything", async () => {
+    const specs = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const row = await confinementRow({ ...base, children: specs }, undefined);
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/could not confirm/);
+    expect(row.meta).toMatchObject({ confined: [], unconfined: [], unknown: ["assistant", "reconciler"] });
+  });
+
+  it("a reconciler the supervisor has not spawned is 'could not confirm', not unconfined, beside a confined assistant", async () => {
+    const specs = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: ["github.com"], tokens: {} }, children: specs }, [ran(specs[0]!), { name: "reconciler", state: "pending", restarts: 0, log: specs[1]!.log }]);
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/could not confirm the reconciler/);
+    expect(row.remediation).not.toMatch(/NOT confined/);
+  });
+
+  it("sandboxProfileOf reads the -f operand of a leading sandbox-exec, and only that", () => {
+    expect(sandboxProfileOf([SANDBOX_EXEC, "-f", "/p/r.sb", "-D", "X=1", "/n/node", "m.js"])).toBe("/p/r.sb");
+    expect(sandboxProfileOf(["/n/node", "m.js", "-f", "/p/r.sb"])).toBeNull();
+    expect(sandboxProfileOf([SANDBOX_EXEC, "/n/node", "m.js"])).toBeNull();
   });
 });

@@ -35,6 +35,8 @@ import {
   RESTART_HEALTHY_MS,
   type ChildSpec,
   type ChildStatus,
+  type SpawnedInfo,
+  sandboxProfileOf,
   type SupervisorConfig,
 } from "@foldedspacelabs/metistry-core";
 
@@ -80,6 +82,8 @@ interface ChildRuntime {
   spec: ChildSpec;
   proc?: ChildProcess | undefined;
   state: ChildStatus["state"];
+  /** what the last spawn ran (status reports it — doctor cannot read confinement off a running process) */
+  spawned?: SpawnedInfo | undefined;
   startedAt?: number | undefined;
   restarts: number;
   /** restart timestamps inside the crash-loop window */
@@ -244,6 +248,7 @@ export class Supervisor {
       return;
     }
     c.proc = proc;
+    c.spawned = { argv: [...c.spec.argv], profile: sandboxProfileOf(c.spec.argv) };
     c.state = "running";
     c.startedAt = this.now();
     this.log(`[${c.spec.name}] started pid ${proc.pid ?? "?"} → ${c.spec.log}`);
@@ -364,6 +369,7 @@ export class Supervisor {
         name,
         state: c.state,
         ...(c.proc?.pid !== undefined ? { pid: c.proc.pid } : {}),
+        ...(c.spawned ? { spawned: { argv: [...c.spawned.argv], profile: c.spawned.profile } } : {}),
         ...(c.startedAt !== undefined ? { uptimeMs: this.now() - c.startedAt } : {}),
         restarts: c.restarts,
         ...(c.lastExit ? { lastExit: c.lastExit } : {}),

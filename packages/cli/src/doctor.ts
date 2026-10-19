@@ -77,7 +77,7 @@ import { realExec, type Exec } from "./exec.js";
 import { labelFor, loadPlistTemplates, logPathFor, parseRegistrar, registrarPhrase, SUPERVISED_SERVICES, type RegistrarFinding } from "./launchd.js";
 import { actualName } from "./migrate-inbox.js";
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
-import { SANDBOX_EXEC, UNCONFINED_PROFILE_REL } from "./sandbox.js";
+import { UNCONFINED_PROFILE_REL } from "./sandbox.js";
 import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
 import { defaultUi, padTo, statusName, visibleWidth, type Ui } from "./ui.js";
 import { envPaths, readInstanceId } from "./instance.js";
@@ -1762,7 +1762,7 @@ export async function supervisorRows(stateRoot: string, snapshot?: Promise<Super
       })),
     },
   ];
-  rows.push(await confinementRow(config));
+  rows.push(await confinementRow(config, snap.children));
   for (const spec of config.children) {
     const st = children?.find((c) => c.name === spec.name);
     let action: DoctorAction | undefined;
@@ -1796,49 +1796,83 @@ export async function supervisorRows(stateRoot: string, snapshot?: Promise<Super
 /**
  * WHICH CHILDREN RUN CONFINED, and what their one way out is.
  *
- * Derived from the child argv in `supervisor.json` rather than from a second
- * table: the argv is what actually runs, so a row computed from anything
- * else could be right about a plan and wrong about the machine. A child
- * whose argv[0] is `/usr/bin/sandbox-exec` is confined; the profile it names
- * is the honest answer to "confined by what", which is why the off switch is
- * a real file (`ops/sandbox/unconfined.sb`) rather than a missing prefix.
+ * Read from what the SUPERVISOR SPAWNED (`ChildStatus.spawned`, reported over
+ * its control socket), not from `supervisor.json` and not from the running
+ * process. Neither of those can be trusted with the question:
+ *
+ *  - `sandbox-exec` EXECS into its target, so a confined child's own argv
+ *    (`ps`) is `node main.js` — nothing in it names the profile. Reading the
+ *    running process's argv would call every confined child unconfined.
+ *  - `supervisor.json` is what the NEXT start will run; `up` can re-render it
+ *    beside a supervisor whose children were spawned from an older one. A row
+ *    computed from it can be right about a plan and wrong about the machine
+ *    (the owner's live instance, which reported the reconciler unconfined
+ *    while it was confined).
+ *
+ * The supervisor is the only party that knows what it handed to spawn(), so
+ * it says. A child it has not spawned, a supervisor that does not answer, and
+ * one that predates the field all read "could not confirm" — never
+ * "unconfined" and never "confined". The profile named is the honest answer
+ * to "confined by what", which is why the off switch is a real file
+ * (`ops/sandbox/unconfined.sb`) rather than a missing prefix.
  *
  * Never `failed`. An install can legitimately run with the reconciler
  * unconfined (no real git on the Mac, an SSH remote, the operator's switch),
  * and doctor's job here is to SAY so — a red row for a supported shape
  * teaches the operator to ignore red rows.
  */
-export async function confinementRow(config: SupervisorConfig): Promise<DoctorRow> {
+export async function confinementRow(config: SupervisorConfig, children?: ChildStatus[]): Promise<DoctorRow> {
   const confined: string[] = [];
   const unconfined: string[] = [];
+  const unknown: string[] = [];
+  const stale: string[] = [];
   const profiles: Record<string, string> = {};
+  const offName = UNCONFINED_PROFILE_REL.split("/").pop()!;
   for (const c of config.children) {
-    const i = c.argv.indexOf(SANDBOX_EXEC);
-    const profile = i !== -1 ? c.argv[c.argv.indexOf("-f", i) + 1] : undefined;
-    const isOff = profile !== undefined && profile.endsWith(`/${UNCONFINED_PROFILE_REL.split("/").pop()}`);
-    if (profile !== undefined) profiles[c.name] = profile;
-    (profile !== undefined && !isOff ? confined : unconfined).push(c.name);
+    const spawned = children?.find((s) => s.name === c.name)?.spawned;
+    if (!spawned) {
+      unknown.push(c.name);
+      continue;
+    }
+    const profile = spawned.profile;
+    if (profile !== null) profiles[c.name] = profile;
+    (profile !== null && !profile.endsWith(`/${offName}`) ? confined : unconfined).push(c.name);
+    if (spawned.argv.length !== c.argv.length || spawned.argv.some((a, i) => a !== c.argv[i])) stale.push(c.name);
   }
   const egress = config.egress;
   return {
     kind: "sandbox",
-    ...(await runCheck("sandbox", "which supervisor children run under a Seatbelt profile, and where their egress goes", async () => {
-      const meta = { confined, unconfined, profiles, egress: egress ? { port: egress.port, allow: egress.allow } : null };
+    ...(await runCheck("sandbox", "which supervisor children the supervisor spawned under a Seatbelt profile, and where their egress goes", async () => {
+      const meta = { confined, unconfined, unknown, stale, profiles, egress: egress ? { port: egress.port, allow: egress.allow } : null };
       const door = egress ? `egress: 127.0.0.1:${egress.port}, ${egress.allow.length} allowed host(s)` : "egress: no proxy (compose shape, or an install that predates one)";
-      if (confined.length === 0) {
-        return { status: "degraded", remediation: `no child runs under a profile — ${door}. Under the compose shape the container is the boundary; under launchd this is a gap (docs/ops/deployment-shapes.md)`, meta };
+      const staleNote = stale.length
+        ? ` ${stale.join(", ")} ${stale.length === 1 ? "was" : "were"} spawned from a different argv than supervisor.json now holds — it was re-rendered after they started, and \`metistry up\` restarts the supervisor onto it.`
+        : "";
+      if (unknown.length === config.children.length && config.children.length > 0) {
+        return {
+          status: "degraded",
+          remediation: `could not confirm which children are confined — the supervisor ${children ? "has not spawned any of them yet, or is older than the field that reports what it spawned (its status carries no \`spawned\`)" : "did not answer status"}; \`metistry up\` restarts it onto the current release. Nothing here is read off supervisor.json or ps: a running child's argv never shows sandbox-exec, and the file can be newer than what runs. ${door}`,
+          meta,
+        };
       }
-      const detail = `confined: ${confined.join(", ")}${unconfined.length ? `; ambient: ${unconfined.join(", ")}` : ""}; ${door}`;
+      if (confined.length === 0) {
+        return { status: "degraded", remediation: `no child runs under a profile — ${door}. Under the compose shape the container is the boundary; under launchd this is a gap (docs/ops/deployment-shapes.md)${unknown.length ? `. Could not confirm: ${unknown.join(", ")}` : ""}`, meta };
+      }
+      const detail = `confined: ${confined.join(", ")}${unconfined.length ? `; ambient: ${unconfined.join(", ")}` : ""}${unknown.length ? `; could not confirm: ${unknown.join(", ")}` : ""}; ${door}`;
+      if (unknown.includes("reconciler")) {
+        return { status: "degraded", remediation: `could not confirm the reconciler — the sole committer, and the only place git runs — is confined: the supervisor has not reported spawning it. ${detail}. \`metistry logs supervisor\`${staleNote}`, meta };
+      }
       if (!confined.includes("reconciler")) {
         return {
           status: "degraded",
-          remediation: `the reconciler — the sole committer, and the only place git runs — is NOT confined. ${detail}. \`metistry up\` says why (no real git the profile can name, or METISTRY_RECONCILER_SANDBOX=0); docs/ops/reconciler.md`,
+          remediation: `the reconciler — the sole committer, and the only place git runs — is NOT confined (the supervisor spawned it ${profiles.reconciler ? `under ${profiles.reconciler}` : "without sandbox-exec"}). ${detail}. \`metistry up\` says why (no real git the profile can name, or METISTRY_RECONCILER_SANDBOX=0); docs/ops/reconciler.md${staleNote}`,
           meta,
         };
       }
       if (egress && egress.allow.length === 0) {
-        return { status: "degraded", remediation: `${detail} — the allowlist is empty, so every off-machine call from a confined child is refused. That is correct for a local-only install and a bug for any other (compute.yaml's providers and the instance repo's remotes are where it comes from)`, meta };
+        return { status: "degraded", remediation: `${detail} — the allowlist is empty, so every off-machine call from a confined child is refused. That is correct for a local-only install and a bug for any other (compute.yaml's providers and the instance repo's remotes are where it comes from)${staleNote}`, meta };
       }
+      if (stale.length || unknown.length) return { status: "degraded", remediation: `${detail}.${staleNote}`, meta };
       return { meta };
     })),
   };

@@ -256,7 +256,9 @@ to get there:
   `routines/test/weekly-review.integration.test.ts` shadows the eight tables
   the review reads inline, since the review is a whole-database aggregate
   that *ranks* — a sibling's rows do not add noise, they push the fixture off
-  the end of a top-10 list. A bare `DELETE FROM <table>` in a test is a bug
+  the end of a top-10 list. `routines/test/morning-brief.integration.test.ts`
+  does the same for the five tables the brief reads and writes (its "Waiting on
+  you" list is the five most urgent requests in the whole queue). A bare `DELETE FROM <table>` in a test is a bug
   (X-25).
 
 **Nothing truncates.** Until X-25 the weekly review's suite answered the

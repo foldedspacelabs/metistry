@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `metistry` — init | connect-repo | connect | secrets | console | doctor |
+// `metistry` — init | connect-repo | connect | secrets | console | enroll | doctor |
 // up | down | update (plan
 // §4.16; connect-repo and secrets are the install verbs the Mac app drives,
 // docs/product/desktop-app-plan.md). Hand-rolled argument parsing: a handful
@@ -76,6 +76,7 @@ import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-rep
 import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
 import { consoleCall, renderConsoleCallError, renderWhoami, runConsoleSession, whoami } from "./console-client.js";
 import { agentAutonomy, agentsDefine, agentsList, parseAutonomyFlags, renderAgents, renderAutonomy, renderDefine } from "./agents.js";
+import { enroll, enrollCancel, NoDatabaseError, parseCodeId, renderEnrollCancelled, renderEnrollMinted, renderEnrollRefusal } from "./enroll.js";
 
 const AGENTS_USAGE =
   "usage: metistry agents list [--json] | metistry agents autonomy <id> [--level observe|propose|act_within_scope] [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]" +
@@ -462,6 +463,23 @@ const USAGE = `metistry — Metistry command line
       answered, {id, error: {code, message}} when it did not. stream: true
       (GET /api/events only) writes {id, event} frames until {id, cancel: true}
       or the console closes it, then {id, ended}. EOF on stdin ends the session.
+
+  metistry enroll [--json] [--instance <dir>] [--env-file <path>]
+  metistry enroll --cancel <code_id> [--json] [--instance <dir>] [--env-file <path>]
+      Add a phone (plan §2.22, M19). Mints a one-time passkey enrolment code on
+      THIS Mac — single use, 10 minutes, stored hashed in auth_enrollment_codes —
+      and prints the URL to open on the phone: <first METISTRY_ORIGIN entry>/#enroll=<code>.
+      No HTTP route mints one, by design: shell access to this Mac is the root
+      of trust for a first credential (docs/ops/auth.md). Refuses BEFORE minting
+      when the phone cannot complete the ceremony against that origin — a
+      loopback host (every install's default), http://, an IP literal, or an
+      origin this Mac itself cannot reach within 5 s (or that names another
+      instance) — each refusal in its own words, naming METISTRY_ORIGIN and the
+      fix; a refusal writes no row and exits 1. --json writes exactly one
+      document: {url, code_id, origin, expires_at} on a mint, {refused: {case,
+      message, origin, fix}} on a refusal. --cancel <code_id> expires an unused
+      code at once (the id --json printed, never the code); the Mac's Add a
+      Phone sheet runs it when it closes. Both land in runs (auth).
 
   metistry identity [--json] [--instance <dir>]
   metistry identity set [--name <name>] [--mention <@slug>] [--mark <glyph>] [--dry-run] [--json]
@@ -1027,6 +1045,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
     verbs: [
       ["connect <tool> | --list", "give Cursor, OpenCode, Devin or Claude Code its own way in"],
       ["console whoami | call | session", "authenticated requests against the console, as you"],
+      ["enroll [--cancel <code_id>]", "add a phone: a one-time enrolment code, minted here and never over HTTP"],
       ["runs export", "the audit ledger as NDJSON, oldest first, resumable"],
       ["import-sessions", "summarise this machine's Claude Code sessions into /capture"],
     ],
@@ -2181,6 +2200,45 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       } catch (e) {
         err(`metistry console whoami: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
+      }
+    }
+    case "enroll": {
+      const usage = "usage: metistry enroll [--json] [--instance <dir>] [--env-file <path>] | metistry enroll --cancel <code_id> [--json]";
+      if (positional.length > 0) {
+        err(usage);
+        return 2;
+      }
+      const loadedEnroll = loadEnv();
+      const common = { env: process.env, instanceDir: loadedEnroll.instanceDir, fetchFn: io.fetchFn };
+      if (flags.cancel !== undefined) {
+        const codeId = parseCodeId(flags.cancel);
+        if (codeId === undefined) {
+          err(`--cancel takes the code id --json printed (a positive integer), not ${JSON.stringify(flags.cancel)}\n${usage}`);
+          return 2;
+        }
+        try {
+          const c = await enrollCancel({ ...common, codeId });
+          out(flags.json === true ? JSON.stringify(c) : renderEnrollCancelled(c));
+          return c.outcome === "not_found" ? 1 : 0;
+        } catch (e) {
+          err(`metistry enroll --cancel: ${e instanceof Error ? e.message : String(e)}`);
+          return e instanceof NoDatabaseError ? 2 : 1;
+        }
+      }
+      try {
+        const r = await enroll(common);
+        if (r.kind === "refused") {
+          // the refusal is the answer: its words on stderr for a person, and
+          // with --json one document on stdout for the Mac's sheet to show
+          err(renderEnrollRefusal(r.refusal));
+          if (flags.json === true) out(JSON.stringify({ refused: r.refusal }));
+          return 1;
+        }
+        out(flags.json === true ? JSON.stringify(r.minted) : renderEnrollMinted(r.minted, ui));
+        return 0;
+      } catch (e) {
+        err(`metistry enroll: ${e instanceof Error ? e.message : String(e)}`);
+        return e instanceof NoDatabaseError ? 2 : 1;
       }
     }
     case "agents": {

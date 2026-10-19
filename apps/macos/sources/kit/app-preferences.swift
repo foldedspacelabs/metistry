@@ -65,6 +65,33 @@ public enum AppPreference: String, CaseIterable, Sendable {
 
     /// The scaffold's key, read once and removed (see the file header).
     public static let legacyProductDirectory = "productDirectory"
+
+    /// The keys that are POINTERS: they say where something lives and front a
+    /// file or object that exists without them. `pinnedItemsPrefix` is a
+    /// pointer too, but a prefix rather than a key, so `isListed(_:)` handles it.
+    public static let pointers: Set<AppPreference> = [
+        .activeInstance, .recentInstances, .developerProductDirectory, .pinnedItemsPrefix,
+    ]
+
+    /// The keys that are DEVICE-LOCAL configuration: plan §2.2 gives them no
+    /// CLI and no API, so no file the CLI owns exists for them to front. The
+    /// next one joins this set — and only this set — on purpose.
+    public static let deviceLocal: Set<AppPreference> = [.anyAppShortcuts, .captureBar]
+
+    /// Whether `key` is one this app is allowed to write: a pointer, a
+    /// device-local key, or `pinnedItems.<instance_id>`. Anything else is
+    /// state the app has no business keeping.
+    public static func isListed(_ key: String) -> Bool {
+        let listed = pointers.union(deviceLocal)
+        if listed.contains(where: { $0 != .pinnedItemsPrefix && $0.rawValue == key }) { return true }
+        return key.hasPrefix(pinnedItemsPrefix.rawValue + ".")
+    }
+
+    /// The keys in `keys` that are in neither set. A test holds the app's
+    /// defaults domain to this being empty.
+    public static func unlisted(in keys: some Sequence<String>) -> [String] {
+        keys.filter { !isListed($0) }.sorted()
+    }
 }
 
 // MARK: - The capture bar's placement (screen-11 §8, T6-15)

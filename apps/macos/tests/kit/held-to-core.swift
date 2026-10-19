@@ -17,11 +17,13 @@ import Foundation
 @testable import MetistryKit
 
 enum HeldToCore {
-    /// `packages/core/test/held-to-core/<name>.json`, found from this file.
+    /// The repository root, found from this file (this file, tests/kit, tests, macos, apps: five up).
+    static let repoRoot: URL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+
+    /// `packages/core/test/held-to-core/<name>.json`.
     static func url(_ name: String) -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("packages/core/test/held-to-core/\(name).json")
+        repoRoot.appendingPathComponent("packages/core/test/held-to-core/\(name).json")
     }
 
     /// The whole file, or a thrown error naming the path — never an empty set

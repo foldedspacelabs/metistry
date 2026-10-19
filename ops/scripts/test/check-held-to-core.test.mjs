@@ -77,5 +77,5 @@ test("a CI filter that would skip the Swift job when a case changes is refused",
 test("this repository passes, through the CLI", () => {
   const r = spawnSync(process.execPath, [script], { cwd: repoRoot, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr + r.stdout);
-  assert.match(r.stdout, /held to core: ok — 2 fixtures/);
+  assert.match(r.stdout, /held to core: ok — 3 fixtures/);
 });

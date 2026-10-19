@@ -67,7 +67,7 @@ import { linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { ConflictMoved } from "../dist/knowledge-routes.js";
 import { GithubWriteClient } from "../dist/github-write.js";
-import { planDraft, stampCheck } from "@foldedspacelabs/metistry-connections";
+import { envSecretSource, loadInstanceCatalog, planDraft, stampCheck } from "@foldedspacelabs/metistry-connections";
 import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, recordingMonthStart, runsExportCursor, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
@@ -461,8 +461,23 @@ await vault.write("Templates/Meeting.md", readFileSync(join(REPO_ROOT, "seed/vau
 // anything the query itself read.
 const queries = new QueryStore(pool, () => RECORDING_NOW.getTime());
 await queries.loadDir(join(REPO_ROOT, "seed/queries"));
-const targets = new TargetRegistry({ env: { METISTRY_GITHUB_WRITE_TOKEN: "fixture-not-a-token", METISTRY_GITHUB_DISPATCH_REPO: "example/fixtures" }, fetchFn: fakeFetch });
+// the crews' local-crew (the one `targets/` manifest left, X-85), and a
+// `github-issues` agent connection in an instance of its own (T4-11) so the
+// Connections list above records exactly what it did: the write token is a
+// reference filled at the connection's egress door; GitHub is the fake above
+const targetsDir = join(root, "agent-targets");
+await mkdir(join(targetsDir, ".metistry", "connections"), { recursive: true });
+await writeFile(
+  join(targetsDir, ".metistry", "connections", "github-issues.yaml"),
+  'name: github-issues\ntype: agent\nprovider: github-issues\nreach:\n  http:\n    url: https://api.github.com\n    auth: { scheme: bearer, secret: github_write_token }\nsecrets: [github_write_token]\nconfig:\n  repo: "example/fixtures"\n',
+);
+await writeFile(join(targetsDir, ".metistry", "secrets.yaml"), 'secrets:\n  github_write_token:\n    hosts: [api.github.com]\n    grants: { "connection:github-issues": on }\n');
+const targets = new TargetRegistry({ fetchFn: fakeFetch });
 await targets.loadDir(join(REPO_ROOT, "targets"));
+targets.bindConnections({
+  catalog: () => loadInstanceCatalog({ instanceDir: targetsDir, seedDir: join(REPO_ROOT, "seed") }),
+  secrets: envSecretSource({ METISTRY_SECRET_GITHUB_WRITE_TOKEN: "fixture-not-a-token" }),
+});
 
 // the shipped crew, loaded as the console loads it: an actor with a definition
 // (T4-6). Synced after the seeded rows below, so its audit rows come after them

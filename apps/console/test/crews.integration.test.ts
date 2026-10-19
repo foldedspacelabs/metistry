@@ -71,7 +71,7 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     await vault.write(`agents/itest/${crewA}.md`, Buffer.from(crewFile(crewA)), intent);
     await vault.write(`agents/itest/${crewB}.md`, Buffer.from(crewFile(crewB, { projects: ["itest-p"], scope: ["Resources"], autonomy: { max_open_bundles: 2, accept_from: ["user"] } })), intent);
     registry = new CrewRegistry(pool, ["agents"], vault);
-    const targets = new TargetRegistry({ env: {} });
+    const targets = new TargetRegistry();
     await targets.loadDir(`${root}targets`);
     server = makeServer(pool, new QueryStore(pool), { origin: "http://127.0.0.1:0", inboxDir: `/tmp/metistry-test-inbox-crews-${Date.now()}`, policy, secureCookies: false, targets, crews: registry, localOwner: { token: localOwnerToken, trusted: [] } });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));

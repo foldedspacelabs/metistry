@@ -8,8 +8,8 @@
 // `github` connection's secret (T4-11): a `{{ secret.x }}` reference in the
 // Authorization header, filled at the connection's egress door for
 // api.github.com only, and the repos are its `repos` config — or, for one
-// release when no GitHub connection is there, METISTRY_GITHUB_TOKEN and
-// METISTRY_GITHUB_REPOS. PRs carry their
+// release when no GitHub connection was there, METISTRY_GITHUB_TOKEN and
+// METISTRY_GITHUB_REPOS — the console no longer reads them (0.17.0, X-85). PRs carry their
 // head SHA and review-request metadata (work.meta) so "what's waiting on my
 // review" is one query (one extra reviews call per open non-draft PR).
 //
@@ -57,9 +57,9 @@ export interface Db {
 }
 
 export interface GithubCtx {
-  /** the legacy read-only token (METISTRY_GITHUB_TOKEN) — read for one release, when no GitHub connection opens */
+  /** the legacy read-only token — the console stopped setting it from METISTRY_GITHUB_TOKEN in 0.17.0 (X-85); a direct caller (a test) may still hand one in */
   githubToken?: string;
-  githubRepos?: string[]; // ["owner/repo", ...] — the legacy list (METISTRY_GITHUB_REPOS), beside githubToken
+  githubRepos?: string[]; // ["owner/repo", ...] — the legacy list, beside githubToken (the console stopped setting it with METISTRY_GITHUB_REPOS, X-85)
   fetchFn?: typeof fetch;
   /** the runner's resolved Needs You switches (`syncs.github-state.raise`); absent = the manifest's defaults */
   raise?: Readonly<Record<string, boolean>>;

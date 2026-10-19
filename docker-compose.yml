@@ -79,13 +79,6 @@ services:
       # note contents for mcp-brain's knowledge_read. Degrades absent when unset.
       METISTRY_RECONCILER_URL: ${METISTRY_RECONCILER_URL:-}
       METISTRY_BRIDGE_TOKEN_RECONCILER: ${METISTRY_BRIDGE_TOKEN_RECONCILER:-}
-      # github-state collector: fine-grained READ-ONLY PAT + "owner/repo,owner/repo2"
-      METISTRY_GITHUB_TOKEN: ${METISTRY_GITHUB_TOKEN:-}
-      METISTRY_GITHUB_REPOS: ${METISTRY_GITHUB_REPOS:-}
-      # github-issues dispatch target (§4.18): a SEPARATE fine-grained WRITE PAT
-      # (Issues read/write + Metadata on the dispatch repo only) + "owner/repo"
-      METISTRY_GITHUB_WRITE_TOKEN: ${METISTRY_GITHUB_WRITE_TOKEN:-}
-      METISTRY_GITHUB_DISPATCH_REPO: ${METISTRY_GITHUB_DISPATCH_REPO:-}
       METISTRY_TARGETS_DIRS: ${METISTRY_TARGETS_DIRS:-targets:.metistry/targets}
       # compute.yaml (docs/ops/compute.md): providers, assignments, budgets.
       # The seed's copy ships in the image and assigns nothing; an instance
@@ -101,12 +94,7 @@ services:
       METISTRY_AWS_ACCESS_KEY_ID: ${METISTRY_AWS_ACCESS_KEY_ID:-}
       METISTRY_AWS_SECRET_ACCESS_KEY: ${METISTRY_AWS_SECRET_ACCESS_KEY:-}
       METISTRY_AWS_SESSION_TOKEN: ${METISTRY_AWS_SESSION_TOKEN:-}
-      # devin-knowledge collector (degrades absent; docs/ops/devin.md): the
-      # owner's own `cog_` Devin key. ORG_ID only for account-scoped tokens
-      # (enterprise service users, PATs); REPOS is the opt-in wiki half.
-      METISTRY_DEVIN_API_KEY: ${METISTRY_DEVIN_API_KEY:-}
-      METISTRY_DEVIN_ORG_ID: ${METISTRY_DEVIN_ORG_ID:-}
-      METISTRY_DEVIN_REPOS: ${METISTRY_DEVIN_REPOS:-}
+      # Devin (docs/ops/devin.md) is the `devin` agent connection, not a variable.
       METISTRY_DEVIN_MAX_ITEMS: ${METISTRY_DEVIN_MAX_ITEMS:-}
       # user's timezone for brief/schedule rendering (Me/profile.md drives this later)
       TZ: ${METISTRY_TZ:-UTC}

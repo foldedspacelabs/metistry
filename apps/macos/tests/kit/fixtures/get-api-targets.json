@@ -12,51 +12,16 @@
   "body": {
     "targets": [
       {
-        "name": "devin-sessions",
-        "description": "Dispatch a brief to a Devin session — debugging and knowledge research; the structured answer returns as a report proposal",
-        "transport": "http",
-        "submit": {
-          "kind": "devin-session",
-          "url": "env:METISTRY_DEVIN_API_URL",
-          "org": "env:METISTRY_DEVIN_ORG_ID",
-          "max_acu": 5
-        },
-        "result": {
-          "via": "report_queue",
-          "status_via": "devin-sessions"
-        },
-        "auth": "env:METISTRY_DEVIN_API_KEY",
-        "cost": {
-          "per_run_estimate_usd": 0
-        },
-        "data_policy": {
-          "allow": [],
-          "deny_sources": [
-            "comms",
-            "devin"
-          ],
-          "max_brief_bytes": 16384
-        },
-        "check": {
-          "name": "devin-sessions",
-          "status": "absent",
-          "latency_ms": 0,
-          "probe": "resolve auth + submit.org from environment",
-          "remediation": "set env:METISTRY_DEVIN_API_KEY (the same `cog_` key collectors/devin-knowledge reads — docs/ops/devin.md)"
-        }
-      },
-      {
         "name": "github-issues",
-        "description": "Open a GitHub issue for a task — the external work queue (plan §6 decision 4)",
         "transport": "github",
         "submit": {
-          "repo": "env:METISTRY_GITHUB_DISPATCH_REPO"
+          "repo": "example/fixtures"
         },
         "result": {
           "via": "report_queue",
           "status_via": "github-state"
         },
-        "auth": "env:METISTRY_GITHUB_WRITE_TOKEN",
+        "auth": "{{ secret.github_write_token }}",
         "cost": {
           "per_run_estimate_usd": 0
         },
@@ -74,12 +39,13 @@
         "check": {
           "name": "github-issues",
           "status": "ok",
-          "latency_ms": 0,
-          "probe": "GET /repos/example/fixtures with the write token (issue creation itself is not probed)",
+          "latency_ms": 3,
+          "probe": "GET /repos/example/fixtures with the write token of connection github-issues, filled at its door (issue creation itself is not probed)",
           "meta": {
             "repo": "example/fixtures"
           }
-        }
+        },
+        "connection": "github-issues"
       },
       {
         "name": "local-crew",
@@ -127,6 +93,6 @@
         }
       }
     ],
-    "as_of": "2026-09-30T04:49:51.843Z"
+    "as_of": "2026-10-19T01:04:28.167Z"
   }
 }

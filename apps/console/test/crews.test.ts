@@ -142,7 +142,7 @@ describe("policy: crew scope ∩ target allow", () => {
   });
 
   it("the shipped local-crew target narrows the seed researcher to its own scope and keeps the target's sources + cap", async () => {
-    const reg = new TargetRegistry({ env: {} });
+    const reg = new TargetRegistry();
     await reg.loadDir(`${root}targets`);
     const target = reg.get(LOCAL_CREW_TARGET)!;
     expect(target).toMatchObject({ transport: "local", result: { via: "report_queue" } });
@@ -198,7 +198,7 @@ const assistant: AgentPrincipal = { id: "assistant", kind: "internal", grants: {
 
 describe("dispatchCrew (fakes)", () => {
   it("refuses a brief citing a path outside scope ∩ allow with the violations, logs the refusal, creates NO work row", async () => {
-    const targets = new TargetRegistry({ env: {} });
+    const targets = new TargetRegistry();
     await targets.loadDir(`${root}targets`);
     const reg = await registryWith(seed);
     const db = fakeDb();
@@ -219,7 +219,7 @@ describe("dispatchCrew (fakes)", () => {
   });
 
   it("a denied source and an oversized brief are refused the same way (the existing checkBrief, reused)", async () => {
-    const targets = new TargetRegistry({ env: {} });
+    const targets = new TargetRegistry();
     await targets.loadDir(`${root}targets`);
     const reg = await registryWith(seed);
     const comms = await dispatchCrew(fakeDb(), fakeTasks(), reg, targets, { crew: "researcher", brief: "<!-- source: comms -->\nsummarize" }, assistant);
@@ -229,7 +229,7 @@ describe("dispatchCrew (fakes)", () => {
   });
 
   it("queues a clean brief: work row kind task, owner crew:<name>, meta = brief + sha + crew snapshot (prompt included) + effective allow; runs row ok", async () => {
-    const targets = new TargetRegistry({ env: {} });
+    const targets = new TargetRegistry();
     await targets.loadDir(`${root}targets`);
     const reg = await registryWith(seed);
     const db = fakeDb();
@@ -254,7 +254,7 @@ describe("dispatchCrew (fakes)", () => {
     const reg = await registryWith(seed);
     const db = fakeDb();
     const tasks = fakeTasks();
-    const targets = new TargetRegistry({ env: {} });
+    const targets = new TargetRegistry();
     await targets.loadDir(`${root}targets`);
     expect(await dispatchCrew(db, tasks, reg, targets, { crew: "nobody", brief: "x" }, assistant)).toMatchObject({ ok: false, code: "not_found", message: expect.stringContaining("registered: researcher") });
     expect(await dispatchCrew(db, tasks, reg, undefined, { crew: "researcher", brief: "x" }, assistant)).toMatchObject({ ok: false, code: "not_available" });
@@ -288,7 +288,7 @@ assignments:
 
 describe("cross-kind delegation (collaboration rule 4)", () => {
   it("refuses a DIRECTED push to a crew whose engine kind differs, with invalid_request, a runs row, and the field to edit", async () => {
-    const targets = new TargetRegistry({ env: {} });
+    const targets = new TargetRegistry();
     await targets.loadDir(`${root}targets`);
     const reg = await registryWith(seed);
     const db = fakeDb();
@@ -305,7 +305,7 @@ describe("cross-kind delegation (collaboration rule 4)", () => {
   });
 
   it("follows the crew's OWN model when its definition names one (T4-6): the guard, the runner and the actor read one rule", async () => {
-    const targets = new TargetRegistry({ env: {} });
+    const targets = new TargetRegistry();
     await targets.loadDir(`${root}targets`);
     const brief = { crew: "researcher", brief: "Summarize Projects/Ios.md" };
     // pinned to provider `a` — the caller's own kind — so the push is allowed, whatever assignments.crews says
@@ -319,7 +319,7 @@ describe("cross-kind delegation (collaboration rule 4)", () => {
   });
 
   it("allows it when both sides are the same kind — which is every valid compute.yaml today, and an install with none", async () => {
-    const targets = new TargetRegistry({ env: {} });
+    const targets = new TargetRegistry();
     await targets.loadDir(`${root}targets`);
     const reg = await registryWith(seed);
     const brief = { crew: "researcher", brief: "Summarize Projects/Ios.md" };

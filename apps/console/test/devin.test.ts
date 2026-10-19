@@ -1,11 +1,12 @@
 // The `devin-session` submit adapter against fakes (no db, no network):
 // the request shape a brief turns into, the Draft-7 contract, the ACU
-// budget, and the misuse tests for the shipped manifest's data policy —
+// budget, and the misuse tests for the Devin connection type's data policy —
 // whose `allow` list is EMPTY, so the product default lets a brief cite
-// nothing from the vault at all.
+// nothing from the vault at all. Devin is an agent connection (X-85 removed
+// the `targets/devin-sessions` manifest and its environment key): the target
+// here is a `devin` connection in a scratch instance, its key filled at its door.
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import {
   DEFAULT_MAX_ACU,
@@ -16,15 +17,16 @@ import {
   resolveMaxAcu,
   schemaIssues,
 } from "../src/devin.js";
-import { DEVIN_SUBMIT_KIND, dispatch, TargetRegistry } from "../src/dispatch.js";
+import { DEVIN_SUBMIT_KIND, dispatch, type TargetRegistry } from "../src/dispatch.js";
+import { agentRegistry, authorizationOf, root, type AgentRegistry } from "./agent-registry.js";
 
-const root = fileURLToPath(new URL("../../../", import.meta.url));
-const shipped = parseYaml(readFileSync(`${root}targets/devin-sessions/manifest.yaml`, "utf8")) as Record<string, unknown>;
 // The purposes are the Devin connection type's (T4-11) — read from the seed, so the test holds the shipped words.
-const DEVIN_TYPE = parseYaml(readFileSync(`${root}seed/connection-types/devin/manifest.yaml`, "utf8")) as { dispatch: { purposes: Record<string, { preamble: string }> } };
+const DEVIN_TYPE = parseYaml(readFileSync(`${root}seed/connection-types/devin/manifest.yaml`, "utf8")) as {
+  dispatch: { max_acu: number; purposes: Record<string, { preamble: string }>; result: Record<string, unknown>; data_policy: { allow: string[]; deny_sources: string[] } };
+};
 const preamble = (purpose: string) => DEVIN_TYPE.dispatch.purposes[purpose]!.preamble;
 
-const env = { METISTRY_DEVIN_API_KEY: "cog_x", METISTRY_DEVIN_ORG_ID: "org-abc" };
+const KEY = ["cog", "unitTestKey0123456789"].join("_");
 const task = { id: 7, title: "why does the deploy hang", status: "open", external_ref: null };
 
 type Call = { url: string; init?: RequestInit };
@@ -32,11 +34,9 @@ function fakeFetch(calls: Call[], opts: { postStatus?: number; selfStatus?: numb
   return (async (url: string, init?: RequestInit) => {
     calls.push({ url, init });
     if (init?.method === "POST") {
-      const status = opts.postStatus ?? 200;
-      return { ok: status < 300, status, json: async () => opts.session ?? { session_id: "devin-123", url: "https://app.devin.ai/sessions/123" } };
+      return new Response(JSON.stringify(opts.session ?? { session_id: "devin-123", url: "https://app.devin.ai/sessions/123" }), { status: opts.postStatus ?? 200 });
     }
-    const status = opts.selfStatus ?? 200;
-    return { ok: status < 300, status, json: async () => ({ org_id: "org-abc" }), text: async () => "" };
+    return new Response(JSON.stringify({ org_id: "org-abc" }), { status: opts.selfStatus ?? 200 });
   }) as unknown as typeof fetch;
 }
 
@@ -58,10 +58,16 @@ function fakeDb(row: Record<string, unknown> | null = task) {
   };
 }
 
-async function registry(calls: Call[], over: Record<string, string> = {}, opts: Parameters<typeof fakeFetch>[1] = {}) {
-  const reg = new TargetRegistry({ env: { ...env, ...over }, fetchFn: fakeFetch(calls, opts) });
-  reg.add(shipped, "targets/devin-sessions/manifest.yaml");
-  return reg;
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((c) => c()));
+});
+/** A registry holding the `devin` connection — org and key as given — already read once. */
+async function registry(calls: Call[], opts: Parameters<typeof fakeFetch>[1] = {}, devin: NonNullable<Parameters<typeof agentRegistry>[0]["devin"]> = { org: "org-abc", key: KEY }): Promise<TargetRegistry> {
+  const r: AgentRegistry = await agentRegistry({ fetchFn: fakeFetch(calls, opts), devin });
+  cleanups.push(r.cleanup);
+  await r.registry.refresh();
+  return r.registry;
 }
 
 // --- the structured-output contract -------------------------------------------
@@ -130,47 +136,47 @@ describe("devin session request shape", () => {
 
 // --- dispatch -------------------------------------------------------------------
 
-describe("dispatch to devin-sessions (fakes)", () => {
+describe("dispatch to the devin connection (fakes)", () => {
   it("creates the session, binds devin:<id>, freezes what the poller needs on the row, and records the ACU cap", async () => {
     const calls: Call[] = [];
     const reg = await registry(calls);
     const db = fakeDb();
-    const r = await dispatch(db, reg, 7, "devin-sessions", "Answer the question.", "owner", [], { purpose: "knowledge_research", max_acu: 3 });
+    const r = await dispatch(db, reg, 7, "devin", "Answer the question.", "owner", [], { purpose: "knowledge_research", max_acu: 3 });
     expect(r).toEqual({ ok: true, ref: "devin:devin-123", url: "https://app.devin.ai/sessions/123", run_id: 101 });
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("https://api.devin.ai/v3/organizations/org-abc/sessions");
-    expect((calls[0]!.init!.headers as Record<string, string>).authorization).toBe("Bearer cog_x");
+    expect(authorizationOf(calls[0]!.init)).toBe(`Bearer ${KEY}`); // filled at the connection's door
     const sent = JSON.parse(String(calls[0]!.init!.body));
     expect(sent.prompt).toContain("Answer the question.");
     expect(sent.max_acu_limit).toBe(3);
     expect(sent.structured_output_required).toBe(true);
 
     const upd = db.q.find((x) => x.text.startsWith("UPDATE work"))!;
-    expect(upd.values.slice(0, 3)).toEqual([7, "devin:devin-123", "target:devin-sessions"]);
+    expect(upd.values.slice(0, 3)).toEqual([7, "devin:devin-123", "target:devin"]);
     expect(JSON.parse(String(upd.values[4]))).toEqual({
-      devin: { session_id: "devin-123", org: "org-abc", url: "https://app.devin.ai/sessions/123", max_acu: 3, purpose: "knowledge_research", target: "devin-sessions", dispatch_run_id: 101 },
+      devin: { session_id: "devin-123", org: "org-abc", url: "https://app.devin.ai/sessions/123", max_acu: 3, purpose: "knowledge_research", target: "devin", dispatch_run_id: 101, connection: "devin" },
     });
 
     const start = db.q.find((x) => x.text.startsWith("INSERT INTO runs"))!;
-    expect(JSON.parse(String(start.values[6]))).toMatchObject({ target: "devin-sessions", task: 7, principal: "owner", purpose: "knowledge_research" });
+    expect(JSON.parse(String(start.values[6]))).toMatchObject({ target: "devin", task: 7, principal: "owner", purpose: "knowledge_research", connection: "devin" });
     const [finish] = db.runFinish();
     expect(finish![1]).toBe(true);
-    expect(JSON.parse(String(finish![6]))).toEqual({ ref: "devin:devin-123", url: "https://app.devin.ai/sessions/123", session_id: "devin-123", org: "org-abc", max_acu: 3 });
+    expect(JSON.parse(String(finish![6]))).toEqual({ ref: "devin:devin-123", url: "https://app.devin.ai/sessions/123", session_id: "devin-123", org: "org-abc", max_acu: 3, secrets: ["devin_api_key"] });
   });
 
-  it("the purpose defaults to `work` and the ACU cap falls back to the manifest's", async () => {
+  it("the purpose defaults to `work` and the ACU cap falls back to the type's", async () => {
     const calls: Call[] = [];
     const db = fakeDb();
-    await dispatch(db, await registry(calls), 7, "devin-sessions", "Do the thing.", "owner");
-    expect(JSON.parse(String(calls[0]!.init!.body)).max_acu_limit).toBe(shipped.submit ? (shipped.submit as { max_acu: number }).max_acu : -1);
+    await dispatch(db, await registry(calls), 7, "devin", "Do the thing.", "owner");
+    expect(JSON.parse(String(calls[0]!.init!.body)).max_acu_limit).toBe(DEVIN_TYPE.dispatch.max_acu);
     expect(JSON.parse(String(db.q.find((x) => x.text.startsWith("UPDATE work"))!.values[4])).devin.purpose).toBe("work");
   });
 
-  it("the shipped policy refuses EVERY vault citation — allow is empty on purpose — and sends nothing", async () => {
+  it("the type's policy refuses EVERY vault citation — allow is empty on purpose — and sends nothing", async () => {
     const calls: Call[] = [];
     const db = fakeDb();
-    const r = await dispatch(db, await registry(calls), 7, "devin-sessions", "See Projects/x.md", "owner");
+    const r = await dispatch(db, await registry(calls), 7, "devin", "See Projects/x.md", "owner");
     expect(r).toMatchObject({ ok: false, code: "invalid_request" });
     if (r.ok) return;
     expect(r.violations).toEqual([{ kind: "path_outside_allow", paths: ["Projects/x.md"], allow: [] }]);
@@ -181,65 +187,64 @@ describe("dispatch to devin-sessions (fakes)", () => {
 
   it("refuses comms-derived AND devin-derived briefs — Devin's own knowledge is not silently re-exported", async () => {
     const calls: Call[] = [];
-    const r = await dispatch(fakeDb(), await registry(calls), 7, "devin-sessions", "---\nsource: devin\n---\nsummarize", "owner");
+    const r = await dispatch(fakeDb(), await registry(calls), 7, "devin", "---\nsource: devin\n---\nsummarize", "owner");
     expect(r).toMatchObject({ ok: false, code: "invalid_request" });
     if (!r.ok) expect(r.violations).toEqual([{ kind: "denied_source", sources: ["devin"] }]);
-    const c2 = await dispatch(fakeDb(), await registry(calls), 7, "devin-sessions", "clean", "owner", ["comms"]);
+    const c2 = await dispatch(fakeDb(), await registry(calls), 7, "devin", "clean", "owner", ["comms"]);
     if (!c2.ok) expect(c2.violations).toEqual([{ kind: "denied_source", sources: ["comms"] }]);
     expect(calls).toHaveLength(0);
   });
 
-  it("degrades absent without an organization: check() names the variable, dispatch is a conflict, nothing sent", async () => {
+  it("a connection without an organization is unavailable, naming `config.org`: check() fails, dispatch is a conflict, nothing sent", async () => {
     const calls: Call[] = [];
-    const reg = new TargetRegistry({ env: { METISTRY_DEVIN_API_KEY: "cog_x" }, fetchFn: fakeFetch(calls) });
-    reg.add(shipped);
-    const check = await reg.check("devin-sessions");
-    expect(check.status).toBe("absent");
-    expect(check.remediation).toMatch(/METISTRY_DEVIN_ORG_ID/);
-    expect(await dispatch(fakeDb(), reg, 7, "devin-sessions", "fine", "owner")).toMatchObject({ ok: false, code: "conflict", check: { status: "absent" } });
+    const reg = await registry(calls, {}, { key: KEY });
+    const check = await reg.check("devin");
+    expect(check.status).toBe("failed");
+    expect(check.remediation).toMatch(/config\.org/);
+    expect(await dispatch(fakeDb(), reg, 7, "devin", "fine", "owner")).toMatchObject({ ok: false, code: "conflict", check: { status: "failed" } });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("a key that was never delivered sends nothing: the door refuses it by name", async () => {
+    const calls: Call[] = [];
+    const reg = await registry(calls, {}, { org: "org-abc" });
+    const r = await dispatch(fakeDb(), reg, 7, "devin", "fine", "owner");
+    expect(r).toMatchObject({ ok: false, code: "conflict", message: expect.stringMatching(/missing_secret.*devin_api_key/) });
     expect(calls).toHaveLength(0);
   });
 
   it("check() probes /v3/self and never creates a session; 429 is degraded, a bad key is failed", async () => {
     const calls: Call[] = [];
-    expect(await (await registry(calls)).check("devin-sessions")).toMatchObject({ status: "ok", meta: { org: "org-abc", base: "https://api.devin.ai" } });
+    expect(await (await registry(calls)).check("devin")).toMatchObject({ status: "ok", meta: { org: "org-abc", base: "https://api.devin.ai" } });
     expect(calls.map((c) => c.url)).toEqual(["https://api.devin.ai/v3/self"]);
-    expect(calls.every((c) => c.init?.method === undefined)).toBe(true);
-    expect((await (await registry([], {}, { selfStatus: 429 })).check("devin-sessions")).status).toBe("degraded");
-    expect((await (await registry([], {}, { selfStatus: 401 })).check("devin-sessions")).status).toBe("failed");
+    expect(calls.every((c) => (c.init?.method ?? "GET") === "GET")).toBe(true);
+    expect((await (await registry([], { selfStatus: 429 })).check("devin")).status).toBe("degraded");
+    expect((await (await registry([], { selfStatus: 401 })).check("devin")).status).toBe("failed");
   });
 
   it("a submission failure is a uniform internal error; the HTTP status lives in the runs row", async () => {
     const db = fakeDb();
-    const r = await dispatch(db, await registry([], {}, { postStatus: 402 }), 7, "devin-sessions", "fine", "owner");
+    const r = await dispatch(db, await registry([], { postStatus: 402 }), 7, "devin", "fine", "owner");
     expect(r).toEqual({ ok: false, code: "internal", message: "target submission failed" });
     expect(String(db.runFinish()[0]![2])).toMatch(/HTTP 402/);
   });
 
   it("a response without a session_id is a failure, not a row bound to `devin:undefined`", async () => {
     const db = fakeDb();
-    const r = await dispatch(db, await registry([], {}, { session: { url: "u" } }), 7, "devin-sessions", "fine", "owner");
+    const r = await dispatch(db, await registry([], { session: { url: "u" } }), 7, "devin", "fine", "owner");
     expect(r).toMatchObject({ ok: false, code: "internal" });
     expect(db.q.some((x) => x.text.startsWith("UPDATE work"))).toBe(false);
   });
 
-  it("an http target with an unimplemented submit.kind is refused by name, not silently no-op'd", async () => {
-    const reg = new TargetRegistry({ env, fetchFn: fakeFetch([]) });
-    reg.add({ ...shipped, name: "cloud-worker", submit: { kind: "some-other-api", url: "https://example.com" } });
-    expect((await reg.check("cloud-worker")).status).toBe("absent");
-    const r = await dispatch(fakeDb(), reg, 7, "cloud-worker", "fine", "owner");
-    expect(r).toMatchObject({ ok: false, code: "invalid_request", message: expect.stringContaining("some-other-api") });
-  });
-
-  it("the shipped manifest loads through the registry with the transport and return path W6 specifies", async () => {
-    const reg = new TargetRegistry({ env: {} });
-    expect(await reg.loadDir(`${root}targets`)).toEqual(["devin-sessions", "github-issues", "local-crew"]);
-    const m = reg.get("devin-sessions")!;
-    expect(m.transport).toBe("http");
-    expect(m.submit.kind).toBe(DEVIN_SUBMIT_KIND);
-    expect(m.result).toMatchObject({ via: "report_queue", status_via: "devin-sessions" });
-    expect(m.auth).toBe("env:METISTRY_DEVIN_API_KEY");
-    expect(m.data_policy.allow).toEqual([]); // the instance overlays this; the product default cites nothing
-    expect(m.data_policy.deny_sources).toEqual(["comms", "devin"]);
+  it("the type carries the transport and return path W6 specifies, and the connection presents them as a target", async () => {
+    const reg = await registry([]);
+    const t = (await reg.describe()).find((x) => x.name === "devin")!;
+    expect(t).toMatchObject({ name: "devin", connection: "devin", transport: "http", submit: { kind: DEVIN_SUBMIT_KIND } });
+    expect(t.result).toMatchObject({ via: "report_queue", status_via: "devin-sessions" });
+    expect(t.auth).toBe("{{ secret.devin_api_key }}"); // a reference, never the key
+    expect(JSON.stringify(t)).not.toContain(KEY);
+    expect(t.data_policy.allow).toEqual([]); // the instance overlays the type; the product default cites nothing
+    expect(t.data_policy.deny_sources).toEqual(["comms", "devin"]);
+    expect(DEVIN_TYPE.dispatch.data_policy.allow).toEqual([]);
   });
 });

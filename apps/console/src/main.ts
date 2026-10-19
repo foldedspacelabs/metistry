@@ -39,7 +39,7 @@ import type { ScheduledAdmin } from "./scheduled-routes.js";
 import { PLAN_ROUTINE, RoutineTrigger, closeTriggeredPass } from "./close-day.js";
 import { loadRules, makeRoutePolicy } from "./router.js";
 import { watchCompute } from "./compute.js";
-import { TargetRegistry } from "./dispatch.js";
+import { CONNECTION_HINT, RETIRED_TARGET_KEYS, TargetRegistry } from "./dispatch.js";
 import {
   dirSink,
   vaultSink,
@@ -167,6 +167,9 @@ await targets.load([
   ...(extensionsDir ? [{ dir: extensionsDir, origin: "extension" as const }] : []),
 ]);
 logSkips("target", targets.skipped);
+for (const key of RETIRED_TARGET_KEYS) {
+  if (process.env[key]) console.warn(`${key} is set and is not read (0.17.0) — ${CONNECTION_HINT}`);
+}
 console.log(`targets: ${targets.names().join(", ") || "(none)"}`);
 
 // METISTRY_ORIGIN may be a comma-separated list; the FIRST entry is
@@ -418,7 +421,9 @@ const openSync = connections ? instanceSyncOpener({ instanceDir: connections.ins
 // target registry, read afresh on every listing and dispatch, each dispatched
 // through its own door with the values `metistry secrets sync --to env`
 // delivered (consoleSecretNames lists an agent connection's). The Devin
-// type's purposes come from the same catalog. No instance: targets/ only.
+// type's purposes come from the same catalog. No instance: the crews'
+// `local-crew` only. `METISTRY_GITHUB_TOKEN` and `METISTRY_DEVIN_API_KEY` are
+// not read (X-85, 0.17.0): the one-release shim for them ended with 0.16.0.
 if (connections) {
   const roots = { instanceDir: connections.instanceDir, seedDir: connections.seedDir };
   targets.bindConnections({ catalog: () => loadInstanceCatalog(roots), secrets: envSecretSource(process.env) });
@@ -558,7 +563,6 @@ const componentCtx: ComponentCtx = {
   ...(process.env.METISTRY_LIVE_CAPTURE_URL && process.env.METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE
     ? { liveCapture: { url: process.env.METISTRY_LIVE_CAPTURE_URL, token: process.env.METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE } }
     : {}),
-  ...(process.env.METISTRY_GITHUB_TOKEN ? { githubToken: process.env.METISTRY_GITHUB_TOKEN } : {}),
   // A sync reading its connection (T4-24, packages/connections `sync.ts`):
   // the instance's catalog, read afresh per run, and the secrets `metistry
   // secrets sync --to env` delivered for sync-read connections — filled at
@@ -573,18 +577,14 @@ const componentCtx: ComponentCtx = {
   ...(process.env.METISTRY_AWS_ACCESS_KEY_ID && process.env.METISTRY_AWS_SECRET_ACCESS_KEY
     ? { aws: { accessKeyId: process.env.METISTRY_AWS_ACCESS_KEY_ID, secretAccessKey: process.env.METISTRY_AWS_SECRET_ACCESS_KEY, ...(process.env.METISTRY_AWS_SESSION_TOKEN ? { sessionToken: process.env.METISTRY_AWS_SESSION_TOKEN } : {}) } }
     : {}),
-  ...(process.env.METISTRY_GITHUB_REPOS ? { githubRepos: process.env.METISTRY_GITHUB_REPOS.split(",").map((s) => s.trim()).filter(Boolean) } : {}),
-  // devin-knowledge collector (degrades absent): the owner's own `cog_` key.
+  // devin-knowledge collector (degrades absent): its key is the `devin`
+  // agent connection's, filled at the connection's door (openSync above).
   // inboxDir is the same directory /capture writes to — this collector's
   // captures are ordinary inbox rows, made idempotent by (principal, key).
-  ...(process.env.METISTRY_DEVIN_API_KEY ? { devinApiKey: process.env.METISTRY_DEVIN_API_KEY } : {}),
-  ...(process.env.METISTRY_DEVIN_ORG_ID ? { devinOrgId: process.env.METISTRY_DEVIN_ORG_ID } : {}),
-  ...(process.env.METISTRY_DEVIN_REPOS ? { devinRepos: process.env.METISTRY_DEVIN_REPOS.split(",").map((s) => s.trim()).filter(Boolean) } : {}),
   ...(process.env.METISTRY_DEVIN_MAX_ITEMS ? { devinMaxItems: intEnv("METISTRY_DEVIN_MAX_ITEMS", 200) } : {}),
-  // devin-sessions collector: the return path of targets/devin-sessions. It
-  // reads the organization off each work row's meta, so only the key is
-  // needed here; the base URL is shared with devin-knowledge.
-  ...(process.env.METISTRY_DEVIN_API_URL ? { devinApiUrl: process.env.METISTRY_DEVIN_API_URL } : {}),
+  // devin-sessions collector: the return path of a dispatch to the `devin`
+  // connection. It reads the organization off each work row's meta and the
+  // base URL off the connection.
   ...(process.env.METISTRY_DEVIN_SESSION_TIMEOUT_HOURS ? { devinSessionTimeoutHours: intEnv("METISTRY_DEVIN_SESSION_TIMEOUT_HOURS", 24) } : {}),
   inboxDir,
   inboxSink: inbox,

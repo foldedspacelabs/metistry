@@ -1,17 +1,18 @@
-// Data-policy enforcement + dispatch against fakes (no db, no network).
+// Data-policy enforcement + dispatch against fakes (no db, no network). Since
+// X-85 a target other than the crews' `local-crew` is an agent connection (a
+// scratch instance directory, ./agent-registry.ts): there is no `targets/`
+// manifest or environment key to dispatch with.
 // The policy tests are the misuse tests for §4.18.B: a brief that would
 // carry comms-derived content or a personal vault path off the machine is
 // refused by the tool, whatever a prompt said.
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { DataPolicy } from "@foldedspacelabs/metistry-core";
 import { envSecretSource, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
-import { checkBrief, dispatch, resolveRef, returnFooter, TargetRegistry } from "../src/dispatch.js";
-
-const root = fileURLToPath(new URL("../../../", import.meta.url));
+import { CONNECTION_HINT, checkBrief, dispatch, returnFooter, TargetRegistry } from "../src/dispatch.js";
+import { agentRegistry, authorizationOf, root, type AgentRegistry } from "./agent-registry.js";
 
 const policy: DataPolicy = {
   allow: ["Projects", "Areas/fsl"],
@@ -64,16 +65,17 @@ describe("data policy — enforced at the tool", () => {
 
 // --- dispatch against fakes ------------------------------------------------
 
-const manifest = {
-  name: "github-issues",
-  type: "target",
-  transport: "github",
-  submit: { repo: "env:REPO" },
-  result: { via: "report_queue" },
-  auth: "env:TOKEN",
-  cost: { per_run_estimate_usd: 0.25 },
-  data_policy: policy,
-};
+const GH_KEY = ["gh" + "p", "unitTestWriteToken0123456789"].join("_");
+
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((c) => c()));
+});
+async function githubRegistry(fetchFn: typeof fetch, over: { key?: string | undefined; repo?: string | undefined } = { key: GH_KEY, repo: "o/r" }): Promise<TargetRegistry> {
+  const r: AgentRegistry = await agentRegistry({ fetchFn, github: over });
+  cleanups.push(r.cleanup);
+  return r.registry;
+}
 
 function fakeDb(task: Record<string, unknown> | null) {
   const q: { text: string; values: unknown[] }[] = [];
@@ -99,27 +101,25 @@ function fakeFetch(calls: Call[], opts: { postStatus?: number; getStatus?: numbe
     calls.push({ url, init });
     if (init?.method === "POST") {
       const status = opts.postStatus ?? 201;
-      return { ok: status < 300, status, json: async () => ({ number: 42, html_url: "https://github.com/o/r/issues/42" }) };
+      return new Response(JSON.stringify({ number: 42, html_url: "https://github.com/o/r/issues/42" }), { status });
     }
-    const status = opts.getStatus ?? 200;
-    return { ok: status < 300, status, json: async () => ({}) };
+    return new Response("{}", { status: opts.getStatus ?? 200 });
   }) as unknown as typeof fetch;
 }
 
 const task = { id: 7, title: "ship the thing", status: "open", external_ref: null };
 
 describe("dispatch (fakes)", () => {
-  it("creates the issue with brief + return footer, binds the ref, records the runs row with the target's cost", async () => {
+  it("creates the issue with brief + return footer, binds the ref, records the runs row with the type's cost", async () => {
     const calls: Call[] = [];
-    const reg = new TargetRegistry({ env: { TOKEN: "t", REPO: "o/r" }, fetchFn: fakeFetch(calls) });
-    reg.add(manifest);
+    const reg = await githubRegistry(fakeFetch(calls));
     const db = fakeDb(task);
     const r = await dispatch(db, reg, 7, "github-issues", "Do X per Projects/x.md", "owner");
     expect(r).toEqual({ ok: true, ref: "gh:o/r#42", url: "https://github.com/o/r/issues/42", run_id: 101 });
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("https://api.github.com/repos/o/r/issues");
-    expect((calls[0]!.init!.headers as Record<string, string>).authorization).toBe("Bearer t");
+    expect(authorizationOf(calls[0]!.init)).toBe(`Bearer ${GH_KEY}`); // filled at the connection's door
     const body = JSON.parse(String(calls[0]!.init!.body));
     expect(body.title).toBe("ship the thing");
     expect(body.body).toContain("Do X per Projects/x.md");
@@ -132,17 +132,16 @@ describe("dispatch (fakes)", () => {
 
     const start = db.q.find((x) => x.text.startsWith("INSERT INTO runs"))!;
     expect(start.values.slice(0, 4)).toEqual(["console", "dispatch", null, "github-issues"]);
-    expect(JSON.parse(String(start.values[6]))).toMatchObject({ target: "github-issues", task: 7, principal: "owner" });
+    expect(JSON.parse(String(start.values[6]))).toMatchObject({ target: "github-issues", task: 7, principal: "owner", connection: "github-issues" });
     const [finish] = db.runFinish();
     expect(finish![1]).toBe(true); // ok
-    expect(finish![5]).toBe(0.25); // cost_usd from the manifest's profile
-    expect(JSON.parse(String(finish![6]))).toEqual({ ref: "gh:o/r#42", url: "https://github.com/o/r/issues/42" });
+    expect(finish![5]).toBe(0); // cost_usd from the type's profile: the issue is free
+    expect(JSON.parse(String(finish![6]))).toEqual({ ref: "gh:o/r#42", url: "https://github.com/o/r/issues/42", secrets: ["github_write_token"] });
   });
 
   it("refuses a policy violation with a machine-readable reason, records the refusal, and sends NOTHING", async () => {
     const calls: Call[] = [];
-    const reg = new TargetRegistry({ env: { TOKEN: "t", REPO: "o/r" }, fetchFn: fakeFetch(calls) });
-    reg.add(manifest);
+    const reg = await githubRegistry(fakeFetch(calls));
     const db = fakeDb(task);
     const r = await dispatch(db, reg, 7, "github-issues", "summarize Me/profile.md", "owner", ["comms"]);
     expect(r.ok).toBe(false);
@@ -156,32 +155,30 @@ describe("dispatch (fakes)", () => {
     expect(String(finish![2])).toMatch(/^data_policy: denied_source,path_outside_allow$/);
   });
 
-  it("degrades absent: no write token → check() is absent with a remediation, dispatch is a conflict envelope, nothing sent", async () => {
+  it("degrades absent: no write token delivered → check() is absent, dispatch is a conflict naming the secret, nothing sent", async () => {
     const calls: Call[] = [];
-    const reg = new TargetRegistry({ env: { REPO: "o/r" }, fetchFn: fakeFetch(calls) });
-    reg.add(manifest);
+    const reg = await githubRegistry(fakeFetch(calls), { repo: "o/r" });
+    await reg.refresh();
     const check = await reg.check("github-issues");
     expect(check.status).toBe("absent");
-    expect(check.remediation).toMatch(/env:TOKEN/);
     const r = await dispatch(fakeDb(task), reg, 7, "github-issues", "fine", "owner");
-    expect(r).toMatchObject({ ok: false, code: "conflict", check: { status: "absent" } });
+    expect(r).toMatchObject({ ok: false, code: "conflict", message: expect.stringMatching(/missing_secret.*github_write_token/) }); // refused at the door, which sent nothing
     expect(calls).toHaveLength(0);
   });
 
   it("check() probes the repo with the write token — ok on 200, failed on 404", async () => {
     const calls: Call[] = [];
-    const ok = new TargetRegistry({ env: { TOKEN: "t", REPO: "o/r" }, fetchFn: fakeFetch(calls) });
-    ok.add(manifest);
+    const ok = await githubRegistry(fakeFetch(calls));
+    await ok.refresh();
     expect(await ok.check("github-issues")).toMatchObject({ status: "ok", meta: { repo: "o/r" } });
     expect(calls[0]!.url).toBe("https://api.github.com/repos/o/r");
-    const bad = new TargetRegistry({ env: { TOKEN: "t", REPO: "o/r" }, fetchFn: fakeFetch([], { getStatus: 404 }) });
-    bad.add(manifest);
+    const bad = await githubRegistry(fakeFetch([], { getStatus: 404 }));
+    await bad.refresh();
     expect((await bad.check("github-issues")).status).toBe("failed");
   });
 
   it("unknown target / unknown task → not_found; already-bound or closed task → conflict", async () => {
-    const reg = new TargetRegistry({ env: { TOKEN: "t", REPO: "o/r" }, fetchFn: fakeFetch([]) });
-    reg.add(manifest);
+    const reg = await githubRegistry(fakeFetch([]));
     expect(await dispatch(fakeDb(task), reg, 7, "nope", "x", "owner")).toMatchObject({ ok: false, code: "not_found" });
     expect(await dispatch(fakeDb(null), reg, 7, "github-issues", "x", "owner")).toMatchObject({ ok: false, code: "not_found" });
     expect(await dispatch(fakeDb({ ...task, external_ref: "gh:o/r#1" }), reg, 7, "github-issues", "x", "owner")).toMatchObject({ ok: false, code: "conflict" });
@@ -189,50 +186,123 @@ describe("dispatch (fakes)", () => {
   });
 
   it("submission failure → uniform internal error; the HTTP status lives in the runs row, not on the wire", async () => {
-    const reg = new TargetRegistry({ env: { TOKEN: "t", REPO: "o/r" }, fetchFn: fakeFetch([], { postStatus: 403 }) });
-    reg.add(manifest);
+    const reg = await githubRegistry(fakeFetch([], { postStatus: 403 }));
     const db = fakeDb(task);
     const r = await dispatch(db, reg, 7, "github-issues", "fine", "owner");
     expect(r).toEqual({ ok: false, code: "internal", message: "target submission failed" });
     expect(String(db.runFinish()[0]![2])).toMatch(/HTTP 403/);
   });
+});
 
-  it("a transport without a dispatcher is refused, not silently no-op'd", async () => {
-    const reg = new TargetRegistry({ env: {} });
-    reg.add({ ...manifest, name: "cloud-worker", transport: "mcp", submit: { tool: "run_task" } });
-    expect((await reg.check("cloud-worker")).status).toBe("absent");
-    const r = await dispatch(fakeDb(task), reg, 7, "cloud-worker", "fine", "owner");
-    expect(r).toMatchObject({ ok: false, code: "invalid_request" });
+// --- X-85: the shim is gone -----------------------------------------------------
+
+async function targetsDir(...manifests: Array<[dir: string, yaml: string]>): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "metistry-targets-"));
+  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  for (const [name, yaml] of manifests) {
+    await mkdir(join(dir, name), { recursive: true });
+    await writeFile(join(dir, name, "manifest.yaml"), yaml);
+  }
+  return dir;
+}
+const targetYaml = (name: string, transport: string, extra = "") =>
+  [`schema: 1`, `name: ${name}`, `type: target`, `transport: ${transport}`, `submit: { repo: "env:REPO" }`, `result: { via: report_queue }`, extra, `data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 100 }`, ""].join("\n");
+
+describe("the targets shim is removed (X-85)", () => {
+  it("the product's targets/ is the crews' local-crew and nothing else", async () => {
+    const reg = new TargetRegistry();
+    expect(await reg.loadDir(`${root}targets`)).toEqual(["local-crew"]);
+    expect(reg.skipped).toEqual([]);
+  });
+
+  it("a targets/ manifest other than local-crew is refused at load — skipped with the verb that replaces it, never registered", async () => {
+    const dir = await targetsDir(["github-issues", targetYaml("github-issues", "github", "auth: env:TOKEN")], ["local-crew", targetYaml("local-crew", "local")], ["cloud-worker", targetYaml("cloud-worker", "mcp")]);
+    const reg = new TargetRegistry();
+    expect(await reg.loadDir(dir)).toEqual(["local-crew"]);
+    expect(reg.names()).toEqual(["local-crew"]);
+    expect(reg.get("github-issues")).toBeUndefined();
+    expect(reg.skipped.map((s) => s.name).sort()).toEqual(["cloud-worker", "github-issues"]);
+    for (const s of reg.skipped) expect(s.reason).toContain("connections add");
+  });
+
+  it("an owner's overlay or extension of a retired target is refused the same way; their local-crew still overlays", async () => {
+    const product = await targetsDir(["local-crew", targetYaml("local-crew", "local")]);
+    const mine = await targetsDir(["devin-sessions", targetYaml("devin-sessions", "http")], ["local-crew", targetYaml("local-crew", "local").replace("max_brief_bytes: 100", "max_brief_bytes: 7")]);
+    const reg = new TargetRegistry();
+    await reg.load([
+      { dir: product, origin: "product" },
+      { dir: mine, origin: "extension" },
+    ]);
+    expect(reg.names()).toEqual(["local-crew"]);
+    expect(reg.get("local-crew")!.data_policy.max_brief_bytes).toBe(7);
+    expect(reg.skipped.map((s) => s.name)).toEqual(["devin-sessions"]);
+  });
+
+  it("add() refuses a target but local-crew, naming the verb", () => {
+    const reg = new TargetRegistry();
+    expect(() => reg.add({ schema: 1, name: "github-issues", type: "target", transport: "github", submit: { repo: "o/r" }, result: { via: "report_queue" }, auth: "env:TOKEN", data_policy: policy })).toThrow(/connections add/);
+    expect(reg.add({ schema: 1, name: "local-crew", type: "target", transport: "local", submit: {}, result: { via: "report_queue" }, data_policy: policy }).name).toBe("local-crew");
+  });
+
+  it("an environment key alone dispatches nothing: with the old keys set and no connection, the target is unknown and nothing is sent", async () => {
+    const saved = { gh: process.env.METISTRY_GITHUB_TOKEN, wr: process.env.METISTRY_GITHUB_WRITE_TOKEN, repo: process.env.METISTRY_GITHUB_DISPATCH_REPO, dv: process.env.METISTRY_DEVIN_API_KEY, org: process.env.METISTRY_DEVIN_ORG_ID };
+    Object.assign(process.env, { METISTRY_GITHUB_TOKEN: "t", METISTRY_GITHUB_WRITE_TOKEN: "t", METISTRY_GITHUB_DISPATCH_REPO: "o/r", METISTRY_DEVIN_API_KEY: "cog_x", METISTRY_DEVIN_ORG_ID: "org-abc" });
+    try {
+      const calls: Call[] = [];
+      const reg = new TargetRegistry({ fetchFn: fakeFetch(calls) });
+      await reg.loadDir(`${root}targets`);
+      expect(reg.names()).toEqual(["local-crew"]);
+      for (const name of ["github-issues", "devin-sessions", "devin"]) {
+        expect(await dispatch(fakeDb(task), reg, 7, name, "fine", "owner")).toMatchObject({ ok: false, code: "not_found" });
+      }
+      // …and a connection-less install is not rescued by the manifest's own shape either: nothing resolves a key from the environment
+      expect((await reg.describe()).map((t) => t.name)).toEqual(["local-crew"]);
+      expect(calls).toHaveLength(0);
+    } finally {
+      for (const [k, v] of Object.entries({ METISTRY_GITHUB_TOKEN: saved.gh, METISTRY_GITHUB_WRITE_TOKEN: saved.wr, METISTRY_GITHUB_DISPATCH_REPO: saved.repo, METISTRY_DEVIN_API_KEY: saved.dv, METISTRY_DEVIN_ORG_ID: saved.org })) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it("a connection with its key delivered is what dispatches — the same task, through the door", async () => {
+    const calls: Call[] = [];
+    const reg = await githubRegistry(fakeFetch(calls));
+    expect(await dispatch(fakeDb(task), reg, 7, "github-issues", "fine", "owner")).toMatchObject({ ok: true });
+    expect(authorizationOf(calls[0]!.init)).toBe(`Bearer ${GH_KEY}`);
+  });
+
+  it("the hint every refusal carries names the verb and the release", () => {
+    expect(CONNECTION_HINT).toMatch(/metistry connections add/);
+    expect(CONNECTION_HINT).toMatch(/0\.17\.0/);
   });
 });
 
 describe("target registry", () => {
-  it("loads targets/* from the repo, resolves env refs, and describe() carries the check", async () => {
-    const reg = new TargetRegistry({ env: {} });
-    expect(await reg.loadDir(`${root}targets`)).toEqual(["devin-sessions", "github-issues", "local-crew"]); // the shipped targets; local-crew is the crews' (docs/ops/crews.md), devin-sessions is W6's (docs/ops/devin.md)
+  it("loads targets/* from the repo, and describe() carries the check", async () => {
+    const reg = new TargetRegistry();
+    expect(await reg.loadDir(`${root}targets`)).toEqual(["local-crew"]); // the crews' target (docs/ops/crews.md); GitHub Issues and Devin are agent connections
     const described = await reg.describe();
-    const d = described.find((t) => t.name === "github-issues");
     const local = described.find((t) => t.name === "local-crew");
-    expect(d).toMatchObject({ name: "github-issues", transport: "github", auth: "env:METISTRY_GITHUB_WRITE_TOKEN", check: { status: "absent" } });
     // the local target needs no auth and has a dispatcher (the assistant's agents_delegate) — never reported as "no dispatcher"
     expect(local).toMatchObject({ name: "local-crew", transport: "local", check: { status: "ok", meta: { via: "agents_delegate" } } });
     expect(local!.auth).toBeUndefined();
+    expect(local!.connection).toBeUndefined();
     // …but the task-dispatch route is not that dispatcher: it refuses a local target by name, pointing at the tool
     const r = await dispatch(fakeDb(task), reg, 7, "local-crew", "fine", "owner");
     expect(r).toMatchObject({ ok: false, code: "invalid_request", message: expect.stringContaining("agents_delegate") });
-    expect(d!.data_policy.deny_sources).toContain("comms");
-    expect(resolveRef("env:X", { X: "v" })).toBe("v");
-    expect(resolveRef("env:X", {})).toBeUndefined();
-    expect(resolveRef("o/r", {})).toBe("o/r");
+    expect(local!.data_policy.deny_sources).toContain("comms");
   });
 
   it("a missing overlay dir is fine; a later dir overrides by name; a bad manifest throws", async () => {
-    const reg = new TargetRegistry({ env: {} });
+    const reg = new TargetRegistry();
     expect(await reg.loadDir(`${root}no-such-dir`)).toEqual([]);
-    reg.add(manifest);
-    reg.add({ ...manifest, data_policy: { ...policy, max_brief_bytes: 1 } });
-    expect(reg.get("github-issues")!.data_policy.max_brief_bytes).toBe(1);
-    expect(() => reg.add({ ...manifest, data_policy: "no_personal_comms" })).toThrow(/data_policy/);
+    const crew = { schema: 1, name: "local-crew", type: "target", transport: "local", submit: {}, result: { via: "report_queue" }, data_policy: policy };
+    reg.add(crew);
+    reg.add({ ...crew, data_policy: { ...policy, max_brief_bytes: 1 } });
+    expect(reg.get("local-crew")!.data_policy.max_brief_bytes).toBe(1);
+    expect(() => reg.add({ ...crew, data_policy: "no_personal_comms" })).toThrow(/data_policy/);
     expect(() => reg.add({ name: "x", type: "service", runs_on: "host" })).toThrow(/not a target/);
   });
 });
@@ -298,7 +368,7 @@ describe("a github-issue connection's config.repo (REPO_RE) — enforced at the 
         join(dir, ".metistry/secrets.yaml"),
         ["secrets:", "  github_write_token:", "    hosts: [api.github.com]", `    grants: { ${repos.map((r) => `"connection:${r.name}": on`).join(", ")} }`, ""].join("\n"),
       );
-      const reg = new TargetRegistry({ env: {}, fetchFn: (async () => Response.json({})) as typeof fetch });
+      const reg = new TargetRegistry({ fetchFn: (async () => Response.json({})) as typeof fetch });
       reg.bindConnections({
         catalog: () => loadInstanceCatalog({ instanceDir: dir, seedDir: `${root}seed` }),
         secrets: envSecretSource({ METISTRY_SECRET_GITHUB_WRITE_TOKEN: "x".repeat(40) }),

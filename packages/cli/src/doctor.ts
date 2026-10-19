@@ -238,6 +238,10 @@ export async function registriesRow(productDir: string, env: NodeJS.ProcessEnv):
         units[kind] = reg.names().length;
         for (const u of reg.overlaid()) overlays.push(`${kind} ${u.name}: ${u.path} replaces ${u.replaced?.path}`);
         for (const sk of reg.skipped) skipped.push({ kind, ...(sk.name ? { name: sk.name } : {}), path: sk.path, reason: sk.reason });
+        // X-85: the console refuses every `targets/` manifest but the crews' local-crew, so the row says so too
+        if (kind === "target") {
+          for (const u of reg.units()) if (u.name !== CREW_TARGET) skipped.push({ kind, name: u.name, path: u.path, reason: `a \`targets/\` manifest other than ${CREW_TARGET} is no longer loaded (0.17.0) — ${RETIRED_KEYS_FIX}` });
+        }
       }
       const meta = { units, overlays, skipped };
       if (skipped.length > 0) {
@@ -681,6 +685,38 @@ export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
     })),
   };
   return action ? { ...row, action } : row;
+}
+
+// ---- the targets shim, removed (X-85) -----------------------------------------
+//
+// T4-11 kept two environment keys and the `targets/` manifests working for one
+// release, only where no connection of the name existed. 0.16.0 was that
+// release: the console now reads neither (apps/console/src/dispatch.ts), so a
+// key left in the environment is dead weight that looks like a working
+// setting. One row names which are set and the verb that replaces them.
+// Never `failed`: nothing is broken, a connection is simply not there yet.
+
+/** The crews' target — the one `targets/` manifest the console still loads. */
+const CREW_TARGET = "local-crew";
+/** The environment keys the shim read; the console ignores them from 0.17.0. */
+export const RETIRED_TARGET_KEYS = ["METISTRY_GITHUB_TOKEN", "METISTRY_DEVIN_API_KEY"] as const;
+const RETIRED_KEYS_FIX = "`metistry connections add <name> --type agent --provider devin|github-issues …` (docs/ops/connections.md, Agent connections)";
+
+export function retiredTargetKeysRow(env: NodeJS.ProcessEnv): DoctorRow | undefined {
+  const set = RETIRED_TARGET_KEYS.filter((k) => (env[k] ?? "").trim() !== "");
+  if (set.length === 0) return undefined;
+  return {
+    kind: "instance",
+    name: "target keys",
+    status: "degraded",
+    latency_ms: 0,
+    probe: "no environment key the console stopped reading (0.17.0) is still set",
+    remediation:
+      `${set.join(", ")} ${set.length === 1 ? "is" : "are"} set and ignored — dispatch to GitHub Issues or Devin, and their syncs, go through an agent connection now: ${RETIRED_KEYS_FIX}; then drop the line from .env` +
+      (set.includes("METISTRY_GITHUB_TOKEN") ? " (`metistry update` still reads METISTRY_GITHUB_TOKEN for the Releases API)" : ""),
+    action: runVerb(["metistry", "connections", "list"], "List connections"),
+    meta: { keys: set },
+  };
 }
 
 // ---- the retired shared scope (plan §2.14, T4-3) --------------------------------
@@ -1997,7 +2033,8 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // someone else's server (docs/ops/connections.md)
     env.METISTRY_INSTANCE_DIR ? connectionRows({ instanceDir, productDir: productDir, env, platform, uid, exec, ...(deps.keychain ? { keychain: deps.keychain } : {}) }) : Promise.resolve([]),
   ]);
-  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...(launchdEnv ? [launchdEnv] : []), ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync, ...connections);
+  const targetKeys = retiredTargetKeysRow(env);
+  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...(launchdEnv ? [launchdEnv] : []), ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), ...(targetKeys ? [targetKeys] : []), vaultSync, ...connections);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, product, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

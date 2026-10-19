@@ -1,7 +1,7 @@
 # The GitHub Issues connection type (plan §2.6, §2.7; T4-11) — an `agent`
 # connection: a task dispatched to it opens an issue in one repository, the
 # external work queue whoever watches that repo picks up. It is what
-# `targets/github-issues/manifest.yaml` was: this TYPE carries how a brief is
+# the `targets/github-issues` manifest was (removed in 0.17.0, X-85): this TYPE carries how a brief is
 # dispatched and what it may carry; the CONNECTION carries the repository and
 # the write token. Added with
 #

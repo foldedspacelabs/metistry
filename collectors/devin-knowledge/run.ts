@@ -283,7 +283,7 @@ export async function check(ctx: DevinCtx = {}): Promise<CheckResult> {
       return {
         status: "absent" as const,
         remediation:
-          "no Devin connection — `metistry connections add devin --type agent --provider devin …` (docs/ops/connections.md, Agent connections); for one release METISTRY_DEVIN_API_KEY still works (`metistry secrets sync --to env`); degrades absent meanwhile (no Devin knowledge reaches the inbox, everything else runs)",
+          "no Devin connection — `metistry connections add devin --type agent --provider devin …` (docs/ops/connections.md, Agent connections), then `metistry secrets sync --to env`; METISTRY_DEVIN_API_KEY is no longer read (0.17.0); degrades absent meanwhile (no Devin knowledge reaches the inbox, everything else runs)",
       };
     }
     let orgId: string | null;
@@ -299,7 +299,7 @@ export async function check(ctx: DevinCtx = {}): Promise<CheckResult> {
       return {
         status: "degraded" as const,
         remediation:
-          "the key authenticated but resolves no organization (an enterprise service-user key or a PAT is account-scoped) — set METISTRY_DEVIN_ORG_ID to a child organization id from Settings → Service users",
+          "the key authenticated but resolves no organization (an enterprise service-user key or a PAT is account-scoped) — name an organization on the connection: `metistry connections set devin --config org=org-…` (a child organization id from Settings → Service users; docs/ops/connections.md, Agent connections)",
       };
     }
     return { status: "ok" as const, meta: { org_id: orgId, repos: access.repos.length, ...(access.connection ? { connection: access.connection } : {}) } };

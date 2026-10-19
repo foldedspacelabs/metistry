@@ -21,6 +21,7 @@ import {
   restartHint,
   registriesRow,
   renderTable,
+  retiredTargetKeysRow,
   walkManifests,
   type Db,
   type DoctorRow,
@@ -50,7 +51,7 @@ async function checkout(opts: { brokenManifests?: boolean } = {}): Promise<strin
   await put("packages/mcp-y/manifest.yaml", "name: y\ntype: bridge\ntransport: http\nport: 7902\nruns_on: host\nexposes: [{name: a}]\n");
   await put("apps/console/manifest.yaml", "name: console\ntype: service\nruns_on: container\nport: 8080\n");
   await put("apps/watchdog/manifest.yaml", "name: watchdog\ntype: service\nruns_on: host\n");
-  await put("targets/tgt/manifest.yaml", "schema: 1\nname: tgt\ntype: target\ntransport: local\nsubmit: {}\nresult: {via: report_queue}\ndata_policy: {allow: [], deny_sources: [], max_brief_bytes: 10}\n");
+  await put("targets/local-crew/manifest.yaml", "schema: 1\nname: local-crew\ntype: target\ntransport: local\nsubmit: {}\nresult: {via: report_queue}\ndata_policy: {allow: [], deny_sources: [], max_brief_bytes: 10}\n");
   await put("db/migrations/0001_a.sql", "select 1;");
   await put("db/migrations/0002_b.sql", "select 1;");
   await put("ops/launchd/com.foldedspacelabs.metistry.a.plist", PLIST("com.foldedspacelabs.metistry.a"));
@@ -133,7 +134,7 @@ describe("doctor: everything healthy", () => {
       "bridge:y=absent",
       "service:console=ok",
       "service:watchdog=ok",
-      "target:tgt=ok",
+      "target:local-crew=ok",
       "registry:registries=ok", // every registry kind loads; no extensions, nothing skipped
       "instance:instance layout=absent", // a bare temp dir is not an instance directory
       "instance:inbox=ok",
@@ -466,8 +467,8 @@ describe("doctor: failed", () => {
       "packages/mcp-y=true",
       "apps/console=true",
       "apps/watchdog=true",
+      "targets/local-crew=true",
       "targets/mismatch=false",
-      "targets/tgt=true",
     ]);
     const report = await doctor({ productDir, env: {}, fetchFn: fakeFetch({ "/health": res(200), "/api/status": res(401) }), db: null, exec: fakeExec({ docker: { code: 127 } }), platform: "linux" });
     const r = byName(report.rows);
@@ -554,6 +555,76 @@ describe("doctor: the registries row", () => {
     // T4-21: nothing here can name WHICH unit to fix in one command (there may
     // be several), so the button just gets the operator to the list
     expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "extensions", "list"], label: "List extensions" });
+  });
+});
+
+// X-85: the one-release targets shim is gone. The environment keys it read are
+// named by one row (and ignored); a `targets/` manifest but local-crew is a
+// skipped unit on the registries row, each naming the verb that replaces them.
+describe("doctor: the targets shim is removed (X-85)", () => {
+  const target = (name: string, transport = "local") =>
+    `schema: 1\nname: ${name}\ntype: target\ntransport: ${transport}\nsubmit: {}\nresult: {via: report_queue}\ndata_policy: {allow: [], deny_sources: [], max_brief_bytes: 10}\n`;
+  async function tree(files: Record<string, string>): Promise<string> {
+    const root = await mkdtemp(join(tmpdir(), "metistry-doctor-shim-"));
+    for (const [rel, text] of Object.entries(files)) {
+      await mkdir(join(root, rel, ".."), { recursive: true });
+      await writeFile(join(root, rel), text);
+    }
+    return root;
+  }
+
+  it("no row when neither key is set — or when one is blank", () => {
+    expect(retiredTargetKeysRow({})).toBeUndefined();
+    expect(retiredTargetKeysRow({ METISTRY_DEVIN_API_KEY: "  ", METISTRY_GITHUB_TOKEN: "" })).toBeUndefined();
+  });
+
+  it("an env key alone is ignored, and the row names it and `connections add` — degraded, never failed", () => {
+    const row = retiredTargetKeysRow({ METISTRY_DEVIN_API_KEY: "cog_x" })!;
+    expect(row).toMatchObject({ kind: "instance", name: "target keys", status: "degraded", meta: { keys: ["METISTRY_DEVIN_API_KEY"] } });
+    expect(row.remediation).toContain("METISTRY_DEVIN_API_KEY is set and ignored");
+    expect(row.remediation).toContain("metistry connections add");
+    expect(row.remediation).not.toContain("Releases API"); // only a GitHub token has a second reader
+    expect(JSON.stringify(row)).not.toContain("cog_x"); // names, never values
+    expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "connections", "list"], label: "List connections" });
+  });
+
+  it("the GitHub token's row says `metistry update` still reads it for the Releases API", () => {
+    const row = retiredTargetKeysRow({ METISTRY_GITHUB_TOKEN: "ghp_x", METISTRY_DEVIN_API_KEY: "cog_x" })!;
+    expect(row.meta).toEqual({ keys: ["METISTRY_GITHUB_TOKEN", "METISTRY_DEVIN_API_KEY"] });
+    expect(row.remediation).toContain("METISTRY_GITHUB_TOKEN, METISTRY_DEVIN_API_KEY are set and ignored");
+    expect(row.remediation).toContain("`metistry update` still reads METISTRY_GITHUB_TOKEN");
+  });
+
+  it("doctor() carries the row only when a key is set, and still passes (ok: no row is failed)", async () => {
+    const productDir = await checkout();
+    const deps = {
+      productDir,
+      fetchFn: (async () => { throw new Error("no network"); }) as unknown as typeof fetch,
+      db: null,
+      exec: async () => ({ code: 127, stdout: "", stderr: "" }),
+      platform: "linux" as const,
+    };
+    const without = await doctor({ ...deps, env: {} });
+    expect(without.rows.find((r) => r.name === "target keys")).toBeUndefined();
+    const withKey = await doctor({ ...deps, env: { METISTRY_DEVIN_API_KEY: "cog_x" } });
+    expect(withKey.rows.find((r) => r.name === "target keys")).toMatchObject({ status: "degraded" });
+  });
+
+  it("local-crew still loads: the registries row is ok with it alone", async () => {
+    const product = await tree({ "targets/local-crew/manifest.yaml": target("local-crew") });
+    const row = await registriesRow(product, {});
+    expect(row.status).toBe("ok");
+    expect(row.meta).toMatchObject({ units: { target: 1 }, skipped: [] });
+  });
+
+  it("a targets/ manifest other than local-crew is a skipped unit naming `connections add`, in the product tree or the owner's", async () => {
+    const product = await tree({ "targets/local-crew/manifest.yaml": target("local-crew"), "targets/github-issues/manifest.yaml": target("github-issues") });
+    const instance = await tree({ ".metistry/targets/devin-sessions/manifest.yaml": target("devin-sessions") });
+    const row = await registriesRow(product, { METISTRY_INSTANCE_DIR: instance });
+    expect(row.status).toBe("degraded");
+    const skipped = (row.meta as { skipped: { name: string; reason: string }[] }).skipped;
+    expect(skipped.map((x) => x.name).sort()).toEqual(["devin-sessions", "github-issues"]);
+    for (const x of skipped) expect(x.reason).toContain("metistry connections add");
   });
 });
 

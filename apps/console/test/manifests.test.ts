@@ -62,7 +62,7 @@ async function shippedManifests(): Promise<{ file: string; type: string }[]> {
 describe("every shipped manifest validates (invariant 5)", () => {
   it("enumerates collectors/*, routines/*, targets/*, apps/*, packages/* and each conforms to the schema", async () => {
     const files = await shippedManifests();
-    expect(files.map((f) => f.file)).toContain("targets/github-issues/manifest.yaml");
+    expect(files.map((f) => f.file)).toContain("targets/local-crew/manifest.yaml");
     const failures: string[] = [];
     for (const { file, type } of files) {
       const r = validateManifest(parseYaml(await readFile(`${root}${file}`, "utf8")));
@@ -84,10 +84,11 @@ describe("every shipped manifest validates (invariant 5)", () => {
   });
 
   it("every targets/* manifest loads through the registry and names its directory", async () => {
-    const reg = new TargetRegistry({ env: {} });
+    const reg = new TargetRegistry();
     const loaded = await reg.loadDir(`${root}targets`);
-    expect(loaded).toContain("github-issues");
-    expect(loaded).toContain("local-crew");
+    // X-85: the crews' target is the only `targets/` manifest; GitHub Issues and Devin are agent connection types (seed/connection-types)
+    expect(loaded).toEqual(["local-crew"]);
+    expect(reg.skipped).toEqual([]);
     expect(reg.names()).toEqual(loaded);
   });
 });

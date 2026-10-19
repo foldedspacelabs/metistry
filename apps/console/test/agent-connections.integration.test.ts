@@ -118,8 +118,8 @@ describe.skipIf(!hasDb)("agent connections as targets (T4-11)", () => {
     await writeSecrets(secretsYaml);
 
     const env = { METISTRY_SECRET_DEVIN_API_KEY: DEVIN_KEY, METISTRY_SECRET_GITHUB_WRITE_TOKEN: GH_KEY };
-    targets = new TargetRegistry({ env: {}, fetchFn: fakeServices(sent) });
-    await targets.loadDir(`${root}targets`); // the product's targets/ still load beside the connections
+    targets = new TargetRegistry({ fetchFn: fakeServices(sent) });
+    await targets.loadDir(`${root}targets`); // the product's targets/ is the crews' local-crew alone (X-85)
     targets.bindConnections({ catalog: () => loadInstanceCatalog({ instanceDir: dir, seedDir: `${root}seed` }), secrets: envSecretSource(env) });
     server = makeServer(pool, new QueryStore(pool), {
       origin: "http://127.0.0.1:0",
@@ -197,8 +197,8 @@ describe.skipIf(!hasDb)("agent connections as targets (T4-11)", () => {
       check: { status: "ok", meta: { org: "org-abc" } },
     });
     expect(byName.get("github-issues")).toMatchObject({ connection: "github-issues", transport: "github", submit: { repo: REPO }, check: { status: "ok" } });
-    // the product's targets/ still load (for one release), and the crews' target is the manifest's, not a connection
-    expect(byName.get("devin-sessions")).toBeDefined();
+    // the crews' target is the one targets/ manifest left, not a connection; the shim's manifests are gone (X-85)
+    expect(byName.has("devin-sessions")).toBe(false);
     expect(byName.get("local-crew")).toMatchObject({ transport: "local" });
     expect(byName.get("local-crew").connection).toBeUndefined();
     // a GitHub Issues connection pointed anywhere but api.github.com is not a target

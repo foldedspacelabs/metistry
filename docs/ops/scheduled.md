@@ -476,7 +476,8 @@ the one `devin` agent connection (its type names `devin-sessions` in
 sync does — `syncs.<name>.connection`, or the one `ok` connection its
 provider declares — and its key is filled at the connection's door
 (`docs/ops/connections.md`, *A sync reading its connection*). With no
-connection, each reads its legacy environment for one release.
+connection, each degrades absent (the legacy environment keys were removed
+in 0.17.0, X-85).
 
 **Standup** is §2.5's eighth default, working days at 08:00. It renders
 its template into `Journal/Standup/<date>.md` — its own reserved subfolder,

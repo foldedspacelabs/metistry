@@ -116,6 +116,16 @@ public struct Device: Sendable, Equatable, Identifiable {
         return nil
     }
 
+    /// Plan §2.23 ("How the origin flows"): a passkey is bound to the host it
+    /// was created on, so one whose `rp_id` is no longer a configured origin's
+    /// host can never sign in again — *Added for old.example.com. Remove it and
+    /// add this phone again.* Nil while the hosts are unknown, for a passkey
+    /// with no recorded host, and for one whose host is still configured.
+    public func strandedNote(configuredHosts: [String]?) -> String? {
+        guard let configuredHosts, let rpID = rpID?.lowercased(), !rpID.isEmpty else { return nil }
+        return configuredHosts.contains(rpID) ? nil : RemoteAccessWords.stranded(rpID)
+    }
+
     /// The sessions that are still signed in.
     public var liveSessions: [DeviceSession] { sessions.filter { !$0.revoked } }
     public var isSignedIn: Bool { !liveSessions.isEmpty }
@@ -169,6 +179,9 @@ public final class DevicesModel {
     public private(set) var busy = false
     /// The Add a Phone sheet, while it is open.
     public private(set) var addPhone: AddPhoneModel?
+    /// The hosts `METISTRY_ORIGIN` names, from `metistry remote status --json`
+    /// (X-107): a passkey bound to any other host is marked. Nil until read.
+    public private(set) var configuredHosts: [String]?
 
     @ObservationIgnored private weak var session: ConsoleSession?
     @ObservationIgnored public var now: @MainActor () -> Date = Date.init
@@ -178,6 +191,9 @@ public final class DevicesModel {
     /// Builds the sheet's model. The default is the session's runner and
     /// stores; a test hands in its own.
     @ObservationIgnored public var makeAddPhone: @MainActor () -> AddPhoneModel
+    /// Reads the configured origins' hosts — Settings points it at the Remote
+    /// Access pane's one read; nil means unknown, and nothing is marked.
+    @ObservationIgnored public var readConfiguredHosts: @MainActor () async -> [String]? = { nil }
 
     public init(session: ConsoleSession?) {
         self.session = session
@@ -197,6 +213,7 @@ public final class DevicesModel {
     public func reset() {
         devices = []
         phase = .idle
+        configuredHosts = nil
         confirmation = nil
         pending = nil
         note = nil
@@ -219,6 +236,7 @@ public final class DevicesModel {
         switch await session.stores.devices() {
         case .success(let list):
             devices = Device.list(list.json)
+            configuredHosts = await readConfiguredHosts()
             phase = .read
         case .failure(let error):
             phase = .unavailable(error.localizedDescription)

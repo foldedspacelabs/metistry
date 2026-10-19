@@ -8,7 +8,17 @@
 // touches a repo. The fake-db suite (routines/morning-brief/brief-file.test.ts)
 // proves the decisions.
 //
-// Every fixture carries an `itest-brief` marker and is removed again.
+// The brief is a WHOLE-QUEUE read: its "Waiting on you" section lists the
+// five most urgent pending requests in the database, and `run()` itself expires
+// every pending request older than two weeks. A sibling file's leftover rows
+// (the console's suites leave pending proposals behind) would therefore push
+// this fixture off the list — and be rewritten by the pass. So, like the weekly
+// review's suite, this one SHADOWS the tables the brief reads and writes
+// (docs/ops/testing.md, "shadow the table"): one connection of its own with a
+// TEMP copy of each (`LIKE public.<t> INCLUDING ALL`), handed to the routine and
+// to the query store alike. An unqualified name on that connection is the
+// shadow, so the brief sees exactly this fixture; no shared row is read,
+// written, expired or deleted, and the shadows go with the connection.
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -67,30 +77,39 @@ function fakeVault(note: string | null = DAILY): FakeVault {
 
 describe.skipIf(!hasDb)("morning-brief (real db)", () => {
   let pool: pg.Pool;
+  /** The connection whose unqualified table names are this suite's shadows; every statement below, the routine's and the query store's included, runs on it. */
+  let db: pg.PoolClient;
   let queries: QueryStore;
-
-  const cleanup = async () => {
-    await pool.query(`DELETE FROM runs WHERE component = $1`, [COMPONENT]);
-    await pool.query(`DELETE FROM proposals WHERE source_agent = $1 OR payload->>'title' LIKE '%' || $2 || '%'`, [COMPONENT, MARK]);
-    await pool.query(`DELETE FROM inbound_messages WHERE thread = $1`, [COMPONENT]);
-    await pool.query(`DELETE FROM outbound_messages WHERE kind = 'brief' AND text LIKE '%' || $1 || '%'`, [briefPath(DATE)]);
-  };
+  /** The tables `morning-brief/run.ts` reads or writes — and therefore the ones shadowed (the `requests` directive reads `proposals` through `pending_requests`). A table the brief touches but this list misses would be the shared one. */
+  const BRIEF_TABLES = ["inbound_messages", "outbound_messages", "proposals", "runs", "work"];
 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
-    queries = new QueryStore(pool);
-    await queries.loadDir(`${SEED}queries`);
-    await cleanup();
-    await pool.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('decision', 'researcher', 'internal', $1)`, [JSON.stringify({ title: `Which repo? ${MARK}` })]);
+    db = await pool.connect();
+    try {
+      for (const t of BRIEF_TABLES) await db.query(`CREATE TEMP TABLE ${t} (LIKE public.${t} INCLUDING ALL)`);
+      queries = new QueryStore(db);
+      await queries.loadDir(`${SEED}queries`);
+      await db.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('decision', 'researcher', 'internal', $1)`, [JSON.stringify({ title: `Which repo? ${MARK}` })]);
+    } catch (e) {
+      db.release(true); // a half-shadowed connection must not go back to the pool
+      throw e;
+    }
   });
 
   beforeEach(async () => {
-    await pool.query(`DELETE FROM runs WHERE component = $1`, [COMPONENT]);
-    await pool.query(`DELETE FROM inbound_messages WHERE thread = $1`, [COMPONENT]);
+    // the shadows only: tests below share one connection, and one morning's rows must not satisfy the next test's dedupe
+    await db.query(`DELETE FROM runs WHERE component = $1`, [COMPONENT]);
+    await db.query(`DELETE FROM inbound_messages WHERE thread = $1`, [COMPONENT]);
   });
 
   afterAll(async () => {
-    await cleanup();
+    try {
+      for (const t of BRIEF_TABLES) await db.query(`DROP TABLE pg_temp.${t}`);
+      db.release();
+    } catch {
+      db.release(true); // drop the connection, and the shadows with it
+    }
     await pool.end();
   });
 
@@ -98,7 +117,7 @@ describe.skipIf(!hasDb)("morning-brief (real db)", () => {
 
   it("writes the brief from the real requests, the section, its own row and ONE turn — and not twice for one morning", async () => {
     const vault = fakeVault();
-    expect(await morningBrief(pool, ctx(vault))).toBe(1);
+    expect(await morningBrief(db, ctx(vault))).toBe(1);
 
     const brief = vault.files.get(briefPath(DATE)) ?? "";
     expect(brief).toContain("source: morning-brief");
@@ -106,42 +125,42 @@ describe.skipIf(!hasDb)("morning-brief (real db)", () => {
     expect(brief).toContain(`![[Journal/Standup/${DATE}]]`);
     expect(vault.files.get(dailyNotePath(DATE))).toContain("### Standup");
 
-    const runs = await pool.query(`SELECT kind, ok, finished_at, meta FROM runs WHERE component = $1 ORDER BY id`, [COMPONENT]);
+    const runs = await db.query(`SELECT kind, ok, finished_at, meta FROM runs WHERE component = $1 ORDER BY id`, [COMPONENT]);
     expect(runs.rows).toHaveLength(1);
     expect(runs.rows[0]).toMatchObject({ kind: "routine_run", ok: true, meta: expect.objectContaining({ brief_for: DATE, outcome: "acted", day_section: "written", prose_slots: 1, next_up: null }) });
     expect(runs.rows[0].finished_at).not.toBeNull();
 
-    const turns = await pool.query(`SELECT id, text, meta FROM inbound_messages WHERE thread = $1`, [COMPONENT]);
+    const turns = await db.query(`SELECT id, text, meta FROM inbound_messages WHERE thread = $1`, [COMPONENT]);
     expect(turns.rows).toHaveLength(1);
     expect(turns.rows[0].meta).toEqual({ kind: "prose", tier: "routine", fresh_session: true, source: COMPONENT, path: briefPath(DATE), slots: 1 });
     expect(runs.rows[0].meta.inbound_id).toBe(Number(turns.rows[0].id));
 
-    expect(await morningBrief(pool, ctx(vault))).toBe(1); // the chat message still goes (a request is pending)…
-    expect((await pool.query(`SELECT 1 FROM inbound_messages WHERE thread = $1`, [COMPONENT])).rows).toHaveLength(1); // …but no second file, no second turn
+    expect(await morningBrief(db, ctx(vault))).toBe(1); // the chat message still goes (a request is pending)…
+    expect((await db.query(`SELECT 1 FROM inbound_messages WHERE thread = $1`, [COMPONENT])).rows).toHaveLength(1); // …but no second file, no second turn
   });
 
   it("broken markers raise ONE note request on the real table, however many mornings find them", async () => {
     const broken = `# ${DATE}\n\n<!-- /metistry:day -->\n`;
-    expect(await morningBrief(pool, ctx(fakeVault(broken)))).toBe(1);
-    await pool.query(`DELETE FROM runs WHERE component = $1`, [COMPONENT]);
-    expect(await morningBrief(pool, ctx(fakeVault(broken)))).toBe(1);
-    const { rows } = await pool.query(`SELECT kind, decision, payload FROM proposals WHERE source_agent = $1`, [COMPONENT]);
+    expect(await morningBrief(db, ctx(fakeVault(broken)))).toBe(1);
+    await db.query(`DELETE FROM runs WHERE component = $1`, [COMPONENT]);
+    expect(await morningBrief(db, ctx(fakeVault(broken)))).toBe(1);
+    const { rows } = await db.query(`SELECT kind, decision, payload FROM proposals WHERE source_agent = $1`, [COMPONENT]);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "knowledge", decision: "pending", payload: expect.objectContaining({ day_section: { day: DATE, path: dailyNotePath(DATE), reason: "unpaired", at_line: 3 } }) });
   });
 
   it("a missing template raises ONE report request on the real table, keyed on the template, however many mornings skip (W2 checkpoint D1)", async () => {
-    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [COMPONENT]);
+    await db.query(`DELETE FROM proposals WHERE source_agent = $1`, [COMPONENT]);
     const noTemplate = () => {
       const v = fakeVault();
       v.files.delete(DEFAULT_TEMPLATE);
       return v;
     };
-    await morningBrief(pool, ctx(noTemplate()));
-    await morningBrief(pool, ctx(noTemplate(), new Date("2026-09-29T11:00:00Z")));
-    const runs = await pool.query(`SELECT meta->>'outcome' AS outcome FROM runs WHERE component = $1 AND meta ? 'brief_for' ORDER BY id`, [COMPONENT]);
+    await morningBrief(db, ctx(noTemplate()));
+    await morningBrief(db, ctx(noTemplate(), new Date("2026-09-29T11:00:00Z")));
+    const runs = await db.query(`SELECT meta->>'outcome' AS outcome FROM runs WHERE component = $1 AND meta ? 'brief_for' ORDER BY id`, [COMPONENT]);
     expect(runs.rows.map((r) => r.outcome)).toEqual(["skipped:template_missing", "skipped:template_missing"]);
-    const { rows } = await pool.query(`SELECT kind, decision, payload FROM proposals WHERE source_agent = $1`, [COMPONENT]);
+    const { rows } = await db.query(`SELECT kind, decision, payload FROM proposals WHERE source_agent = $1`, [COMPONENT]);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "report", decision: "pending", payload: expect.objectContaining({ refs: [DEFAULT_TEMPLATE], template_issue: { path: DEFAULT_TEMPLATE, reason: "template_missing" } }) });
   });

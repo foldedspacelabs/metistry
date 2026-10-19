@@ -36,6 +36,12 @@ ticket, and the §2 sections your ticket names** — not the whole plan.
 - **A scratch instance** for anything end to end: `metistry init <tmp dir>` with
   `--namespace`, never a real one.
 - **GitHub CLI** as `env -u GH_TOKEN gh …`.
+- **Guards behind these rules** (`ops/claude/README.md`): a settings hook refuses
+  `Edit`/`Write` outside a `../metistry-*` worktree (exact); a second hook
+  refuses `security` against the login Keychain, `launchctl`, `caffeinate`,
+  `pmset` and the live ports (a text match — a reminder, not a control); a
+  `commit-msg` git hook refuses an agent commit without the trailer. A refusal
+  is not a puzzle to route around — it means you are outside the brief.
 
 ## What you build to
 

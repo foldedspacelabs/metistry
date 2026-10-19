@@ -3360,7 +3360,7 @@
         "T4-11"
       ],
       "file": "docs/product/tickets/x/x-92.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-93": {
       "title": "`socketDestination` keeps IMAP's port",
@@ -3500,7 +3500,7 @@
         "X-31"
       ],
       "file": "docs/product/tickets/x/x-102.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-75": {
       "title": "`metistry enroll` — an enrolment code minted on this Mac",

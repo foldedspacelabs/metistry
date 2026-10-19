@@ -203,7 +203,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [ ] [X-88](x/x-88.md) · The workspace test script isolates each package's database · M · opus
 - [ ] [X-80](x/x-80.md) · `metistry up` mints the recorder's control token · S · sonnet · after T8-5
 - [ ] [X-85](x/x-85.md) · The targets shim comes out · S · sonnet · after T4-11
-- [ ] [X-102](x/x-102.md) · The recorder leaves no fixed-id rows behind · S · sonnet · after X-31
+- [ ] [X-102](x/x-102.md) · The recorder leaves no fixed-id rows behind · S · sonnet · after X-31 · **in-review**
 - [ ] [X-101](x/x-101.md) · Bare `metistry doctor` resolves the product directory it runs from · S · sonnet
 - [ ] [X-87](x/x-87.md) · The calendar collectors export `check()` · M · opus · after T4-14
 - [ ] [X-75](x/x-75.md) · `metistry enroll` — an enrolment code minted on this Mac · M · opus high
@@ -220,7 +220,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [ ] [X-86](x/x-86.md) · The Mac's Secrets pane hides Grant for an owner-door secret · S · sonnet · after X-41, T6-14
 - [ ] [X-90](x/x-90.md) · The hot-key and accessibility audits see what they miss · S · sonnet · after T6-16
 - [ ] [X-91](x/x-91.md) · The three-pointers test tolerates the device-local keys · S · sonnet · after T6-16, T6-15
-- [ ] [X-92](x/x-92.md) · Dispatch's `REPO_RE` has a misuse test · S · sonnet · after T4-11
+- [ ] [X-92](x/x-92.md) · Dispatch's `REPO_RE` has a misuse test · S · sonnet · after T4-11 · **in-review**
 - [ ] [X-93](x/x-93.md) · `socketDestination` keeps IMAP's port · S · sonnet · after T4-15
 - [ ] [X-94](x/x-94.md) · The wizard's copy templates the configured name · S · sonnet · after T6-12
 - [ ] [X-95](x/x-95.md) · The Mac's loopback set matches core's · S · sonnet · after T6-13a

@@ -12,7 +12,7 @@ import { mountKnowledge } from "./knowledge.js";
 import { mountMore } from "./more.js";
 import { mountNeedsYou, needsYouRoute } from "./needs-you.js";
 // Notifications and install (T7-5, screen 18 §6): the ask, the install sheet, Settings' push rows.
-import { mountNotify } from "./notify.js";
+import { deviceOf, installOffer, mountNotify } from "./notify.js";
 // Settings (T7-6, design-build-plan §2.3): the grouped list; Mac-only rows are their reason, never a control.
 import { mountSettings } from "./settings.js";
 import { mountToday } from "./today.js";
@@ -25,7 +25,26 @@ import { NotQueueable, READS_CACHE, bandText, createOutbox, drainedText, keptSto
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
-let enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll"); // spent once the device is enrolled
+
+// ----- the enrolment link (`#enroll=<code>`; design-build-plan §2.22, X-78) -----
+/**
+ * The code an enrolment link carries, read once and then taken out of the
+ * address bar and history (`history.replaceState` of the same entry), so Add
+ * to Home Screen never saves a spent code and it never sits in history. The
+ * ceremony happens in Safari, whose link opened it: an installed app does not
+ * share that storage and opens at the manifest's start URL, so a standalone
+ * launch reads no code — the wall is sign-in, never enrolment.
+ */
+function readEnrollCode(win) {
+  const loc = win.location;
+  const code = new URLSearchParams(String(loc.hash ?? "").slice(1)).get("enroll");
+  if (code === null) return null;
+  win.history.replaceState(null, "", loc.pathname + loc.search);
+  return deviceOf(win).standalone ? null : code;
+}
+/** After the wall: the install sheet in an iPhone's or iPad's Safari (T7-5's own rule, `installOffer`), else home. */
+const afterEnroll = (device) => (installOffer({ device, deferred: false, offered: false }) === "ios" ? "install" : "home");
+let enrollCode = readEnrollCode(window); // spent once the device is enrolled
 
 async function api(path, opts = {}) {
   const res = await net(path, { ...opts, headers: { "content-type": "application/json", ...opts.headers } });
@@ -337,9 +356,10 @@ $("bell").onclick = () => show("triage");
 $("usage-btn").onclick = () => show("usage");
 
 // ----- auth: a wall, not an alert (screen 18 §0, §7.4) -----
-// Enrolment is a one-time link opened on the device (`#enroll=`), then a
-// passkey. No window.alert and no window.prompt: the device's name is a field on the
-// wall, and every refusal is a line under the buttons in the owner's words.
+// Enrolment is a one-time link opened on the device (`#enroll=`, read once
+// and taken out of the URL above), then a passkey. No window.alert and no
+// window.prompt: the device's name is a field on the wall, and every refusal
+// is a line under the buttons in the owner's words.
 const AUTH_WORDS = {
   code: "This link has expired or was already used. Make a new one on your Mac.",
   enroll: "This device couldn't be enrolled. The link may have expired — make a new one on your Mac.",
@@ -392,9 +412,13 @@ $("enroll-btn").onclick = () => authStep("enroll", async () => {
   const fin = await fetch("/auth/enroll/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: enrollCode, label, response }) });
   if (!fin.ok) return authSay(AUTH_WORDS.enroll);
   enrollCode = null;
-  history.replaceState(null, "", "/");
   show(HOME);
   goLive();
+  // In Safari, not the installed app: the wall hands on to the install sheet
+  // (§2.22 step 3) — the T7-5 sheet, whose last line says when notifications
+  // are asked. Sign-in in the installed app is a login ceremony with this passkey.
+  const device = deviceOf(window);
+  if (afterEnroll(device) === "install") show("install", { title: `Install on ${device.ios}` });
 });
 
 $("login-btn").onclick = () => authStep("signin", async () => {

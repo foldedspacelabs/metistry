@@ -48,6 +48,7 @@ private let viewCoverage: [String: Coverage] = [
     "menu-bar-view.swift": Coverage(test: "accessibility-audit-tests.swift", probes: "MenuBarContent"),
     "needs-you-view.swift": Coverage(test: "needs-you-view-tests.swift", probes: "NeedsYouView"),
     "projects-view.swift": Coverage(test: "projects-view-tests.swift", probes: "ProjectsView"),
+    "remote-access-flow.swift": Coverage(test: "remote-access-tests.swift", probes: "RemoteAccessFlowView"),
     "request-bodies/meeting-card.swift": Coverage(test: "request-bodies-accessibility-tests.swift", probes: "MeetingCardView"),
     "request-bodies/request-card-view.swift": Coverage(test: "request-bodies-accessibility-tests.swift", probes: "RequestCardView"),
     "room-view.swift": Coverage(test: "board-view-tests.swift", probes: "RoomPane"),
@@ -66,6 +67,7 @@ private let viewCoverage: [String: Coverage] = [
     "settings-panes/instance-sheets.swift": Coverage(test: "settings-window-tests.swift", probes: "IdentityEditorView"),
     "settings-panes/keyboard-pane.swift": Coverage(test: "accessibility-audit-tests.swift", probes: "KeyboardPane"),
     "settings-panes/live-capture-pane.swift": Coverage(test: "live-capture-pane-tests.swift", probes: "LiveCapturePaneBody"),
+    "settings-panes/remote-access-pane.swift": Coverage(test: "remote-access-tests.swift", probes: "RemoteAccessPaneBody"),
     "settings-panes/sessions-pane.swift": Coverage(test: "sessions-pane-tests.swift", probes: "SessionsPaneBody"),
     "settings-panes/services-pane.swift": Coverage(test: "settings-window-tests.swift", probes: "LidClosedDialogView"),
     "status-panel.swift": Coverage(test: "accessibility-audit-tests.swift", probes: "StatusPanel"),
@@ -199,6 +201,7 @@ private let viewCoverage: [String: Coverage] = [
         #expect(tree.unlabeledBesidesFields.isEmpty, "\(step) unlabeled: \(tree.unlabeledBesidesFields)")
     }
     for view in [
+        AnyView(RemoteAccessStepView(steps: app.firstRun)),
         AnyView(PasskeyStepView(steps: app.firstRun)),
         AnyView(PasskeyDiagnosticView(model: app.firstRun.passkey)),
         AnyView(ComputeStepView(model: app.firstRun.compute)),

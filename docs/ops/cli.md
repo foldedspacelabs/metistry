@@ -2141,6 +2141,7 @@ prints the rows `GET /api/connections` serves; `show --json` the body of `GET
 ```
 metistry remote [status] [--json] [--instance <dir>]
 metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags] [--yes] [--dry-run] [--timeout <seconds>] [--json]
+  tailscale [--mode funnel|tailnet] [--use-app|--bundled] [--no-browser]
 metistry remote authorize <tailscale|cloudflare> [--no-browser] [--timeout 300] [--json]
 metistry remote test [--json]
 metistry remote off [--yes] [--json]
@@ -2171,8 +2172,9 @@ origin to answer from this Mac (never: nothing written, nothing revoked);
 write the record; revoke the old provider. So the phone is never left with
 nothing mid-change. **`off`** is `set none` with the old provider's revoke.
 A provider this version has no adapter for is refused by name, with the
-choices that exist — this release ships None; the others arrive with their
-own tickets.
+choices that exist — this release ships None and Tailscale (Funnel by
+default, `docs/ops/remote-access.md`, "Tailscale"); the others arrive with
+their own tickets.
 
 **A token never arrives in argv.** `--token` is a switch meaning *read it
 from stdin* (piped, or typed hidden at a prompt in a terminal — the
@@ -2196,7 +2198,15 @@ instead (`docs/ops/bundled-runtime.md`, "Provider tool packs").
 can run), `choices` (the chooser's rows, in the plan's order, each with
 `available`), `rows` (doctor's `remote` rows) and `ok`. Exit 1 when a row is
 `failed`. `remote set --json` prints `{from, provider, origin, applied,
-detail, revoked?, detection}`.
+detail, revoked?, detection, stranding?}` — `revoked` is what the old
+provider's revoke undid and left for you, or in a preview what it **would**
+undo; `stranding` is the sentence about the phones a switch strands, present
+whenever the origin being left has one. **With `--json` the step notes go to
+stderr** — the provider's sign-in link, each approval page, *Waiting for
+<name> to appear on the internet*, the preview's `would:` line and its
+*preview only — pass --yes* — so stdout is exactly the one document and a
+driver (the Mac app's guided flow, X-107) can show the owner where the flow
+is while it waits for the result.
 
 **Doctor's `remote` kind.** None is one `ok` row — *"Remote access: none.
 Your phone can't reach this Mac. Choose a way in Settings ▸ Remote Access."*

@@ -1,6 +1,6 @@
 // The first-launch wizard: navigation, and the reason for every choice.
 //
-// It replaces the scaffold's "First run" tab group, which was a list of seven
+// It replaces the scaffold's "First run" tab group, which was a list of
 // screens you could click in any order — fine for a developer checking that a
 // verb ran, wrong for the one moment the app has to explain itself. This is a
 // sheet: one step at a time, Back · Continue · Skip, and every choice presented
@@ -241,6 +241,11 @@ public final class WizardModel {
     /// the same door, opened for a browser or a phone.
     public func isSatisfied(_ step: FirstRunStep) -> Bool {
         switch step {
+        case .remoteAccess:
+            // None preselected, and continuing with None satisfies the step
+            // (§2.23 step 1): an install that exposes nothing is correct. A
+            // provider satisfies it once `remote set … --yes` wrote the record.
+            return steps.remoteAccess.satisfiesStep
         case .door:
             if steps.consoleSignIn.signIn?.isSignedIn == true { return true }
             if case .enrolled = steps.passkey.phase { return true }
@@ -273,7 +278,7 @@ public final class WizardModel {
 
     public var isOnLastStep: Bool { current == FirstRunStep.allCases.last }
 
-    /// "Step 3 of 7" — sentence case, it is prose.
+    /// "Step 3 of 8" — sentence case, it is prose.
     public var progressLabel: String {
         "Step \(current.rawValue) of \(FirstRunStep.allCases.count)"
     }

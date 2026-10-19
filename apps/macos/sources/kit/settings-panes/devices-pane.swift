@@ -61,7 +61,7 @@ struct DevicesPaneBody: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(pane.devices) { device in
-                    DeviceRowView(device: device, clock: pane.clock, now: pane.now(), busy: pane.busy) { pane.proposeRemove(device) }
+                    DeviceRowView(device: device, clock: pane.clock, now: pane.now(), busy: pane.busy, stranded: device.strandedNote(configuredHosts: pane.configuredHosts)) { pane.proposeRemove(device) }
                     if device.id != pane.devices.last?.id {
                         Divider().overlay(p[.border])
                     }
@@ -111,6 +111,9 @@ struct DeviceRowView: View {
     let clock: ClockTime
     let now: Date
     let busy: Bool
+    /// *Added for old.example.com. Remove it and add this phone again.* — a
+    /// passkey whose host is no longer configured (plan §2.23, X-107).
+    var stranded: String? = nil
     let onRemove: () -> Void
 
     var body: some View {
@@ -133,6 +136,14 @@ struct DeviceRowView: View {
                 Text(device.sessionsLine)
                     .metistryText(.caption1, p, .textTertiary)
                     .monospacedDigit()
+                if let stranded {
+                    HStack(alignment: .firstTextBaseline, spacing: MetistrySpace.s1) {
+                        Image(systemName: CheckStatus.degraded.symbolName).foregroundStyle(p[.degraded]).accessibilityHidden(true)
+                        Text(stranded)
+                            .metistryText(.caption1, p, .degraded)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)

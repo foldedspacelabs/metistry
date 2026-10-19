@@ -2515,7 +2515,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-25.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-26": {
       "title": "Linear's sync reads in a stable order",
@@ -2529,7 +2529,7 @@
         "T4-26"
       ],
       "file": "docs/product/tickets/x/x-26.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-27": {
       "title": "The router-policy test has no wall-clock bound",
@@ -2541,7 +2541,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-27.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-28": {
       "title": "The chat viewport test is deterministic",
@@ -2553,7 +2553,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-28.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-29": {
       "title": "Main's Mac fixtures match the recorder",
@@ -2820,7 +2820,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-48.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-49": {
       "title": "The brain's eager surface has headroom",
@@ -3176,7 +3176,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-74.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-80": {
       "title": "`metistry up` mints the recorder's control token",
@@ -3190,7 +3190,7 @@
         "T8-5"
       ],
       "file": "docs/product/tickets/x/x-80.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-81": {
       "title": "Kept recordings have a list route",
@@ -3219,7 +3219,7 @@
         "T8-7"
       ],
       "file": "docs/product/tickets/x/x-82.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-83": {
       "title": "The activity feed's capture subject reads the title only",
@@ -3233,7 +3233,7 @@
         "T8-6"
       ],
       "file": "docs/product/tickets/x/x-83.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-84": {
       "title": "`POST /message` carries a session-turn marker",
@@ -3248,7 +3248,7 @@
         "T6-15"
       ],
       "file": "docs/product/tickets/x/x-84.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-85": {
       "title": "The targets shim comes out",
@@ -3262,7 +3262,7 @@
         "T4-11"
       ],
       "file": "docs/product/tickets/x/x-85.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-86": {
       "title": "The Mac's Secrets pane hides Grant for an owner-door secret",
@@ -3277,7 +3277,7 @@
         "T6-14"
       ],
       "file": "docs/product/tickets/x/x-86.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-87": {
       "title": "The calendar collectors export `check()`",
@@ -3291,7 +3291,7 @@
         "T4-14"
       ],
       "file": "docs/product/tickets/x/x-87.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-88": {
       "title": "The workspace test script isolates each package's database",
@@ -3303,7 +3303,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-88.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-89": {
       "title": "A request raised while the console is down still pushes",
@@ -3331,7 +3331,7 @@
         "T6-16"
       ],
       "file": "docs/product/tickets/x/x-90.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-91": {
       "title": "The three-pointers test tolerates the device-local keys",
@@ -3346,7 +3346,7 @@
         "T6-15"
       ],
       "file": "docs/product/tickets/x/x-91.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-92": {
       "title": "Dispatch's `REPO_RE` has a misuse test",
@@ -3360,7 +3360,7 @@
         "T4-11"
       ],
       "file": "docs/product/tickets/x/x-92.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-93": {
       "title": "`socketDestination` keeps IMAP's port",
@@ -3374,7 +3374,7 @@
         "T4-15"
       ],
       "file": "docs/product/tickets/x/x-93.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-94": {
       "title": "The wizard's copy templates the configured name",
@@ -3388,7 +3388,7 @@
         "T6-12"
       ],
       "file": "docs/product/tickets/x/x-94.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-95": {
       "title": "The Mac's loopback set matches core's",
@@ -3402,7 +3402,7 @@
         "T6-13a"
       ],
       "file": "docs/product/tickets/x/x-95.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-96": {
       "title": "A connection's detail says who uses it and when it was checked",
@@ -3416,7 +3416,7 @@
         "T6-13a"
       ],
       "file": "docs/product/tickets/x/x-96.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-97": {
       "title": "Variables: when it was set, the preview an agent sees, and a key's expiry",
@@ -3445,7 +3445,7 @@
         "T6-5"
       ],
       "file": "docs/product/tickets/x/x-98.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-99": {
       "title": "The phone's writable rows have controls",
@@ -3459,7 +3459,7 @@
         "T7-6"
       ],
       "file": "docs/product/tickets/x/x-99.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-100": {
       "title": "The \"held to core\" Swift tests cannot drift",
@@ -3474,7 +3474,7 @@
         "T6-5"
       ],
       "file": "docs/product/tickets/x/x-100.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-101": {
       "title": "Bare `metistry doctor` resolves the product directory it runs from",
@@ -3486,7 +3486,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-101.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-102": {
       "title": "The recorder leaves no fixed-id rows behind",
@@ -3500,7 +3500,7 @@
         "X-31"
       ],
       "file": "docs/product/tickets/x/x-102.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-75": {
       "title": "`metistry enroll` — an enrolment code minted on this Mac",
@@ -3512,7 +3512,7 @@
       "effort": "high",
       "deps": [],
       "file": "docs/product/tickets/x/x-75.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-76": {
       "title": "Removing a device revokes its passkey",
@@ -3524,7 +3524,7 @@
       "effort": "high",
       "deps": [],
       "file": "docs/product/tickets/x/x-76.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-77": {
       "title": "Settings ▸ Devices and the Add a Phone sheet",
@@ -3539,7 +3539,7 @@
         "X-76"
       ],
       "file": "docs/product/tickets/x/x-77.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-78": {
       "title": "The phone's half: enrol, install, sign in",
@@ -3551,7 +3551,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-78.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-79": {
       "title": "The phone guide, and the website's copy re-checked",
@@ -3568,7 +3568,7 @@
         "X-78"
       ],
       "file": "docs/product/tickets/x/x-79.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-103": {
       "title": "The console's proxy listener — the local owner token never crosses a tunnel",
@@ -3580,7 +3580,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-103.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-104": {
       "title": "Passkeys per origin — the rpID follows the request",
@@ -3592,7 +3592,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-104.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-105": {
       "title": "`metistry remote` — the record, the adapter interface, and None",
@@ -3607,7 +3607,7 @@
         "X-104"
       ],
       "file": "docs/product/tickets/x/x-105.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-106": {
       "title": "The Tailscale adapter — Funnel by default, tailnet as the alternative",
@@ -3623,7 +3623,7 @@
         "X-112"
       ],
       "file": "docs/product/tickets/x/x-106.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-107": {
       "title": "Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access",
@@ -3640,7 +3640,7 @@
         "X-77"
       ],
       "file": "docs/product/tickets/x/x-107.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-111": {
       "title": "A console on the internet — rate limits and headers on the proxy listener",
@@ -3654,7 +3654,7 @@
         "X-103"
       ],
       "file": "docs/product/tickets/x/x-111.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-108": {
       "title": "The Cloudflare Tunnel adapter",
@@ -3714,7 +3714,7 @@
         "X-105"
       ],
       "file": "docs/product/tickets/x/x-112.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-113": {
       "title": "The zrok adapter",
@@ -3746,7 +3746,7 @@
         "X-103"
       ],
       "file": "docs/product/tickets/x/x-114.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-115": {
       "title": "Metistry Relay data plane — the PoC, then the instance",
@@ -3850,7 +3850,7 @@
         "T9-3"
       ],
       "file": "docs/product/tickets/x/x-121.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-122": {
       "title": "Doctor waits out a job it has just started",
@@ -3862,7 +3862,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-122.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-123": {
       "title": "`metistry doctor` repairs what it finds",
@@ -3877,7 +3877,7 @@
         "X-48"
       ],
       "file": "docs/product/tickets/x/x-123.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-124": {
       "title": "`.env` is derived, never hand-edited",
@@ -3889,7 +3889,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-124.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-125": {
       "title": "Fix All in the Status window",
@@ -3903,7 +3903,7 @@
         "X-123"
       ],
       "file": "docs/product/tickets/x/x-125.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-126": {
       "title": "The policy mirror's rename-revoke test is deterministic",
@@ -3915,7 +3915,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-126.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-127": {
       "title": "Every terminal read behaves like `secrets set`",
@@ -3927,7 +3927,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-127.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-128": {
       "title": "A session-start briefing: handles and the owner's text",
@@ -3943,7 +3943,7 @@
         "X-133"
       ],
       "file": "docs/product/tickets/x/x-128.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-129": {
       "title": "Plugins deliver the briefing at session start, on by default",
@@ -3957,7 +3957,7 @@
         "X-128"
       ],
       "file": "docs/product/tickets/x/x-129.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-130": {
       "title": "A repository maps to a project page",
@@ -3969,7 +3969,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-130.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-131": {
       "title": "Last time in this repository",
@@ -3983,7 +3983,7 @@
         "X-130"
       ],
       "file": "docs/product/tickets/x/x-131.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-132": {
       "title": "`connections_call` folds a large answer",
@@ -3995,7 +3995,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-132.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-133": {
       "title": "`connect claude-code` reads as well as writes",
@@ -4007,7 +4007,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-133.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-134": {
       "title": "`connect --remove`, and a reconnect after a revoke",

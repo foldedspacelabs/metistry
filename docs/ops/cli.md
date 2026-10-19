@@ -311,7 +311,9 @@ and the row itself (`docs/ops/console-api.md`'s `conflictBody`) survive the
 trip rather than being dropped with the envelope; plain mode is unchanged,
 the body stays off stdout on a failure. A body comes from a file
 (`--body @request.json`) or stdin (`--body -`, so a value never sits in
-shell history); GET needs neither. It refuses a non-loopback
+shell history; in a terminal with nothing piped in it first says, on
+stderr, that the input ends with Ctrl-D, and what you type is shown — a
+body is not a secret); GET needs neither. It refuses a non-loopback
 `METISTRY_CONSOLE_URL`/`METISTRY_URL` outright — the local owner token is
 minted for this machine only, and this verb will not carry it anywhere
 else. `docs/ops/console-api.md` is the routes it can call; the app and
@@ -620,7 +622,10 @@ The instance repo comes from `--instance`, else `METISTRY_INSTANCE_DIR`
      `METISTRY_GITHUB_OAUTH_CLIENT_ID` — see below.
    - `--auth token` reads a PAT (scope `repo`) from **stdin**, so it is
      never in argv, never in shell history:
-     `pbpaste | metistry connect-repo <url> --auth token`.
+     `pbpaste | metistry connect-repo <url> --auth token`. Run in a
+     terminal with nothing piped in, it prompts on stderr and reads one
+     line with the echo off — `secrets set`'s reader, so a typed token is
+     never shown; piped, it is read to EOF as before.
    - `--auth ssh` writes no credential; `ls-remote` in step 3 is the
      check that your key or agent works.
 3. **`ls-remote origin`** — reachability, proven rather than assumed.
@@ -1104,7 +1109,8 @@ alone**. The assistant can never write it (A4), and the console only reads it
 definition editor is a client of it.
 
 - It edits what the editor edits: `--prompt-file` (the operating prompt; `-`
-  reads stdin), `--model` and `--effort` (one dropdown, C128), and
+  reads stdin — in a terminal it says on stderr that the input ends with
+  Ctrl-D, and keeps the echo), `--model` and `--effort` (one dropdown, C128), and
   `--description`. **Every other line of the file is kept as it was**, comments
   included — `uses`, `scope`, `projects` and `autonomy` are what the crew may
   reach, and widening an actor is an edit to the file by hand, never a flag.
@@ -1630,7 +1636,10 @@ and values with a newline are refused. It is never printed, never written to
 `secrets.yaml`, never in a result (`--json` prints names).
 
 Piped stdin is read whole, to EOF, exactly as every other verb above reads
-it. Run directly in a terminal with nothing piped in, stdin never reaches
+it. (Every other terminal read follows the same rule: `connect-repo --auth
+token` takes this hidden line; `console call --body -` and `agents define
+--prompt-file -` are text, not secrets, so they keep the echo and say on
+stderr that Ctrl-D ends them.) Run directly in a terminal with nothing piped in, stdin never reaches
 EOF on its own — so `set`/`replace` instead prompt on stderr (`Paste the
 value for <name> and press Enter (input is hidden):`) and read one line with
 the terminal's echo off, the same way a password prompt does: backspace

@@ -1,4 +1,4 @@
--- 0042_project_repos_and_sessions — a git remote → the project page the
+-- 0043_project_repos_and_sessions — a git remote → the project page the
 -- owner wrote for it, and the handles of every captured coding session
 -- (research docs/research/2026-10-04-context-mode-review.md §6, tickets
 -- CM-3 and CM-4; owner rulings of 2026-10-04).

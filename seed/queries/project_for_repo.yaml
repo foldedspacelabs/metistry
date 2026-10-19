@@ -7,7 +7,7 @@
 # between them is the page's own `repos:` frontmatter — one remote or a
 # list — which the owner writes in Obsidian and git carries (invariant 1).
 # The reconciler indexes it into `project_repos` (db/migrations/
-# 0042_project_repos_and_sessions.sql, apps/reconciler/src/indexer.ts
+# 0043_project_repos_and_sessions.sql, apps/reconciler/src/indexer.ts
 # `projectRepoPairs`), and only from a page the user owns: the fold creates
 # pages under `Projects/` under its own `source:`, and a page an agent wrote
 # never makes a repository resolve to it.

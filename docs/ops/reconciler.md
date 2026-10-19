@@ -93,7 +93,7 @@ they were. `POST /reconcile` returns their sizes as `meeting_refs` and
 ## Project repos and captured sessions
 
 Two more maps, derived on the same terms (migration
-`0042_project_repos_and_sessions.sql`; research 2026-10-04 §6, CM-3 and CM-4):
+`0043_project_repos_and_sessions.sql`; research 2026-10-04 §6, CM-3 and CM-4):
 
 | Table | From | Which files |
 | --- | --- | --- |

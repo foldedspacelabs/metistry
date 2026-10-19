@@ -8,7 +8,7 @@
 # them back. This is the return path, as HANDLES: date, tool, repo, branch,
 # turns, the files touched, and the owner's first prompt clipped — read
 # from `vault_sessions`, which the reconciler derives from the notes
-# (db/migrations/0042_project_repos_and_sessions.sql, apps/reconciler/src/
+# (db/migrations/0043_project_repos_and_sessions.sql, apps/reconciler/src/
 # indexer.ts `syncSessions`).
 #
 # **Never the agent's last reply.** The note's `## Last response` is the

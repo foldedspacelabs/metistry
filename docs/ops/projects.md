@@ -68,7 +68,7 @@ scheme and any `user@` credential dropped, an SSH `user@host:path` folded
 to `host/path`, a trailing `.git` removed, the host lowercased and the path
 kept as written (core's `normalizeRepoRemote`, the Context Mode Engine's
 shape) — and indexes it into `project_repos (remote, path)`, a derived table
-rebuilt whole every cycle (`db/migrations/0042_project_repos_and_sessions.sql`).
+rebuilt whole every cycle (`db/migrations/0043_project_repos_and_sessions.sql`).
 
 **Only your page counts.** `Projects/` is not a user-only directory — the
 fold creates entity pages there under its own `source:` — so the walk reads

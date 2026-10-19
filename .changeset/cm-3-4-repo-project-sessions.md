@@ -18,4 +18,4 @@ note under `Inbox/` into the derived `vault_sessions` table (core's new
 prompt clipped — never the agent's `## Last response`, which has no column),
 and `recent_sessions {repo, days}` serves a repository's sessions back once
 the knowledge fold has read them, never one an agent credential captured.
-Migration `0042_project_repos_and_sessions.sql`, additive and derived in full.
+Migration `0043_project_repos_and_sessions.sql`, additive and derived in full.

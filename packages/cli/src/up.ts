@@ -46,6 +46,7 @@ import {
 import { droppedOriginsNote } from "./remote/rows.js";
 import { assistantEnv, consoleEnv, consoleOrigins, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
+import type { StartedAt } from "./doctor-grace.js";
 import type { Exec } from "./exec.js";
 import {
   awaitBootout,
@@ -1162,10 +1163,12 @@ export function runningNote(shape: Deployment["shape"]): string {
 }
 
 /** The closing doctor: printed in a dry run, executed otherwise; its verdict is the exit code. */
-export async function closingDoctor(r: StepRunner, productDir: string, deps: Partial<DoctorDeps> | undefined, doctorFn: (d: DoctorDeps) => Promise<DoctorReport>): Promise<number> {
+export async function closingDoctor(r: StepRunner, productDir: string, deps: Partial<DoctorDeps> | undefined, doctorFn: (d: DoctorDeps) => Promise<DoctorReport>, startedAt?: StartedAt): Promise<number> {
   r.section("doctor");
   if (!r.action("metistry doctor")) return 0;
-  const report = await doctorFn({ productDir, exec: r.exec, env: r.env, ...deps });
+  // the jobs this run has just bootstrapped or kickstarted: doctor waits out
+  // their start rather than failing a socket that is not there yet (X-122)
+  const report = await doctorFn({ productDir, exec: r.exec, env: r.env, ...(startedAt ? { startedAt } : {}), ...deps });
   r.out(renderTable(report));
   return report.ok ? 0 : 1;
 }
@@ -1355,6 +1358,8 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   if (!engine.ok) r.note(engineAbsentNote(engine.why as string, engine.fix as string));
   let failure: StepFailed | undefined;
   let bootstrapped: string[] = [];
+  /** when each bootstrapped job was started (epoch ms), for the closing doctor */
+  const startedAt: Record<string, number> = {};
 
   try {
     if (opts.compose === false) {
@@ -1413,6 +1418,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       await planConfinement(r, opts.productDir, values, opts.exists ?? existsSync);
       r.section("launchd");
       bootstrapped = await installLaunchd(r, runDir, le, deployment, values, opts.exists ?? existsSync);
+      for (const l of bootstrapped) startedAt[l] = Date.now();
       if (pg) {
         r.section("database");
         await finishPostgres(r, pg);
@@ -1446,7 +1452,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   if (opts.within) return { code: failure ? failure.code || 1 : 0, source, commands: r.commands, timings: [], elapsedMs: r.elapsedMs(), bootstrapped };
 
   // doctor runs even after a failed step — its table is the diagnosis; the failure keeps the exit code
-  const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
+  const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor, startedAt);
   const timings = r.timings();
   r.section("timings");
   r.note(renderTimings(timings, r.elapsedMs()));

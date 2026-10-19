@@ -116,6 +116,67 @@ describe("doctor: schedules", () => {
     expect(r.gh?.action).toEqual({ kind: "run_verb", command: ["metistry", "logs", "console"], label: "View console logs" });
   });
 
+  // X-122: the console's runner does nothing before its first tick, so a
+  // console started moments ago has not been given the chance to run what is
+  // owed — the sixteen false rows after `metistry update` on 2026-10-04.
+  describe("a console that has only just started (X-122)", () => {
+    const overdue: Seed[] = [{ component: "gh", kind: "collector_run", at: ago(185), ok: true }];
+    const withRunner = async (uptimeSec: number | undefined, env: NodeJS.ProcessEnv = {}) =>
+      byName(await scheduleRows(seededDb(overdue), await checkout(), env, NOW, async () => uptimeSec));
+
+    it("an overdue row is pending, with why, while the runner is inside its first tick plus the grace", async () => {
+      const r = await withRunner(30);
+      expect(r.gh?.status).toBe("degraded"); // not failed: doctor still exits 0
+      expect(r.gh?.remediation).toMatch(/^pending: gh last ran 185m ago/);
+      expect(r.gh?.remediation).toContain("started 30s ago");
+      expect(r.gh?.meta).toMatchObject({ pending: true, runner_uptime_sec: 30, runner_grace_sec: 90 });
+      expect(r.gh?.action).toBeUndefined();
+    });
+
+    it("the same row past the grace fails as it always did", async () => {
+      const r = await withRunner(91);
+      expect(r.gh?.status).toBe("failed");
+      expect(r.gh?.remediation).toContain("over 2×");
+      expect(r.gh?.meta).not.toHaveProperty("pending");
+    });
+
+    it("an uptime nobody can read grants nothing — a console of unknown age is not given the benefit of the doubt", async () => {
+      expect((await withRunner(undefined)).gh?.status).toBe("failed");
+      expect(byName(await scheduleRows(seededDb(overdue), await checkout(), {}, NOW)).gh?.status).toBe("failed");
+    });
+
+    it("the grace is configuration: a runner tick of 5 minutes widens it", async () => {
+      expect((await withRunner(200, { METISTRY_RUNNER_TICK_MS: "300000" })).gh?.status).toBe("degraded");
+      expect((await withRunner(200, {})).gh?.status).toBe("failed");
+    });
+
+    it("does not look the uptime up when nothing is overdue", async () => {
+      let asked = 0;
+      await scheduleRows(seededDb([{ component: "gh", kind: "collector_run", at: ago(10), ok: true }]), await checkout(), {}, NOW, async () => {
+        asked++;
+        return 1;
+      });
+      expect(asked).toBe(0);
+    });
+
+    it("a failure the runner itself recorded is not graced: only the overdue reading waits on a tick", async () => {
+      const r = byName(
+        await scheduleRows(
+          seededDb([
+            { component: "gh", kind: "collector_run", at: ago(30), ok: true },
+            { component: "gh", kind: "runner", tool: "skipped_streak", at: ago(5), ok: false, error: "5 failures in a row", meta: { streak: 5, max_streak: 5 } },
+          ]),
+          await checkout(),
+          {},
+          NOW,
+          async () => 5,
+        ),
+      );
+      expect(r.gh?.status).toBe("failed");
+      expect(r.gh?.remediation).toContain("stopped running gh");
+    });
+  });
+
   it("an open streak below the limit degrades and names the limit's variable", async () => {
     const r = await rowsFor([
       { component: "gh", kind: "collector_run", at: ago(200), ok: true },

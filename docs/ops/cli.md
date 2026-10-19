@@ -2426,6 +2426,35 @@ divided down to match. Best-effort throughout, like every add-on fact in
 this report: an unparseable `Status` or a `ps` that fails reports no
 `uptime_sec` rather than failing the row.
 
+**A job that has just started is given time (X-122).** A check that depends on
+something kickstarted moments ago is asked again, or read as *pending*, before
+it is allowed to fail. Two runs failed a healthy install on 2026-10-04 by racing
+exactly this: after `metistry update`, sixteen schedule rows said the console's
+runner was not running them, because the console had come up seconds earlier
+and its scheduler had not ticked; and at `up`, the recorder helper's socket was
+not there one second after bootstrap.
+
+- **A bridge, the console or the brain** whose probe fails while its job (or,
+  for `live-capture`, its recorder helper, or the supervisor that restarted it)
+  started less than the start grace ago is probed again every second until it
+  answers or the grace is spent; then the row is whatever the last probe said.
+  The grace is `METISTRY_DOCTOR_START_GRACE_SEC` (default `30`; `0` turns the
+  waiting off), and it is also the most one doctor run waits on any row.
+- **A schedule row** whose only fault is "overdue" reads **pending** (status
+  `degraded`, so the run still exits 0; `meta.pending: true`, with the runner's
+  uptime) while the console's runner has been up for less than its first tick
+  plus the start grace — `METISTRY_RUNNER_TICK_MS` (the console's own setting,
+  default 60 s) + `METISTRY_DOCTOR_START_GRACE_SEC`. Past that it fails as it
+  always did. A failure the runner itself recorded (a stopped streak, a blocked
+  config) is never graced: only the clock reading waits on a tick.
+- **What counts as "started" is evidence**, never a guess: the supervisor's
+  uptime for a child, `ps -o etimes=` for a launchd job, `docker compose ps`
+  for a container, and the start times `up` and `update` hand over for the jobs
+  they have just bootstrapped or kickstarted (in-process, or to `update`'s child
+  doctor in `METISTRY_DOCTOR_STARTED=label=epochMs,…`). A job whose age nothing
+  can tell is **not** graced, and neither is one that started before the grace:
+  it is reported failed on the first answer, with no second probe.
+
 **`instance layout`** is its own row, reported as `flat` or `legacy`:
 `flat` when the vault root holds the vault and `.metistry/` holds
 everything else (the 2026-09-17 layout, `docs/ops/instance-layout.md`),

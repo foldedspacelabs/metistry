@@ -240,6 +240,21 @@ jobs:
         with:
           path: .runtime-build/cache
           key: remote-packs-darwin-arm64-${{ hashFiles('ops/release/runtime-versions.env') }}
+      # The macos-14 image ships no `go`, and tailscaled is built from source.
+      # The version is read from the ONE pin (runtime-versions.env) so a bump
+      # there moves this too; build-remote-packs.sh also sets GOTOOLCHAIN to it.
+      - name: read the pinned Go toolchain (TAILSCALE_GO_TOOLCHAIN in ops/release/runtime-versions.env)
+        id: gover
+        run: |
+          set -euo pipefail
+          tc="$(sed -n 's/^TAILSCALE_GO_TOOLCHAIN=//p' ops/release/runtime-versions.env)"
+          case "$tc" in go[0-9]*) ;; *) echo "::error::TAILSCALE_GO_TOOLCHAIN is '$tc', expected goX.Y.Z"; exit 1 ;; esac
+          echo "version=${tc#go}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.gover.outputs.version }}
+          check-latest: false
+          cache: false
       - uses: ./.github/actions/apple-keychain
         with:
           certificate-p12: ${{ secrets.APPLE_CERTIFICATE_P12 }}

@@ -570,9 +570,9 @@ like — `metistry connect-repo <url>`, the next section; the reconciler
 pushes on the vault sync policy (`metistry vault settings`, below) and never blocks on it. Point Obsidian
 at `<dir>` itself — the instance directory is the vault root.
 
-`init` finds `seed/` in the checkout it runs from (`--product-dir`,
-`METISTRY_PRODUCT_DIR`, the workspace it is installed in, or the current
-directory's enclosing checkout — in that order) and otherwise uses the copy
+`init` finds `seed/` in the product it runs from (`--product-dir`,
+`METISTRY_PRODUCT_DIR`, the release install it runs from, the workspace it is
+installed in, or the current directory's enclosing checkout — in that order) and otherwise uses the copy
 bundled in the npm package, so a stranger's `npx … init` works without a
 checkout.
 
@@ -2046,8 +2046,26 @@ fail the run.
 
 ## Reading a doctor report
 
+The first line names the product doctor read, so a bare `metistry doctor`
+never leaves you guessing which one that was:
+
+- `release 0.5.0 (read from /…/product/current)` — a release install. A bare
+  `metistry doctor` (no `--product-dir`, no `METISTRY_PRODUCT_DIR`) run from an
+  installed CLI resolves the **install it runs from** — the product dir
+  holding `releases/` and `current` — and reads `current`, even when the
+  current directory is inside a development checkout or the install sits
+  inside one (X-101). Given the install's root (what `--product-dir`,
+  `METISTRY_PRODUCT_DIR` and the shim all name), doctor reads its `current`
+  the same way; given `releases/<version>` or `current` itself, it reads that.
+- `checkout` — anything else: a workspace install, or a checkout passed with
+  `--product-dir`.
+
+`doctor --json` carries the same as `product`: `{ kind: "release" | "checkout",
+version?, install_dir? (a release's product dir), read_dir }`. `product_dir` is
+still the directory doctor was given.
+
 ```
-/Users/you/src/metistry — shape launchd, 2026-09-19T09:14:02.118Z
+/Users/you/src/metistry — checkout, shape launchd, 2026-09-19T09:14:02.118Z
 
 bridge
   ✓ apple-fm  ok       920ms

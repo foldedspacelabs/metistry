@@ -13,6 +13,7 @@ import {
   describeConnectionDetail,
   describeConnectionTypes,
   describeConnections,
+  forgetCheck,
   loadInstanceCatalog,
   readCheckStamps,
   type ConnectionCatalog,
@@ -146,6 +147,12 @@ describe("describeConnections — names, never values", () => {
       const stamps = await readCheckStamps(instance);
       expect([...stamps.keys()].sort()).toEqual(["fake", "second"]);
       expect(stamps.get("fake")!.status).toBe("ok");
+      // a connection that is gone leaves no stamp behind for a same-named one to inherit
+      const onlyFake = { ...catalogOf([stdio("fake", {})]), baseDir: instance };
+      await checkConnection(poolFor(onlyFake), onlyFake, "fake");
+      expect([...(await readCheckStamps(instance)).keys()]).toEqual(["fake"]);
+      await forgetCheck(instance, "fake");
+      expect((await readCheckStamps(instance)).size).toBe(0);
     });
 
     it("a check of a name that is no connection stamps nothing; a garbled stamp file reads as never checked", async () => {

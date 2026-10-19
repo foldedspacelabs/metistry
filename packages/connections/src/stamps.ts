@@ -64,18 +64,40 @@ export async function readCheckStamps(instanceDir: string | undefined): Promise<
   return out;
 }
 
+/** Drop `name`'s stamp (its connection was removed). Never throws. */
+export function forgetCheck(instanceDir: string | undefined, name: string): Promise<void> {
+  if (!instanceDir) return Promise.resolve();
+  const run = queue.then(async () => {
+    try {
+      const all = Object.fromEntries(await readCheckStamps(instanceDir));
+      if (!(name in all)) return;
+      delete all[name];
+      const file = pathFor(instanceDir);
+      const tmp = `${file}.${process.pid}.tmp`;
+      await writeFile(tmp, `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 });
+      await rename(tmp, file);
+    } catch {
+      // nothing to forget, or nowhere to write
+    }
+  });
+  queue = run;
+  return run;
+}
+
 let queue: Promise<unknown> = Promise.resolve();
 
 /**
  * Record that `name` was checked now. Never throws: a state directory that
  * cannot be written is a check that goes unrecorded, not a check that fails.
  */
-export function stampCheck(instanceDir: string | undefined, name: string, status: CheckVerdict, at: Date = new Date()): Promise<void> {
+export function stampCheck(instanceDir: string | undefined, name: string, status: CheckVerdict, at: Date = new Date(), known?: readonly string[]): Promise<void> {
   if (!instanceDir) return Promise.resolve();
   const run = queue.then(async () => {
     try {
       const file = pathFor(instanceDir);
       const all = Object.fromEntries(await readCheckStamps(instanceDir));
+      // a connection that is gone leaves no stamp for a same-named one added later to inherit
+      if (known) for (const n of Object.keys(all)) if (!known.includes(n)) delete all[n];
       all[name] = { at: at.toISOString(), status };
       await mkdir(dirname(file), { recursive: true });
       const tmp = `${file}.${process.pid}.tmp`;

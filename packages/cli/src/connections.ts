@@ -76,6 +76,7 @@ import {
   checkConnection,
   connectionGrantee,
   describeConnectionDetail,
+  forgetCheck,
   describeConnectionTypes,
   describeConnections,
   generatedToolsFor,
@@ -967,6 +968,7 @@ export async function connectionsRemove(name: string | undefined, opts: Connecti
     fetchFn: opts.fetchFn ?? fetch,
     instanceDir: opts.instanceDir,
   });
+  if (opts.dryRun !== true) await forgetCheck(opts.instanceDir, e.name);
   return { name: e.name, referred_by: referredBy, delivery };
 }
 

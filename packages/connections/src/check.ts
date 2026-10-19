@@ -180,6 +180,6 @@ export async function checkConnection(pool: ConnectionPool, catalog: ConnectionC
     secrets: [...used].sort(),
     meta: { status: out.status, ...(out.meta ?? {}) },
   });
-  if (entry) await stampCheck(catalog.baseDir, name, out.status);
+  if (entry) await stampCheck(catalog.baseDir, name, out.status, new Date(), catalog.entries.map((e) => e.name));
   return out;
 }

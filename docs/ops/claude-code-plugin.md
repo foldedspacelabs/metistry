@@ -100,8 +100,11 @@ once the knowledge fold has read it, and a session an agent credential
 captured is never served as yours (`docs/ops/reconciler.md`, "Project repos
 and captured sessions"). The query is `expose: route` — your first prompt
 and your files are owner text and vault paths — so no agent reaches it
-through `queries_run`; nothing reads it at session start yet, and the
-consumer will be CM-1/CM-2's briefing under the caller's grant.
+through `queries_run`. Its consumer is the session-start briefing, `GET
+/api/briefing` (X-128, `docs/ops/client-api.md`): handles plus the owner's
+own text, under the caller's grant, on by default for every agent with a
+read grant and opt-out per agent (`briefing: false` in its grants). The
+plugin's SessionStart hook is what calls it (§5).
 
 **Who is handed what (Context Mode Q3, ruled 2026-10-04).** A session the
 fold has read goes to any agent whose grant allows it. A session still
@@ -154,12 +157,70 @@ The summariser exists twice on purpose: the plugin ships as dependency-free
 through both and fails the build the moment they disagree — so edit
 `scripts/lib.mjs` and `packages/core/src/session-summary.ts` together.
 
-## 5. Failure modes
+## 5. The session-start briefing (X-129)
+
+The plugin's `SessionStart` hook hands each new session what the instance
+already knows about the project it was opened in: the project page for the
+checkout, its open tasks, the owner's recent sessions there and the evening
+folds that name it. The console assembles it (`GET /api/briefing`,
+`docs/ops/client-api.md`, X-128) as handles plus the owner's own text, under
+this agent's grant, with no model; the hook only asks and injects.
+
+**On by default; opt out per agent.** Every agent with a read grant is served
+(the owner's ruling of 2026-10-04). To opt this agent out:
+
+```sh
+metistry connect claude-code --briefing off     # --briefing on takes it back
+```
+
+The opt-out is `briefing: false` in the agent's grants **on the console**, so an
+opted-out agent is answered the empty briefing and the hook injects nothing —
+the plugin could be edited or stale and still not read what was withheld.
+`METISTRY_BRIEFING=off` in a profile's environment silences the hook for that
+profile alone, without a request. A new agent has no read grant until
+`--areas` widens it, and is served nothing until then.
+
+**What the hook does**, in `plugins/claude-code/scripts/session-start.mjs`:
+
+1. Runs on `SessionStart` with source `startup` or `clear` (a fresh context).
+   A `resume` already holds its briefing in the transcript and a `compact`
+   keeps its summary, so neither asks.
+2. Claims the session: an exclusive marker file under the system temp
+   directory, named by a hash of the session id, so a second run for the same
+   session — a re-fired hook, two panes racing — exits silently. A failed fetch
+   spends the claim too: there is no retry mid-session, and the console is
+   asked **once** (the cached prompt prefix is never churned).
+3. Sends `GET {METISTRY_URL}/api/briefing?repo=<checkout basename>&remote=<origin>`
+   with the agent bearer in the `Authorization` header — from
+   `METISTRY_AGENT_TOKEN_CLAUDE_CODE`, else `METISTRY_OWNER_TOKEN` (which
+   `connect`'s printed lines set to the same agent bearer; a real owner token
+   is refused by the console, and the hook injects nothing). The remote has
+   any `user:token@` stripped before it is sent, redirects are not followed,
+   and the fetch is capped at 5 s.
+4. Prints the briefing's `text` as the hook's `additionalContext`. An empty
+   briefing (opted out, no read grant, nothing known) prints nothing.
+
+A **git worktree** has the checkout name of its directory
+(`metistry-x-129`), not of the repository; the console's rule that `repo` must
+agree with `remote` then withholds the unfolded-sessions arm for it. Folded
+sessions, tasks and the project page — found by remote — are unaffected.
+
+Misuse tests (`plugins/claude-code/test/briefing.test.ts`) hold the hook to:
+an opted-out agent's session starts with nothing injected; a console that
+does not answer (refused, 401/403/500, not JSON, a redirect) injects nothing
+and exits 0; the bearer is in no argv, URL, stdout or stderr — even when the
+server echoes it back; the hook never delivers twice for one session id.
+OpenCode gets the same briefing through its system-prompt transform
+(`docs/ops/opencode.md`); Cursor and Devin do not deliver it yet.
+
+## 6. Failure modes
 
 - Missing env / unreachable instance: the **skill** exits 1 with a
   redacted one-line reason (Claude reports it; nothing retried). The
-  **hook** exits 0 with one stderr line — it never blocks or fails the
-  session.
+  **hooks** exit 0 with at most one stderr line — they never block or fail
+  the session. The briefing hook is silent when `METISTRY_URL` or the token
+  is not set (a profile that never ran `connect`), and logs
+  `session briefing skipped: …` for a console that is down or refuses.
 - The token never appears in output; both scripts pass every message
   through a redactor before printing.
 - `SessionEnd` hooks share a short time budget in Claude Code; the hook

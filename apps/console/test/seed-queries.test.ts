@@ -200,8 +200,12 @@ describe("seed queries", () => {
     // the owner touched and their own first prompt. Both are CM-1's
     // briefing route's to read under `canSeeUnder`, never a way past the
     // knowledge tiers for a `queries: true` grant.
+    // `briefing_page_handles` (CM-1, X-128) is vault paths and titles around
+    // the owner's project page — the briefing route's to read under the
+    // caller's grant, never a way to walk the link graph with `queries: true`.
     expect(routeBacked.sort()).toEqual([
       "board",
+      "briefing_page_handles",
       "calendar_event",
       "collector_health",
       "connection_calls",

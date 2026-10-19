@@ -9,7 +9,7 @@ the window is **not resizable** — it is a fixed size chosen for its content.
 
 ```
 Instance · Services · Compute · Updates
-ACCESS    Account · Devices · Connections · Secrets · Variables
+ACCESS    Account · Remote Access · Devices · Connections · Secrets · Variables
 CAPTURE   Live Capture · Sessions
 Keyboard · Advanced
 ```
@@ -22,6 +22,15 @@ Resources, which holds external servers.
 
 > **2026-09-25 (C114, C116, C117):** Resources is now **Connections**; **Secrets**
 > and **Variables** are panes of their own (screen 19).
+
+> **2026-10-19 (plan §2.23, X-107):** ACCESS gains **Remote Access**, before
+> Devices — the choice and mode, the origin, the provider's doctor rows with
+> when they were checked, **Change…** (the guided flow — choose, get the tool,
+> sign in, approve, expose, check, Add a Phone — as the window's sheet, the
+> same flow as the wizard's Remote Access step), **Test** (*answers from this
+> Mac*) and **Turn Off** (back to None after a confirm naming what the
+> provider's revoke undoes). Not drawn on a board; built from §2.23 with this
+> screen's pane grammar.
 
 > **2026-09-28 (plan §2.22, X-77):** ACCESS gains **Devices** — the devices
 > (a passkey each, with its sessions), **Remove** with its confirm naming the

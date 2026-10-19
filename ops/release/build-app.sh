@@ -194,6 +194,13 @@ if [ -n "$runtime_deps_src" ]; then
   place_pack "$runtime_deps_src" "$resources_metistry/runtime"
   [ -x "$resources_metistry/runtime/node/bin/node" ] \
     || die "no runtime/node/bin/node in $runtime_deps_src — the app would find no bundled CLI"
+  # A provider tool pack (runtime/remote/<tool>, plan §2.23 / X-112) is fetched
+  # on the owner's choice and NEVER ships in the DMG. The release asset holds
+  # none; a local `--runtime-deps <product>/runtime` directory might.
+  if [ -d "$resources_metistry/runtime/remote" ]; then
+    say "  dropping runtime/remote/ ($(ls "$resources_metistry/runtime/remote" | paste -sd' ' -)) — provider tool packs are fetched on choice, not embedded"
+    rm -rf "$resources_metistry/runtime/remote"
+  fi
 fi
 
 # ---------------------------------------------------------------- 3. sign

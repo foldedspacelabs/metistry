@@ -28,11 +28,13 @@ path.
   have landed. So have Work ▸ Board, with the card detail and a task's room
   ("Work ▸ Board" below), Work ▸ Projects and Work ▸ Artifacts.
 - **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
-  Runs `metistry doctor --json` and renders the rows to the design
+  Runs `metistry doctor --check --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
   grey and labelled "not configured", a summary line first ("26 ok · 1 degraded
   · 1 not configured") so the panel answers before it is read. The remediation
-  replaces the probe on any row that is not `ok`.
+  replaces the probe on any row that is not `ok`. **Fix All** (X-125,
+  "Status: Fix All" below) repairs what doctor can fix; a your-hand row says so
+  and has no button.
 - **Settings**, in the `Settings` scene: ⌘, and the app menu, seven panes —
   Instance, Services, Connections, **Compute**, Secrets, Updates, Advanced.
   Every value on them is one of three things and the pane says which: a pointer
@@ -110,7 +112,7 @@ path.
 
 | | why | what to do today |
 | --- | --- | --- |
-| **A native passkey** (wizard step 6) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none. **This stopped being step 6's problem on 2026-09-10**: this Mac needs no passkey at all | for a browser or a phone, **Add a Phone…** — the step's and Settings ▸ Devices' sheet ("Add a Phone" below): a QR and a link, the code minted on this Mac. Same `passkeys` row either way. The probe is under Settings → Advanced |
+| **A native passkey** (wizard step 7) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none. **This stopped being step 7's problem on 2026-09-10** (it was step 6 until X-107 put Remote Access before it): this Mac needs no passkey at all | for a browser or a phone, **Add a Phone…** — the step's and Settings ▸ Devices' sheet ("Add a Phone" below): a QR and a link, the code minted on this Mac. Same `passkeys` row either way. The probe is under Settings → Advanced |
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7), Work ▸ Projects (T6-8), Work ▸ Artifacts (T6-9) and Run detail (T6-10). Still to come: the rest of W3 (T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
 | **Attachments in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); live capture is the floating bar's ("The floating bar" below — the #253 hold was lifted 2026-09-30, Q28), and the attachment chip, ⌘⇧A and the window's drop target are not built | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
@@ -191,7 +193,7 @@ times: the Status panel's header (under the doctor summary, with `via`),
 Settings ▸ Account (the full card, with the remedy and the exact argument
 array), the menu bar (a second dot beside the `console` row, and the headline
 inside its submenu — a service being *up* and a service *knowing who you are*
-are different questions), and the wizard's step 6, which now leads with it.
+are different questions), and the wizard's door step, which now leads with it.
 
 **What the app can and cannot call.** It can ask who it is, and — since the
 data layer below — it can make any authenticated request the owner surface
@@ -873,7 +875,7 @@ does not — and should not — see.
 
 **The window (T6-11, screen-15).** Settings is its own window, never a pane
 in the main one: a sidebar in four groups — *Instance · Services · Compute ·
-Updates*, **Access** (*Account · Devices · Connections · Secrets · Variables*),
+Updates*, **Access** (*Account · Remote Access · Devices · Connections · Secrets · Variables*),
 **Capture** (*Live Capture · Sessions*), *Keyboard · Advanced* — at a fixed
 **840 × 600** (a 200 pt sidebar, a 640 pt pane; the owner ruled it is not
 resizable, and the scene takes the view's size). Every pane is a vertical
@@ -912,14 +914,14 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Instance | the assistant: name, mention, mark, instance ID | `metistry identity --json` |
 | Instance | Edit… (name, mention, mark) | `metistry identity set --name --mention --mark` (M10, T2-16), only the fields that changed, **confirmed with the exact command** — a protected write through the reconciler, shown in Activity as a `config_write` run |
 | Instance | this instance: path, Choose…, Open in Finder, Set Up Again… | the persisted pointers above; Set Up Again re-enters the wizard |
-| Instance | namespace and ports | `doctor --json` → the `deployment` row's `meta.namespace` (`state/ports.yaml`); none said is the default labels and ports, which the app does not copy |
+| Instance | namespace and ports | `doctor --check --json` → the `deployment` row's `meta.namespace` (`state/ports.yaml`); none said is the default labels and ports, which the app does not copy |
 | Instance | Recent (up to eight, Forget) | the persisted pointers above |
 | Instance | History: the sync policy in force, branch, ahead and behind, the last commit, the last push and pull, any conflict | `GET /api/vault/status` (T10-2), **read only** — the policy is `deployment.yaml`'s `vault:` block, changed with `metistry vault settings` (M18); the pane names the verb and offers no field |
 | Instance | History: Roll Back… (the last commit, one commit, or a day) | `POST /api/vault/rollback` (T10-6) — raises a Needs You request with the preview and changes nothing; the sheet names what Approve would undo. Reach `local`: drawn and sent only while `GET /api/whoami`'s `via` is `local_owner_token` (ruling 7) |
 | Instance | linked instances: name, origin, capabilities, last seen — *Not seen for 3 days* past a day | `GET /api/instances` |
 | Instance | Link an Instance…, Refresh / Check Now, Remove | `metistry instances add <origin>` / `refresh` / `remove <id>` (M11) — add and remove confirmed; `instances.yaml` is a protected path |
-| Services | Doctor: Run Doctor, each problem with its fix, checks passed | `doctor --json` — a failed or degraded row, or a not-configured one that carries an `action` (T4-21). The fix is the row's `action`: open Secrets, open System Settings, open a `logs` verb in the Log window, or run a §2.2 verb **after a confirmation naming it**; any other argv is shown with Copy |
-| Services | the supervisor (launchd or Docker Compose), Restart All, Stop All | `doctor --json` → the `supervisor` / `compose` row; `metistry restart\|stop --json` (M5), both confirmed |
+| Services | Doctor: Run Doctor, each problem with its fix, checks passed | `doctor --check --json` — a failed or degraded row, or a not-configured one that carries an `action` (T4-21). The fix is the row's `action`: open Secrets, open System Settings, open a `logs` verb in the Log window, or run a §2.2 verb **after a confirmation naming it**; any other argv is shown with Copy |
+| Services | the supervisor (launchd or Docker Compose), Restart All, Stop All | `doctor --check --json` → the `supervisor` / `compose` row; `metistry restart\|stop --json` (M5), both confirmed |
 | Services | one line per service: state, uptime or reason, port; Restart · Stop · Log | the `deployment` row's plan, matched to the `child:`, `compose:`, `launchd:…` and manifest rows by name — the worst state, `meta.uptime_sec`, the remediation verbatim; `metistry restart\|start <svc> --json` at once, `stop <svc>` confirmed, `logs <svc>` in the Log window |
 | Services | Start at Login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
 | Services | Run in the Background | `SMAppService.agent(plistName:)` on the plist sealed in this bundle — the install's ONE background item; macOS keeps this registration too (above) |
@@ -931,14 +933,18 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Compute | a provider's switch, gear, Remove | `metistry compute providers set\|remove <name> … --json` (M16), **confirmed with the exact command** |
 | Compute | Add Provider… (template, name, base URL, key) | `metistry compute providers add --from <t> [--name] [--base-url] --json`, **key on stdin** |
 | Compute | Install a Model…, Load, Unload (LM Studio only) | `metistry compute models install\|load\|unload <provider/model> --json` (M17), confirmed; disk and memory said first |
-| Compute | the local model servers and whether each is running | `doctor --json` → the `local:lmstudio\|ollama\|llamaserver\|applefm` rows |
+| Compute | the local model servers and whether each is running | `doctor --check --json` → the `local:lmstudio\|ollama\|llamaserver\|applefm` rows |
 | Compute | memory and disk | `ProcessInfo.physicalMemory` less a documented reserve, **labelled an estimate**; the home volume's own capacity figures |
 | Account | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
-| Account | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
-| Devices | the devices: a passkey each — label, added, last seen, *This device*, its sessions and whether notifications are on | `GET /api/devices` (§2.22, X-76), refetched on `run.finished` events of kind `auth` |
+| Account | instance repo status, HEAD, queue depth | `doctor --check --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
+| Remote Access | the choice and mode, the address, `METISTRY_ORIGIN`, the provider's doctor rows with *Checked <when>* | `metistry remote status --json` (M20, plan §2.23) through the management runner — the `remote:` record, the rendered origins, the chooser's rows and doctor's `remote` rows in one read ("Set Up Remote Access" below) |
+| Remote Access | Change… | the guided flow as this window's sheet — `remote set <provider> [flags] --json` for the preview, `… --yes --json` for the ceremony, `remote test --json` for the check; its Add a Phone… closes the sheet and opens Devices' |
+| Remote Access | Test | `metistry remote test --json` — step 6, said as *answers from this Mac* |
+| Remote Access | Turn Off | `metistry remote off --json` first (the preview: what the provider's revoke would undo, what is left for you at the provider, which phones stop signing in), shown as the confirm's costs (C136); only Turn Off runs `remote off --yes --json` |
+| Devices | the devices: a passkey each — label, added, last seen, *This device*, its sessions and whether notifications are on; *Added for old.example.com. Remove it and add this phone again.* on a passkey whose `rp_id` is not a configured origin's host (X-107) | `GET /api/devices` (§2.22, X-76), refetched on `run.finished` events of kind `auth`; the configured hosts are the Remote Access pane's one `remote status --json` read |
 | Devices | Remove | `POST /api/devices/:id/revoke` with the route's default scope (`{}`): the passkey and every session under it, their push subscriptions dropped — **confirmed, naming the device** (C136); a removed phone is set up again as a new device |
 | Devices | Sign Out Everywhere | the same door with `{scope: "sessions"}` once per signed-in device, the caller's own last; passkeys kept — confirmed, listing the devices. Off, with its reason, when no device is signed in |
-| Devices | Add a Phone… | the sheet ("Add a Phone" below): `metistry enroll --json` (M19) through the management runner, the QR drawn here; `metistry enroll --cancel <code_id>` when the sheet closes or Make a New Code is pressed. **No console route mints a code** |
+| Devices | Add a Phone… | the sheet ("Add a Phone" below): `metistry enroll --json` (M19) through the management runner, the QR drawn here; `metistry enroll --status <code_id> --json` for *Opened on your phone* (X-114); `metistry enroll --cancel <code_id>` when the sheet closes or Make a New Code is pressed. **No console route mints a code** |
 | Connections | the list: status, name and type, Used By (*Nobody yet*), *Key expired*, the offer shield | `GET /api/connections` and `GET /api/secrets` — names, never a value ("The Connections pane" above) |
 | Connections | one connection: how it is reached, its secrets with *Sent only to*, *What it sends*, the tools by group, Used By | `GET /api/connections/:name` and `GET /api/secrets`; *What it sends* is worked out from them as core's egress door would, and nothing is dialled |
 | Connections | a tool's mode, the offer switch, Test | `metistry connections policy <name> <tool> allow\|ask\|never`, `policy <name> --offer on\|off`, `connections test <name>` (M13), each **confirmed with the exact command** |
@@ -996,9 +1002,60 @@ and `SecretListing` in `packages/cli/src/secrets.ts` is camelCase (`inKeychain`,
 guessing one and blanking a pane over a convention. That is a reader-side
 tolerance, not a wire contract: the shape is the CLI's.
 
+## Set Up Remote Access
+
+The wizard's step 6, **Remote Access** (between Services and Door), and
+Settings ▸ Remote Access ▸ **Change…** present one flow
+(`sources/kit/remote-access-flow.swift` over `remote-access-model.swift`; plan
+§2.23, X-107) — the plan's seven steps: choose · get the tool · sign in ·
+approve · expose · check · Add a Phone. The app runs **three verbs and nothing
+else**, each through the management runner's M20 row:
+
+| the flow | runs | shows |
+| --- | --- | --- |
+| 1. Choose | `metistry remote status --json` | *How should your phone reach this Mac?* — the CLI's `choices` in the plan's order, **None** preselected, *Tailscale — Any browser (Funnel) — Recommended*; a provider whose adapter has not shipped is listed and says *Not yet available*. Tailscale adds its mode (*Any browser (Funnel)* · *Only my devices (tailnet)*) and *Use the Tailscale app already on this Mac* (`--use-app`). Each change of choice re-runs the preview below |
+| the preview | `metistry remote set <provider> [flags] --json` (no `--yes`: read-only on the CLI side — `detect`, and a dry `revoke` of the old provider) | whether the tool is here and signed in, the address, *Set-up would:* the CLI's `would_change` lines, and — for a switch — the CLI's `stranding` sentence and what the old provider's revoke would undo. The one button is the act: **Set Up Tailscale**, or **Switch to Tailscale** |
+| 2–5. Get the tool, sign in, approve, expose | `metistry remote set <provider> [flags] --yes --json`, streamed, cancellable (the process ends with the task) | where the CLI is, read from the lines it prints to stderr under `--json` (`RemoteFlowProgress`): *fetched Metistry's Tailscale pack* → get the tool; *sign in to Tailscale at: <url>* → sign in; *Tailscale asks you to approve Funnel … one click at: <url>* → approve; *Waiting for <name> to appear on the internet* and *waiting for <origin> to answer from this Mac* → expose. Every link the CLI printed is offered to open again. The CLI opened the browser itself; completion (`BackendState` reaching `Running`) is the CLI's reading, never the app's |
+| 6. Check | `metistry remote test --json` | the rows, and *<origin> answers from this Mac* — **never worded as reaching the phone** (§2.23: a Mac on the same tailnet may reach a Funnel name over the tailnet); tailnet mode adds *Your phone must be signed in to the same Tailscale account.* A failed row shows its doctor sentence; a failed `set` shows the CLI's last line and the not-ok rows of `remote status --json` |
+| 7. Add a Phone | — | **Add a Phone…** is offered only once the check passed: the wizard opens step 7's sheet; the pane's sheet closes and Devices' opens |
+
+**The switch confirms, naming the cost (C136).** Choosing a provider while
+another is in place puts a `CostConfirmation` in front of `--yes`: the
+preview's `stranding` sentence first (*phones added under <old origin> stop
+working once this changes…*), then what the old provider's revoke would undo
+and what is left for the owner at the provider — the CLI's words, never the
+app's. A first set-up from None runs on its button; the preview card was the
+informed half. The switching ceremony itself — configure, wait for the new
+origin to answer from this Mac, the protected write, revoke the old — is the
+CLI's (`docs/ops/remote-access.md`, "Switching"); the app drives and shows it.
+
+**The door is a closed grammar (invariant 10).** `ManagementRow.remoteAccess`
+(M20) does not accept "anything starting with `remote`":
+`RemoteAccessArgv.accepts` names the exact shapes — `remote status --json`,
+`remote test --json`, `remote off [--yes] --json`, `remote set <provider>
+[that provider's flags] [--yes] --json` — no wider than what the app runs:
+each flag at most once, each value from a known list or a bare name, nothing
+positional after the provider, `--json` always. `remote authorize` is not
+admitted (the flow does not run it; X-106's `configure` signs in), so
+doctor's *Sign in to Tailscale* action is shown in Services with Copy, like
+any argv outside the door. **A pasted token never reaches argv**:
+`RemoteSetPlan` writes it to the command's standard input with `--token` as
+the bare switch, and `--token <value>`, `--token=<value>` and a value after
+the provider's name are refused by the type. `tests/kit/remote-access-tests.swift`
+holds the whole flow to it: None preselected and Continue satisfies the step;
+Add a Phone is not offered before the check passes; the check is never worded
+as reaching the phone; a pasted token never reaches argv; Turn Off's confirm
+names what revoke undoes; each step's failure shows its doctor sentence; and
+every `remote` argv outside the grammar is refused.
+
+**Satisfying the wizard's step.** Continuing with None satisfies it — an
+install that exposes nothing is correct — as does a provider the flow set up
+here. A provider chosen but not set up leaves the step optional: Continue and
+Skip both stay open, as for the door and compute.
+
 ## Add a Phone
 
-Settings ▸ Devices ▸ **Add a Phone…**, and the wizard's step 6, open one sheet
+Settings ▸ Devices ▸ **Add a Phone…**, and the wizard's step 7, open one sheet
 (`sources/kit/add-phone-sheet.swift` over `add-phone-model.swift`; plan §2.22,
 X-77). It runs `metistry enroll --json` — M19, a `ManagementCommand` through
 the session's `ManagementRunner`, like every other management verb — because
@@ -1015,16 +1072,32 @@ console for one. The sheet's states, in order:
 3. **Ready** — the QR, the URL (selectable, **Copy Link**), *Your phone must
    be able to open <host>*, and *Expires in 9:41* counting down; **Make a New
    Code** cancels the old one first.
-4. **Expired** — the QR is replaced, not dimmed, by *This code expired*.
-5. **Added** — `GET /api/devices` shows a passkey that was not there when the
-   sheet opened: *“iPhone” was added*, with the label the phone chose. The
-   list is refetched on `run.finished` events of kind `auth` and polled while
-   the stream is down (§2.20). X-114 adds *Opened on your phone* between Ready
-   and Added.
+4. **Opened on your phone** (X-114) — `metistry enroll --status <code_id>
+   --json` says the console saw this code's `POST /auth/enroll/start` arrive
+   **through the proxy listener**: *Your phone reached this Mac through
+   <provider>*. Only `proxy` counts — a `main` stamp is the owner opening the
+   link on this Mac and never shows. The code is still live (it is not used
+   until the phone adds itself).
+5. **Expired** — the QR is replaced, not dimmed, by *This code expired*; if no
+   phone ever reached the proxy listener it adds *Your phone didn't reach
+   <origin>. Open it in Safari on your phone with Wi-Fi off to see what it
+   says.*
+6. **Added** — `GET /api/devices` shows a passkey that was not there when the
+   sheet opened: *“iPhone” was added*, with the label the phone chose.
+
+Both reads — the devices list and the code's status — are made on `run.finished`
+events of kind `auth` (the console audits the stamp as one) and by a fallback
+poll that wakes every 5 s, does nothing while the stream is live, and ends with
+the sheet (`close()` cancels it and waits for it). The poll's sleep and the
+stream's liveness are injectable, so its tests step it with no clock.
 
 **Closing the sheet in any state cancels a code that is still live**
 (`metistry enroll --cancel <code_id> --json` — the id, never the code), so a
 QR left on screen or in a screenshot is dead the moment the owner is done.
+That includes the Settings window or the wizard closing under the open sheet:
+the sheet's view going away asks the presenter to close it, as Done does. (A
+quit of the whole app with a sheet open is not covered; the code dies at its
+ten minutes.)
 The QR is CoreImage's `CIQRCodeGenerator` (error correction M), scaled by an
 integer factor with nearest-neighbour sampling so the modules stay sharp, a
 four-module quiet zone in the bitmap, dark on light in both appearances;
@@ -1362,6 +1435,60 @@ the sheet's switches are drawn buttons that say their name and *on/off*
 widths — 270, 328, 360 — and grow longer at the largest text.
 `tests/kit/capture-bar-tests.swift`.
 
+## Status: Fix All
+
+*(X-125; the owner's ruling of 2026-10-04: "regardless of the problems found, the
+user only needs to run `metistry doctor` to fix it".)* The Status window's
+header gains **Fix All** beside Check again — the app half of `metistry doctor`'s
+repair contract (`docs/ops/cli.md`, X-123). It is the window's one mutating act,
+and a closed set of one (invariant 10): the CLI door `doctor --fix --yes --json`
+(§2.2 M6), nothing else.
+
+**What it is made of.** Only the rows doctor itself classified: `fix: "fixable"`
+with a `repair` (a closed-table id, what it does, whether it asks). The app never
+reads a remediation sentence to decide, never names a fix of its own and never
+maps a repair id to anything to run; it displays `repair.does` and the CLI's
+table runs its own function. A row doctor calls `hand` shows the remediation —
+which names the exact step — and the tag *your hand*, and runs nothing; an `info`
+row is a fact and says nothing. A CLI older than the contract sends no classes,
+and the window then offers no Fix All and draws no tag (P5: state is reported,
+never inferred).
+
+**The ask.** The button re-reads first (`doctor --check --json`), because the
+preview must be of what is wrong now. If no fix in the plan moves files or
+restarts a running service (`repair.confirm`) it runs at once. If any does, a
+`CostConfirmation` sheet names *every* fix — the ones that ask marked — and
+**Fix All** in it is the only thing that sends `--yes`; Cancel, Esc and
+dismissing the sheet send nothing, and Return is Cancel. `--yes` is never the
+default. The CLI re-reads inside the run, so a fix that began asking between the
+preview and the run would run unpreviewed: the app cannot prevent that without a
+flag the CLI does not have, and says so afterwards (*Ran without being in the
+preview you confirmed*) rather than staying quiet.
+
+**The door is pinned.** `ManagementRow.doctor` admits exactly two argvs, not a
+prefix — `["doctor", "--check", "--json"]` and `["doctor", "--fix", "--yes",
+"--json"]` — so the app cannot be made to pass `doctor` anything else
+(`ManagementRow.exactShapes`; misuse tests refuse a bare `doctor`, `--json`
+alone, `--fix` without `--yes` or `--json`, reordered flags, extra flags, a
+`--product-dir`, and the repair argv on any other row). `MetistryCLI.doctor()`
+— the read every surface shares — runs `--check` explicitly, so the read is
+read-only whether or not a terminal is attached.
+
+**The answer.** `--fix --json` prints the re-check's rows (each with `fixed`) and
+`fixes[]`; the window replaces its report with it and draws a card: one line
+(*2 fixed · 1 ran, still failing*), then each fix — what it did, its outcome,
+the statuses either side of the re-check (`child:reconciler failed → ok`), the
+error if it threw, and the CLI's own `$` ledger, selectable. Each row carries
+*fixed* or *still failing*. Exit 1 is not "the repair broke" (something is still
+failing, as with the read); a document with no `mode: "fix"` is a CLI that
+ignored `--fix`, and the window says so instead of "nothing needed fixing". While
+a repair runs, Check again and the menu bar's re-read both wait.
+
+**§2.18.** Fix All and Check again wrap rather than clip at the largest text; the
+button speaks *Fix All: have metistry doctor fix what it can*; every row speaks
+what Fix All will do for it; each fix in the card is one spoken sentence; the
+sheet is `CostConfirmView`. Tests: `tests/kit/fix-all-tests.swift`.
+
 ## The menu bar
 
 Grouped by doctor's own `kind`, so a new component kind appears without a change
@@ -1377,7 +1504,7 @@ count and the resolved shape are checks, not processes, and the menu does not
 invent a control the CLI has no verb for.
 
 **Refresh:** doctor is re-run when the menu opens and every 30s while it stays
-open — never continuously. `doctor --json` is a full sweep (every bridge over
+open — never continuously. `doctor --check --json` is a full sweep (every bridge over
 HTTP, `docker compose ps`), far too heavy to poll; the watchdog already keeps a
 liveness view of the same components, and its feed is the intended faster source
 once the app has a read path to it (a management-API query, not a database

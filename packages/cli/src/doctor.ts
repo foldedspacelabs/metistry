@@ -116,13 +116,77 @@ export type DoctorAction =
   | { kind: "open_system_settings"; label: string }
   | { kind: "run_verb"; command: string[]; label: string };
 
+/**
+ * How a finding is put right (X-123): doctor does it (`fixable`), the owner
+ * does it (`hand` — a TCC grant, a credential another service issues, a
+ * download, `sudo`), or it is a fact and not a fault (`info`). Every row
+ * `doctor()` returns carries one; the class is held in code, per finding,
+ * and never read off the remediation sentence (the T4-21 rule).
+ */
+export type FixClass = "fixable" | "hand" | "info";
+
+/**
+ * The closed table of fixes doctor can apply — each an existing audited
+ * service, run through the same `StepRunner` as `up`'s and `update`'s steps
+ * (doctor-fix.ts). Nothing outside this table ever runs: a row names an id,
+ * doctor-fix.ts maps the id to the one function, and the misuse tests hold
+ * the line.
+ */
+export type RepairId =
+  /** `metistry restart <target>` — the supervisor's socket, `launchctl kickstart -k`, or `docker compose restart` (service-control.ts) */
+  | "restart"
+  /** the migration runner under the advisory lock — `update`'s step alone, never the rest of `update` (migrate.ts) */
+  | "migrate"
+  /** re-render the install from `.env`: `up` inside doctor, as `update` runs it (up.ts) — restarts the supervisor, so it always confirms */
+  | "render"
+  /** write this install's cli shim (cli-shim.ts) */
+  | "cli_shim"
+  /** re-seed the templates the vault lacks — `update`'s step (update.ts) */
+  | "seed_templates"
+  /** rename product files to the seed's spelling through the reconciler — `update`'s step (vault-case.ts) */
+  | "vault_case"
+  /** copy shared-scope credentials into this instance — `secrets migrate-scope`, which deletes nothing (update.ts) */
+  | "migrate_scope"
+  /** `metistry migrate-layout` (migrate-layout.ts) — moves files, so it confirms */
+  | "migrate_layout"
+  /** `metistry migrate-inbox` (migrate-inbox.ts) — moves files, so it confirms */
+  | "migrate_inbox";
+
+/** The fix a `fixable` row carries: an id from the closed table, what it acts on, and whether it previews and asks first. */
+export interface Repair {
+  id: RepairId;
+  /** what the fix acts on — the service name for `restart`; absent for the rest */
+  target?: string;
+  /** destructive or disruptive (moves files, restarts a running service): preview-then-confirm, `--yes` to skip the question */
+  confirm: boolean;
+  /** one line, for the preview and the fix log: what applying it does */
+  does: string;
+}
+
 export interface DoctorRow extends CheckResult {
   kind: string;
   /** absent when the row is `ok`, or when doctor has nothing more specific to offer than the remediation text. */
   action?: DoctorAction;
+  /** X-123: who puts this right. Set on every row `doctor()` returns (a builder may set it; `doctor()` fills the rest by status). */
+  fix?: FixClass;
+  /** X-123: after a fix ran for this row — true when the re-check cleared it, false when it did not (or the fix failed); null when no fix ran */
+  fixed?: boolean | null;
+  /** X-123: the fix doctor applies for a `fixable` row — an id from the closed table, never derived from prose */
+  repair?: Repair;
 }
 
 const runVerb = (command: string[], label: string): DoctorAction => ({ kind: "run_verb", command, label });
+/** `metistry restart <service>`: plain when the service is down (nothing running is interrupted), `confirm` when it answers and would be bounced. */
+const restartFix = (service: string, confirm: boolean, does: string): Repair => ({ id: "restart", target: service, confirm, does });
+/** `up` inside doctor: always a confirm — re-rendering restarts the supervisor and every child under it. */
+const renderFix = (does: string): Repair => ({ id: "render", confirm: true, does: `${does} — \`metistry up\` re-renders this install from .env and restarts the supervisor` });
+/** A row plus whatever button, fix or class its builder decided on — each only when there is one, so an ok row stays the plain CheckResult. */
+const decorate = <T extends DoctorRow>(row: T, o: { action?: DoctorAction | undefined; repair?: Repair | undefined; fix?: FixClass | undefined }): T => ({
+  ...row,
+  ...(o.action ? { action: o.action } : {}),
+  ...(o.repair ? { repair: o.repair } : {}),
+  ...(o.fix ? { fix: o.fix } : {}),
+});
 const openSecrets = (label: string): DoctorAction => ({ kind: "open_secrets", label });
 const openSystemSettings = (label: string): DoctorAction => ({ kind: "open_system_settings", label });
 
@@ -370,6 +434,27 @@ async function probeCheck(name: string, url: string, token: string | undefined, 
  * (a stale calendar, a rate limit) gets no action — the bridge's remediation
  * text is still the whole story, read in the terminal or the app alike.
  */
+/**
+ * The fix for a probe's `cause`, from the same closed signal as the button —
+ * never from the sentence. Down or answering nonsense: start it, which
+ * interrupts nothing (plain). Refusing the token: the running bridge holds an
+ * older value than .env, and a restart makes it read the current one; the
+ * bridge is up and serving, so that one asks first (confirm). Never a re-mint:
+ * a token is rotated by the owner's hand, not by a repair. What the bridge
+ * itself reported (a TCC grant, a stale calendar) has no restart in it.
+ */
+function repairForBridgeOutcome(o: Outcome & { cause?: ProbeCause }, service: string): Repair | undefined {
+  switch (o.cause) {
+    case "unreachable":
+    case "bad_body":
+      return restartFix(service, false, `start ${service} (\`metistry restart ${service}\`)`);
+    case "token_rejected":
+      return restartFix(service, true, `restart ${service} so it reads .env's current token (\`metistry restart ${service}\`) — the token itself is never re-minted`);
+    default:
+      return undefined;
+  }
+}
+
 function actionForBridgeOutcome(o: Outcome & { cause?: ProbeCause }, tokenVar: string): DoctorAction | undefined {
   switch (o.cause) {
     case "token_rejected":
@@ -419,10 +504,13 @@ async function componentRow(
       ? `GET ${url}/health ok; /api/status authenticates with METISTRY_LOCAL_OWNER_TOKEN`
       : `GET ${url}/health ok; /api/status answers (401 = a passkey session is required)`;
     let action: DoctorAction | undefined;
+    let repair: Repair | undefined;
     const row = {
       kind,
       ...(await runCheck(man.name, probe, async () => {
         const health = await deps.fetchFn(`${url}/health`, { signal: AbortSignal.timeout(deps.timeoutMs) }).catch((err) => {
+          // down, not answering: starting it interrupts nothing (plain)
+          repair = restartFix("console", false, "start the console (`metistry restart console`)");
           throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — ${restartHint("console", deps.shape, deps.labelSuffix)}`);
         });
         if (!health.ok) throw new Error(`console /health returned ${health.status} — ${logHint("console", deps.shape, deps.labelSuffix)}`);
@@ -434,7 +522,11 @@ async function componentRow(
         // METISTRY_TRUSTED_LOOPBACK_PROXY missing — but the console itself
         // is up and serving, so this degrades rather than fails.
         if (token && status.status === 401) {
-          action = runVerb(["metistry", "secrets", "sync", "--to", "env"], "Sync secrets to .env");
+          // the fix is the restart the sentence below names (the running
+          // console holds an older value); re-syncing .env changes nothing.
+          // A running service is bounced, so it asks first.
+          repair = restartFix("console", true, "restart the console so it reads .env's METISTRY_LOCAL_OWNER_TOKEN (`metistry restart console`)");
+          action = runVerb(["metistry", "restart", "console"], "Restart the console");
           return {
             status: "degraded" as const,
             // Most often a token mismatch: `.env` (and the Keychain) hold a
@@ -448,21 +540,26 @@ async function componentRow(
         return { meta };
       })),
     };
-    return action ? { ...row, action } : row;
+    return decorate(row, { action, repair });
   }
 
   if (man.type === "bridge" && man.name === "brain") {
     // mounted at the console's POST /mcp (packages/mcp-brain/manifest.yaml) — no port of its own
     const url = hostLocal(deps.env.METISTRY_CONSOLE_URL || "http://127.0.0.1:8080", deps.shape);
-    return {
+    // the console being down is the console row's finding: this row follows
+    // it (info) and clears when that one is fixed — never a second restart
+    let fix: FixClass | undefined;
+    const row = {
       kind,
       ...(await runCheck(man.name, `${url}/mcp answers (401 = agent bearer required; served by the console)`, async () => {
         const r = await deps.fetchFn(`${url}/mcp`, { signal: AbortSignal.timeout(deps.timeoutMs) }).catch((err) => {
-          throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — ${restartHint("console", deps.shape, deps.labelSuffix)}`);
+          fix = "info";
+          throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — ${restartHint("console", deps.shape, deps.labelSuffix)}; follows the console row`);
         });
         if (r.status !== 401 && r.status !== 200) throw new Error(`/mcp returned ${r.status} — ${logHint("console", deps.shape, deps.labelSuffix)}`);
       })),
     };
+    return decorate(row, { fix });
   }
 
   // The engine is the one component an install may deliberately run without
@@ -477,6 +574,8 @@ async function componentRow(
     if (!engine.ok) {
       return {
         kind,
+        // picking a provider and pasting its key is the owner's (never minted, never guessed)
+        fix: "hand",
         ...(await runCheck(man.name, "compute.yaml assigns a default → the supervisor starts the engine", async () => ({
           status: "absent",
           remediation: `${engine.why} — \`${engine.fix}\`; meanwhile the assistant is not started at all: captures, tasks, search and the console run, and fold turns wait (docs/ops/assistant-tools.md)`,
@@ -488,7 +587,11 @@ async function componentRow(
     // from the environment `up` last saw. On the owner's 0.14.2 instance the
     // key reached `.env` after that render, so there was no assistant child
     // at all while this row said ok. The row is the RUNNING child now.
-    if (deps.supervisor) return { kind, ...(await runCheck(man.name, "the supervisor is running the assistant child", async () => assistantChildOutcome(await deps.supervisor!))) };
+    if (deps.supervisor) {
+      const outcome = assistantChildOutcome(await deps.supervisor);
+      const { repair, fix, ...rest } = outcome;
+      return decorate({ kind, ...(await runCheck(man.name, "the supervisor is running the assistant child", async () => rest)) }, { repair, fix });
+    }
   }
 
   const httpSurface = (man.type === "bridge" && man.transport === "http") || (man.type === "service" && man.port !== undefined);
@@ -500,6 +603,8 @@ async function componentRow(
       return {
         kind,
         action: openSecrets(`Add ${t.tokenVar} in Secrets`),
+        // the feature is off: a fact, and turning it on is the owner's choice (info)
+        fix: "info",
         ...(await runCheck(man.name, `${t.urlVar} set → GET /check`, async () => ({
           status: "absent",
           remediation: `not configured: set ${t.urlVar}${port ? ` (default ${deps.shape === "launchd" ? `http://127.0.0.1:${port}` : `http://host.docker.internal:${port}`})` : ""} and ${t.tokenVar} in .env — degrades ${"degrades" in man ? man.degrades : "absent"} meanwhile`,
@@ -507,17 +612,20 @@ async function componentRow(
       };
     }
     const url = hostLocal(configured, deps.shape);
-    const restart = restartHint(t.launchdService ?? man.name, t.launchdService ? "launchd" : deps.shape, deps.labelSuffix);
+    const service = t.launchdService ?? man.name;
+    const restart = restartHint(service, t.launchdService ? "launchd" : deps.shape, deps.labelSuffix);
     let action: DoctorAction | undefined;
+    let repair: Repair | undefined;
     const row = {
       kind,
       ...(await runCheck(man.name, `GET ${url}/check answers status ok`, async () => {
         const outcome = await probeCheck(man.name, url, deps.env[t.tokenVar], restart, deps.fetchFn, deps.timeoutMs);
         action = actionForBridgeOutcome(outcome, t.tokenVar);
+        repair = repairForBridgeOutcome(outcome, service);
         return outcome;
       })),
     };
-    return action ? { ...row, action } : row;
+    return decorate(row, { action, repair });
   }
 
   // A collector answers for itself (CLAUDE.md: every collector exports
@@ -544,24 +652,28 @@ async function componentRow(
  * the one the supervisor has — no such child (it logs that at start), or the
  * child's state and last exit.
  */
-export function assistantChildOutcome(snap: SupervisorSnapshot): Partial<Pick<CheckResult, "status" | "remediation" | "meta">> {
+export function assistantChildOutcome(snap: SupervisorSnapshot): Partial<Pick<CheckResult, "status" | "remediation" | "meta">> & { repair?: Repair; fix?: FixClass } {
   const logs = "metistry logs supervisor";
-  if (!snap.config) return { status: "failed", remediation: `not started — there is no ${snap.configPath}, so no supervisor runs an assistant: metistry up` };
+  if (!snap.config) return { status: "failed", remediation: `not started — there is no ${snap.configPath}, so no supervisor runs an assistant: metistry up`, repair: renderFix("no supervisor.json") };
   if (!snap.config.children.some((c) => c.name === "assistant")) {
     return {
       status: "failed",
       remediation: `not started — the supervisor has no assistant child: ${snap.configPath} was rendered when this install had no engine (compute.yaml's default provider key was not in the environment \`up\` rendered from; \`${logs}\` says "not started"). \`metistry up\` re-renders it from .env`,
       meta: { child: "absent" },
+      repair: renderFix("supervisor.json has no assistant child"),
     };
   }
-  if (!snap.children) return { status: "failed", remediation: `the supervisor did not answer (${snap.error ?? "no status"}), so nothing confirms the assistant is running — ${logs}` };
+  // the supervisor not answering is its own row's finding; this one follows it
+  if (!snap.children) return { status: "failed", remediation: `the supervisor did not answer (${snap.error ?? "no status"}), so nothing confirms the assistant is running — ${logs}; follows the supervisor row`, fix: "info" };
   const st = snap.children.find((c) => c.name === "assistant");
-  if (!st) return { status: "failed", remediation: `not started — the supervisor did not report an assistant child — ${logs}`, meta: { child: "unreported" } };
+  if (!st) return { status: "failed", remediation: `not started — the supervisor did not report an assistant child — ${logs}`, meta: { child: "unreported" }, repair: renderFix("the supervisor does not know the assistant child") };
   if (st.state !== "running") {
     return {
       status: "failed",
       remediation: `state = ${st.state}${st.lastExit ? ` (last exit code ${st.lastExit.code ?? "null"}${st.lastExit.signal ? `, signal ${st.lastExit.signal}` : ""} at ${st.lastExit.at})` : ""} — metistry logs assistant; log: ${st.log}`,
       meta: { child: st.state, restarts: st.restarts },
+      // `stopped` is the owner's `metistry stop`: never restarted by a repair (rule 6) — the child row says so
+      ...(st.state === "stopped" ? { fix: "info" as const } : { repair: restartFix("assistant", false, "restart the assistant child once (`metistry restart assistant`)") }),
     };
   }
   return { meta: { child: "running", pid: st.pid, restarts: st.restarts } };
@@ -581,15 +693,20 @@ export function assistantChildOutcome(snap: SupervisorSnapshot): Partial<Pick<Ch
  */
 export async function launchdEnvRow(o: { stateRoot: string; home: string | undefined; labelSuffix?: string | undefined; envFiles: readonly string[] }): Promise<DoctorRow> {
   let action: DoctorAction | undefined;
+  let repair: Repair | undefined;
   const row: DoctorRow = {
     kind: "launchd",
     ...(await runCheck("launchd env", "the supervisor's plist and supervisor.json carry .env's values (hashed, never printed)", async () => {
       const { installed, drift } = await launchdEnvDrift(o);
-      if (!installed) return { status: "absent", remediation: `no ${supervisorConfigPath(o.stateRoot)} — this install has not been brought up under the launchd shape: metistry up` };
+      if (!installed) {
+        repair = renderFix("the launchd shape was never rendered");
+        return { status: "absent", remediation: `no ${supervisorConfigPath(o.stateRoot)} — this install has not been brought up under the launchd shape: metistry up` };
+      }
       const drifted = driftedNames(drift);
       const meta = { sources: drift.map((d) => ({ source: d.source, compared: d.compared.length, differs: d.differs, missing: d.missing, hash: d.hash })) };
       if (drifted.length === 0) return { meta };
       action = runVerb(["metistry", "up"], "Re-render from .env");
+      repair = renderFix(`the running jobs do not carry .env's ${drifted.join(", ")}`);
       return {
         status: "degraded",
         remediation: `.env has ${drifted.length} value(s) the running jobs do not carry: ${drifted.join(", ")} (${drift.filter((d) => d.differs.length + d.missing.length > 0).map((d) => basename(d.source)).join(", ")}) — they still run on what \`up\` last rendered; \`metistry up\` re-renders them from .env and restarts the supervisor`,
@@ -597,7 +714,7 @@ export async function launchdEnvRow(o: { stateRoot: string; home: string | undef
       };
     })),
   };
-  return action ? { ...row, action } : row;
+  return decorate(row, { action, repair });
 }
 
 // ---- the derived .env -------------------------------------------------------
@@ -681,12 +798,16 @@ const LEGACY_INBOX_GITIGNORE_LINE = /^\/?inbox\/?$/;
  */
 export async function layoutRow(instanceDir: string): Promise<DoctorRow> {
   let action: DoctorAction | undefined;
+  let repair: Repair | undefined;
+  let fix: FixClass | undefined;
   const row = {
     kind: "instance",
     ...(await runCheck("instance layout", `${instanceDir} is the flat layout — the directory is the Obsidian vault, machinery under ${INSTANCE_LAYOUT.metistryDir}/`, async () => {
       const shape = detectLayout(instanceDir);
       if (shape === "flat") return { meta: { layout: "flat" } };
       if (shape === "unknown") {
+        // which directory is the instance is the owner's answer, not a repair
+        fix = "hand";
         return {
           status: "absent",
           remediation: `${instanceDir} is not an instance directory (no ${INSTANCE_LAYOUT.identity} and no ${LEGACY_VAULT_DIR}/) — \`metistry init <dir>\` stamps one`,
@@ -694,6 +815,7 @@ export async function layoutRow(instanceDir: string): Promise<DoctorRow> {
         };
       }
       action = runVerb(["metistry", "migrate-layout", "--dry-run"], "Preview migrate-layout");
+      repair = { id: "migrate_layout", confirm: true, does: "move the vault and the config files onto the flat layout (`metistry migrate-layout`) — a git mv storm, so it previews and asks first" };
       return {
         status: "degraded",
         remediation: `the vault still lives in ${LEGACY_VAULT_DIR}/ and the config files at the instance root — \`metistry migrate-layout --dry-run\` prints the whole plan, \`metistry migrate-layout\` runs it (docs/ops/instance-layout.md)`,
@@ -701,7 +823,7 @@ export async function layoutRow(instanceDir: string): Promise<DoctorRow> {
       };
     })),
   };
-  return action ? { ...row, action } : row;
+  return decorate(row, { action, repair, fix });
 }
 
 /**
@@ -744,6 +866,8 @@ export async function vaultCaseRow(instanceDir: string, seedDir: string): Promis
   if (found.length === 0) return null;
   return {
     kind: "instance",
+    // `update`'s step, through the reconciler as the owner: the file is renamed, never edited
+    repair: { id: "vault_case", confirm: false, does: `rename ${found.map(describeMismatch).join(", ")} to the seed's spelling through the reconciler (two commits each)` },
     ...(await runCheck("vault case", "every product file is spelled as the seed spells it (reads are case-exact)", async () => ({
       status: "degraded" as const,
       remediation:
@@ -756,6 +880,7 @@ export async function vaultCaseRow(instanceDir: string, seedDir: string): Promis
 
 export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
   let action: DoctorAction | undefined;
+  let repair: Repair | undefined;
   const row = {
     kind: "instance",
     ...(await runCheck("inbox", `${instanceDir}/inbox/ absent, and .gitignore does not list it — captures live at ${INSTANCE_LAYOUT.inboxDir}/`, async () => {
@@ -770,6 +895,7 @@ export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
       const gitignored = existsSync(gitignorePath) && (await readFile(gitignorePath, "utf8")).split("\n").some((l) => LEGACY_INBOX_GITIGNORE_LINE.test(l.trim()));
       if (entries.length === 0 && !gitignored) return;
       action = runVerb(["metistry", "migrate-inbox", "--dry-run"], "Preview migrate-inbox");
+      repair = { id: "migrate_inbox", confirm: true, does: `move ${entries.length} capture(s) from inbox/ into the vault inbox and rewrite their rows (\`metistry migrate-inbox\`) — files move, so it previews and asks first` };
       return {
         status: "degraded",
         remediation: "the pre-#156 layout: run `metistry migrate-inbox --dry-run` to see the plan, then `metistry migrate-inbox` to move captures into the vault inbox (docs/ops/inbox.md)",
@@ -777,7 +903,7 @@ export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
       };
     })),
   };
-  return action ? { ...row, action } : row;
+  return decorate(row, { action, repair });
 }
 
 // ---- the targets shim, removed (X-85) -----------------------------------------
@@ -825,6 +951,7 @@ export async function sharedScopeRow(o: { instanceDir: string; productDir: strin
   if (!instanceId) return undefined;
   const envFile = envPaths({ instanceDir: o.instanceDir, productDir: o.productDir })?.read[0];
   let action: DoctorAction | undefined;
+  let repair: Repair | undefined;
   const row = {
     kind: "instance",
     ...(await runCheck("shared scope", "no third-party credential left in the retired per-user Keychain account", async () => {
@@ -832,17 +959,21 @@ export async function sharedScopeRow(o: { instanceDir: string; productDir: strin
       try {
         status = await sharedScopeStatus({ instanceDir: o.instanceDir, instanceId, envFile, exampleFile: join(o.productDir, ".env.example"), env: o.env, probe: o.probe });
       } catch (err) {
+        // the login Keychain is locked or refused its prompt: the owner's hand (the default for a degraded row)
         return { status: "degraded", remediation: `could not ask the Keychain (${err instanceof Error ? err.message : String(err)}) — \`${MIGRATE_SCOPE_COMMAND} --instance ${o.instanceDir}\` says what is left` };
       }
       if (!status || status.originals.length === 0) return;
       if (status.unmigrated.length > 0) {
         action = runVerb(MIGRATE_SCOPE_COMMAND.split(" "), "Run secrets migrate-scope");
+        // copies in, deletes nothing — `update` runs the same step
+        repair = { id: "migrate_scope", confirm: false, does: `copy ${status.unmigrated.join(", ")} from the retired shared scope into this instance (\`${MIGRATE_SCOPE_COMMAND}\`; nothing is deleted)` };
         return {
           status: "degraded",
           remediation: `${status.unmigrated.join(", ")} still only in the retired shared scope — this instance reads them from .env until you run \`${MIGRATE_SCOPE_COMMAND} --instance ${o.instanceDir}\` (it copies them in and deletes nothing; \`metistry update\` runs it too)`,
           meta: { unmigrated: status.unmigrated, originals: status.originals },
         };
       }
+      // removing the originals is a Keychain delete with its own preview-then-confirm verb: the owner's hand
       action = runVerb(["metistry", "secrets", "purge-shared"], "Preview secrets purge-shared");
       return {
         status: "degraded",
@@ -851,7 +982,7 @@ export async function sharedScopeRow(o: { instanceDir: string; productDir: strin
       };
     })),
   };
-  return action ? { ...row, action } : row;
+  return decorate(row, { action, repair });
 }
 
 // ---- the cli shim -----------------------------------------------------------
@@ -873,6 +1004,8 @@ export async function cliRow(productDir: string, env: NodeJS.ProcessEnv): Promis
   const dirs = [...(env.PATH ?? "").split(":").filter(Boolean), ...(env.HOME ? [join(env.HOME, ".local", "bin")] : []), ...CLI_ON_PATH_DIRS];
   const found = dirs.map((d) => join(d, "metistry")).find((p) => existsSync(p));
   let action: DoctorAction | undefined;
+  let repair: Repair | undefined;
+  let fix: FixClass | undefined;
   const row = {
     kind: "cli",
     ...(await runCheck(
@@ -884,14 +1017,17 @@ export async function cliRow(productDir: string, env: NodeJS.ProcessEnv): Promis
           // argv, not the `~`-shorthand `cliShimLinkHint` prints for a
           // terminal — `ln` never sees a shell to expand it for
           if (env.HOME) action = runVerb(["ln", "-s", shim, join(env.HOME, ".local", "bin", "metistry")], "Link metistry onto PATH");
+          // putting it on PATH is the user's own hand (invariant 2): the row carries the exact line
+          fix = "hand";
           return { status: "absent", remediation: cliShimLinkHint(shim) + "  (or add its directory to PATH)", meta: { shim } };
         }
         action = runVerb(["metistry", "up"], "Run metistry up");
+        repair = { id: "cli_shim", confirm: false, does: `write the cli shim at ${shim} (\`up\`'s step)` };
         return { status: "absent", remediation: `no cli shim yet at ${shim} — \`metistry up\` writes one`, meta: { shim } };
       },
     )),
   };
-  return action ? { ...row, action } : row;
+  return decorate(row, { action, repair, fix });
 }
 
 // ---- the Mac app ------------------------------------------------------------
@@ -952,7 +1088,8 @@ export async function dbRows(db: Db | null, productDir: string, shape: Deploymen
 
   if (!db) {
     return [
-      { kind: "db", action: openSecrets("Add METISTRY_DB_PASSWORD in Secrets"), ...(await runCheck("db", "SELECT 1 round-trip", async () => ({ status: "absent", remediation: "METISTRY_DB_PASSWORD is unset — copy .env.example to .env and fill in METISTRY_DB_*" }))) },
+      // a password nothing holds is the owner's to set (a data dir with no password in any store is never minted over)
+      { kind: "db", action: openSecrets("Add METISTRY_DB_PASSWORD in Secrets"), fix: "hand", ...(await runCheck("db", "SELECT 1 round-trip", async () => ({ status: "absent", remediation: "METISTRY_DB_PASSWORD is unset — copy .env.example to .env and fill in METISTRY_DB_*" }))) },
       { kind: "db", ...(await runCheck("migrations", `schema_migrations rows = ${files.length} files in db/migrations`, async () => ({ status: "absent", remediation: "not checked — no db configured" }))) },
     ];
   }
@@ -969,16 +1106,27 @@ export async function dbRows(db: Db | null, productDir: string, shape: Deploymen
       }
     })),
   };
+  // not answering: start it, which interrupts nothing. Every row that reads
+  // the db (migrations, schedules) follows this one and is re-checked after.
+  if (!reachable) dbRow.repair = restartFix("db", false, "start the database (`metistry restart db`)");
 
   let migAction: DoctorAction | undefined;
+  let migRepair: Repair | undefined;
+  // The fix is `update`'s migration step ALONE — the same idempotent runner
+  // under the same advisory lock (migrate.ts) — never the rest of `update`,
+  // and never `pnpm db:migrate`, which a release install does not have. A
+  // fresh launchd install whose `up` never migrated crash-loops its console
+  // until this runs; doctor runs it.
+  const migrate = (pending: number): Repair => ({ id: "migrate", confirm: false, does: `apply ${pending} pending migration(s) under pg_advisory_lock — the runner \`metistry update\` uses, one transaction each` });
   const migRow: DoctorRow = {
     kind: "db",
     ...(await runCheck("migrations", `schema_migrations rows = ${files.length} files in db/migrations`, async () => {
-      if (!reachable) return { status: "absent", remediation: "not checked — db unreachable" };
+      if (!reachable) return { status: "absent", remediation: "not checked — db unreachable; follows the db row" };
       const exists = await db.query("SELECT to_regclass('public.schema_migrations') AS t");
       if (!exists.rows[0]?.t) {
-        migAction = runVerb(["metistry", "update"], "Run metistry update");
-        return { status: "degraded", remediation: `no schema_migrations table — run pnpm db:migrate (${files.length} migrations pending)`, meta: { applied: 0, files: files.length } };
+        migAction = runVerb(["metistry", "doctor"], "Apply migrations");
+        migRepair = migrate(files.length);
+        return { status: "degraded", remediation: `no schema_migrations table — ${files.length} migration(s) pending; \`metistry doctor\` applies them (the runner \`metistry update\` uses)`, meta: { applied: 0, files: files.length } };
       }
       const { rows } = await db.query("SELECT filename FROM schema_migrations ORDER BY filename");
       const applied = rows.map((r) => String(r.filename));
@@ -986,14 +1134,16 @@ export async function dbRows(db: Db | null, productDir: string, shape: Deploymen
       const unknown = applied.filter((f) => !files.includes(f));
       const meta = { applied: applied.length, files: files.length, pending, unknown };
       if (pending.length > 0) {
-        migAction = runVerb(["metistry", "update"], "Run metistry update");
-        return { status: "degraded", remediation: `${pending.length} migration(s) not applied (${pending.join(", ")}) — run pnpm db:migrate`, meta };
+        migAction = runVerb(["metistry", "doctor"], "Apply migrations");
+        migRepair = migrate(pending.length);
+        return { status: "degraded", remediation: `${pending.length} migration(s) not applied (${pending.join(", ")}) — \`metistry doctor\` applies them (the runner \`metistry update\` uses)`, meta };
       }
-      if (unknown.length > 0) return { status: "degraded", remediation: `db has migration(s) this checkout lacks (${unknown.join(", ")}) — is the checkout older than the database?`, meta };
+      // the db is ahead of the product: update the product; a schema is never rolled back (hand — the default)
+      if (unknown.length > 0) return { status: "degraded", remediation: `db has migration(s) this checkout lacks (${unknown.join(", ")}) — is the checkout older than the database? \`metistry update\`; a schema is never rolled back`, meta };
       return { meta };
     })),
   };
-  return [dbRow, migAction ? { ...migRow, action: migAction } : migRow];
+  return [dbRow, decorate(migRow, { action: migAction, repair: migRepair })];
 }
 
 // ---- schedules -------------------------------------------------------------
@@ -1154,9 +1304,11 @@ export async function scheduleRows(
     return [
       {
         kind: "schedule",
+        // follows the migrations row: fixed when that one is, never on its own
+        fix: "info",
         ...(await runCheck("schedules", `${scheduled.length} scheduled component(s) have a recent, successful run`, async () => ({
           status: "degraded",
-          remediation: `could not read the runs table (${err instanceof Error ? err.message : String(err)}) — run pnpm db:migrate`,
+          remediation: `could not read the runs table (${err instanceof Error ? err.message : String(err)}) — the migrations row above is the finding; follows it`,
           meta: { scheduled: scheduled.length },
         }))),
       },
@@ -1205,6 +1357,8 @@ export async function scheduleRows(
     };
 
     let action: DoctorAction | undefined;
+    let repair: Repair | undefined;
+    let fix: FixClass | undefined;
     const viewConsoleLogs = runVerb(["metistry", "logs", "console"], "View console logs");
     const row = {
       kind: "schedule",
@@ -1244,8 +1398,11 @@ export async function scheduleRows(
           // fact about Me/profile.md or METISTRY_TZ, never a fault to fix here.
           // Unless the fact has changed since: then the row is history.
           const again = recheckRefusal(lastRun.refused, s.manifestSchedule, facts, env, now);
+          // Me/profile.md's working days, or the timezone: the owner's facts, never doctor's to invent
+          fix = "hand";
           if (again.holds) return { status: "absent" as const, remediation: `not scheduled: ${lastRun.refused.why}`, meta };
           if (!again.next.ok) return { status: "absent" as const, remediation: `not scheduled: ${again.next.why}`, meta: { ...meta, schedule_refused_now: again.next.reason } };
+          fix = undefined;
           return {
             meta: {
               ...meta,
@@ -1263,6 +1420,8 @@ export async function scheduleRows(
           const grace = runnerGraceSec(env);
           const runnerUptimeSec = await (runnerUp ??= runnerUptime?.() ?? Promise.resolve(undefined));
           if (runnerUptimeSec !== undefined && runnerUptimeSec < grace) {
+            // catching up after a restart: a fact about the clock, not a fault (X-122)
+            fix = "info";
             return {
               status: "degraded" as const,
               remediation: `pending: ${s.name} last ran ${humanSec(Math.floor((now.getTime() - lastRun.ts.getTime()) / 1000))} ago, but the console's runner started ${humanSec(Math.floor(runnerUptimeSec))} ago and has not had its first tick yet — checked again once it has been up ${Math.ceil(grace)}s`,
@@ -1291,6 +1450,8 @@ export async function scheduleRows(
           // Templates/Brief.md). Degraded, not failed: the owner may have
           // removed it on purpose, and nothing else is broken.
           action = runVerb(["metistry", "update"], "Run metistry update");
+          // `update`'s step alone: files the vault lacks are copied; a file the owner has is never touched
+          repair = { id: "seed_templates", confirm: false, does: `re-seed the templates the vault lacks (${lastRun.templateMissing}) — \`update\`'s step; a template you have is never touched` };
           return {
             status: "degraded" as const,
             remediation: `${s.name} skipped its last run (${lastRun.ts.toISOString().slice(0, 16)}Z, ${TEMPLATE_MISSING}): ${lastRun.templateMissing} is not in the vault — \`metistry update\` re-seeds missing templates (only files the vault lacks; yours are never touched), or write your own ${lastRun.templateMissing}`,
@@ -1300,7 +1461,7 @@ export async function scheduleRows(
         return { meta };
       })),
     };
-    out.push(action ? { ...row, action } : row);
+    out.push(decorate(row, { action, repair, fix }));
   }
   return out;
 }
@@ -1338,7 +1499,8 @@ export async function vaultSyncRow(deps: { env: NodeJS.ProcessEnv; shape: Deploy
   const url = deps.env.METISTRY_RECONCILER_URL?.trim();
   const token = deps.env.METISTRY_BRIDGE_TOKEN_RECONCILER?.trim();
   const base = url ? hostLocal(url, deps.shape) : undefined;
-  return {
+  let repair: Repair | undefined;
+  const row = {
     kind: VAULT_SYNC_KIND,
     ...(await runCheck("vault sync", base ? `GET ${base}/vault/status: ahead, behind, last push, conflict, policy` : "the reconciler's GET /vault/status", async () => {
       if (!base || !token) {
@@ -1350,7 +1512,11 @@ export async function vaultSyncRow(deps: { env: NodeJS.ProcessEnv; shape: Deploy
       } catch {
         return { status: "absent" as const, remediation: "the reconciler did not answer — its own row above says why" };
       }
-      if (res.status === 404) return { status: "degraded" as const, remediation: "this reconciler predates GET /vault/status — `metistry restart reconciler` after an update" };
+      if (res.status === 404) {
+        // the running reconciler is an older release's: restart it onto the current one (it answers, so it asks first)
+        repair = restartFix("reconciler", true, "restart the reconciler onto the running release (`metistry restart reconciler`)");
+        return { status: "degraded" as const, remediation: "this reconciler predates GET /vault/status — `metistry restart reconciler` after an update" };
+      }
       if (!res.ok) return { status: "absent" as const, remediation: `the reconciler answered HTTP ${res.status} for /vault/status — its own row above says why` };
       const parsed = vaultStatusSchema.safeParse(await res.json().catch(() => undefined));
       if (!parsed.success) return { status: "degraded" as const, remediation: "the reconciler's /vault/status did not match the status schema — a reconciler and CLI from different releases; `metistry update`" };
@@ -1374,6 +1540,7 @@ export async function vaultSyncRow(deps: { env: NodeJS.ProcessEnv; shape: Deploy
       return { meta };
     })),
   };
+  return decorate(row, { repair });
 }
 
 // ---- keeping the Mac awake (macOS) --------------------------------------------
@@ -1447,6 +1614,8 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
   const alwaysVerb = setting.sleep_lid_closed ? "`metistry deployment set-keep-awake always --yes`" : "`metistry deployment set-keep-awake --sleep-on-battery false --yes`";
   const viewSupervisorLogs = runVerb(["metistry", "logs", "supervisor"], "View supervisor logs");
   let action: DoctorAction | undefined;
+  let repair: Repair | undefined;
+  let fix: FixClass | undefined;
 
   const row = {
     kind: KEEP_AWAKE_KIND,
@@ -1464,6 +1633,8 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
       }
       if (mode === "never") {
         action = runVerb(["metistry", "deployment", "set-keep-awake", "allow_sleep_on_battery"], "Turn on keep-awake");
+        // the product may not decide it (seed/deployment.yaml): the owner's setting
+        fix = "hand";
         return {
           status: "absent",
           remediation:
@@ -1492,6 +1663,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
       })();
       if (!state) {
         action = runVerb(["metistry", "up"], "Run metistry up");
+        repair = renderFix("nothing holds this Mac awake: the supervisor has not started since the setting changed");
         return {
           status: "degraded",
           remediation: `keep_awake: ${mode}, but nothing has written ${statePath} — the supervisor is not running, or has not started since the setting changed: \`metistry up\`${lidNote ? `. ${lidNote}` : ""}`,
@@ -1547,6 +1719,8 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
 
       if (state.stopped_at !== undefined) {
         action = runVerb(["metistry", "up"], "Run metistry up");
+        // the supervisor stopped and released it; `up` brings it back (rule 6: not after the owner's own `down` — that leaves no state file to read)
+        repair = renderFix("the hold was released when the supervisor stopped");
         return {
           status: "degraded",
           remediation: `released at ${state.stopped_at} when the supervisor stopped — nothing holds this Mac awake until it is running again: \`metistry up\``,
@@ -1556,6 +1730,8 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
 
       if (now() - Date.parse(state.heartbeat_at) > state.interval_ms * KEEP_AWAKE_CUTOFF_FACTOR) {
         action = viewSupervisorLogs;
+        // the Mac may have just woken: after one cycle this row answers itself (info)
+        fix = "info";
         return {
           status: "degraded",
           remediation:
@@ -1589,7 +1765,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
       return { ...(lidNote ? { status: "degraded" as const, remediation: lidNote } : {}), meta };
     })),
   };
-  return action ? { ...row, action } : row;
+  return decorate(row, { action, repair, fix });
 }
 
 // ---- launchd (macOS) ----------------------------------------------------------
@@ -1654,6 +1830,7 @@ export async function launchdRows(
     // helpers are never the app's.
     let found: RegistrarFinding | undefined;
     let action: DoctorAction | undefined;
+    let repair: Repair | undefined;
     const row: DoctorRow = {
       kind: "launchd",
       ...(await runCheck(`launchd:${label}`, `launchctl print gui/${uid}/${label} reports state = running`, async () => {
@@ -1662,6 +1839,8 @@ export async function launchdRows(
         if (service === SUPERVISOR_SERVICE) found = parseRegistrar(r.code, r.stdout);
         if (r.code !== 0) {
           action = runVerb(["metistry", "up"], "Run metistry up");
+          // bootstrapping is `up`'s step: the plist is rendered with values only it computes
+          repair = renderFix(`${label} is not bootstrapped`);
           return {
             status: "absent",
             // the shaped jobs carry an EnvironmentVariables dict rendered
@@ -1676,6 +1855,9 @@ export async function launchdRows(
           const uptimeSec = p.pid !== undefined ? await processUptimeSec(exec, p.pid) : undefined;
           return { meta: { pid: p.pid, uptime_sec: uptimeSec } };
         }
+        // bootstrapped and not running: kickstart it once — nothing running is interrupted. The
+        // supervisor's job restarts every child with it, so that one asks first.
+        repair = restartFix(service, service === SUPERVISOR_SERVICE, `kickstart ${label} once (\`metistry restart ${service}\`)${service === SUPERVISOR_SERVICE ? " — every child restarts with it" : ""}`);
         return {
           status: "failed",
           remediation: `state = ${p.state}${p.lastExit !== undefined ? `, last exit code ${p.lastExit}` : ""} — launchctl kickstart -k gui/$(id -u)/${label}; log: ${logPathFor(service, labelSuffix)}`,
@@ -1684,6 +1866,7 @@ export async function launchdRows(
       })),
     };
     if (action) row.action = action;
+    if (repair) row.repair = repair;
     if (found && found.registrar !== "none") {
       // the probe is what the table prints for a row that is not ok, and what
       // the Mac app's Services pane prints for one that is (docs/ops/mac-app.md)
@@ -1760,7 +1943,8 @@ export async function composeRows(productDir: string, exec: Exec): Promise<Docto
 
   const r = await exec("docker", ["compose", "ps", "--all", "--format", "json"], { cwd: productDir });
   if (r.code === 127) {
-    return [{ kind: "compose", ...(await runCheck("compose", "docker compose ps --format json", async () => ({ status: "absent", remediation: "docker not found on PATH — install Docker (Desktop on macOS) to run the containers" }))) }];
+    // installing Docker, or moving to the launchd shape, is the owner's
+    return [{ kind: "compose", fix: "hand", ...(await runCheck("compose", "docker compose ps --format json", async () => ({ status: "absent", remediation: "docker not found on PATH — install Docker (Desktop on macOS) to run the containers" }))) }];
   }
   if (r.code !== 0) {
     return [{ kind: "compose", ...(await runCheck("compose", "docker compose ps --format json", async () => {
@@ -1778,16 +1962,25 @@ export async function composeRows(productDir: string, exec: Exec): Promise<Docto
   const rows: DoctorRow[] = [];
   for (const svc of expected) {
     const e = entries.find((x) => x.Service === svc);
-    rows.push({
+    let repair: Repair | undefined;
+    const row: DoctorRow = {
       kind: "container",
       ...(await runCheck(`compose:${svc}`, `docker compose ps: ${svc} running${e?.Health ? " and healthy" : ""}`, async () => {
-        if (!e) return { status: "absent", remediation: `no container — docker compose up -d ${svc}` };
+        if (!e) {
+          // `docker compose up -d` is `up`'s step
+          repair = renderFix(`no ${svc} container`);
+          return { status: "absent", remediation: `no container — docker compose up -d ${svc}` };
+        }
         const meta = { state: e.State, health: e.Health || undefined, status: e.Status, uptime_sec: e.State === "running" ? parseComposeUptimeSec(e.Status) : undefined };
-        if (e.State !== "running") return { status: "failed", remediation: `container ${e.State ?? "?"} (${e.Status ?? ""}) — docker compose up -d ${svc}; docker compose logs ${svc}`, meta };
+        if (e.State !== "running") {
+          repair = restartFix(svc, false, `start the ${svc} container once (\`metistry restart ${svc}\`)`);
+          return { status: "failed", remediation: `container ${e.State ?? "?"} (${e.Status ?? ""}) — docker compose up -d ${svc}; docker compose logs ${svc}`, meta };
+        }
         if (e.Health && e.Health !== "healthy") return { status: "degraded", remediation: `running but ${e.Health} — docker compose logs ${svc}`, meta };
         return { meta };
       })),
-    });
+    };
+    rows.push(decorate(row, { repair }));
   }
   return rows;
 }
@@ -1837,6 +2030,7 @@ export async function supervisorRows(stateRoot: string, snapshot?: Promise<Super
     return [
       {
         kind: "supervisor",
+        repair: renderFix("no supervisor.json"),
         ...(await runCheck("supervisor", `${configPath} lists the supervisor's children`, async () => ({
           status: "absent",
           remediation: `no ${configPath} — this install has not been brought up under the supervisor yet: metistry up`,
@@ -1848,6 +2042,8 @@ export async function supervisorRows(stateRoot: string, snapshot?: Promise<Super
   const rows: DoctorRow[] = [
     {
       kind: "supervisor",
+      // not answering: kickstart it — every child restarts with it, so it asks first
+      ...(snap.children ? {} : { repair: restartFix(SUPERVISOR_SERVICE, true, `kickstart the supervisor (\`metistry restart ${SUPERVISOR_SERVICE}\`) — every child restarts with it`) }),
       ...(await runCheck(`supervisor:${config.label}`, `${config.socket} answers status with ${config.children.length} child(ren)`, async () => {
         if (!snap.children) throw new Error(snap.error ?? "the supervisor refused a status request");
         children = snap.children;
@@ -1859,10 +2055,16 @@ export async function supervisorRows(stateRoot: string, snapshot?: Promise<Super
   for (const spec of config.children) {
     const st = children?.find((c) => c.name === spec.name);
     let action: DoctorAction | undefined;
-    rows.push({
+    let repair: Repair | undefined;
+    let fix: FixClass | undefined;
+    const row: DoctorRow = {
       kind: "child",
       ...(await runCheck(`child:${spec.name}`, `the supervisor reports ${spec.name} running`, async () => {
-        if (!st) return { status: "absent", remediation: `the supervisor did not report ${spec.name} — metistry logs supervisor` };
+        if (!st) {
+          // the supervisor did not answer (its own row's finding), or runs from an older supervisor.json: follows those rows
+          fix = "info";
+          return { status: "absent", remediation: `the supervisor did not report ${spec.name} — metistry logs supervisor; follows the supervisor row` };
+        }
         if (st.state === "running") return { meta: { pid: st.pid, uptime_ms: st.uptimeMs, uptime_sec: st.uptimeMs !== undefined ? Math.round(st.uptimeMs / 1000) : undefined, restarts: st.restarts } };
         // "stopped" was a deliberate `metistry stop` — the next verb is
         // start, not restart (there is nothing running to restart); a
@@ -1874,14 +2076,19 @@ export async function supervisorRows(stateRoot: string, snapshot?: Promise<Super
             : st.state === "crash-looping"
               ? runVerb(["metistry", "logs", spec.name], `View ${spec.name} logs`)
               : undefined;
+        // `stopped` is the owner's `metistry stop`: a fact, and Start is theirs (rule 6 — doctor never
+        // starts what the owner stopped). Anything else is restarted once; a second doctor run inside
+        // the restart window hands it back with the log (doctor-fix.ts).
+        if (st.state === "stopped") fix = "info";
+        else repair = restartFix(spec.name, false, `restart ${spec.name} once (\`metistry restart ${spec.name}\`)`);
         return {
           status: st.state === "stopped" ? "degraded" : "failed",
           remediation: `state = ${st.state}${st.lastExit ? ` (last exit code ${st.lastExit.code ?? "null"}${st.lastExit.signal ? `, signal ${st.lastExit.signal}` : ""} at ${st.lastExit.at})` : ""} — metistry restart ${spec.name}; log: ${st.log}`,
           meta: { state: st.state, restarts: st.restarts, last_exit: st.lastExit },
         };
       })),
-    });
-    if (action) rows[rows.length - 1]!.action = action;
+    };
+    rows.push(decorate(row, { action, repair, fix }));
   }
   return rows;
 }
@@ -1933,15 +2140,21 @@ export async function confinementRow(config: SupervisorConfig, children?: ChildS
     if (spawned.argv.length !== c.argv.length || spawned.argv.some((a, i) => a !== c.argv[i])) stale.push(c.name);
   }
   const egress = config.egress;
-  return {
+  let repair: Repair | undefined;
+  let fix: FixClass | undefined;
+  const row = {
     kind: "sandbox",
     ...(await runCheck("sandbox", "which supervisor children the supervisor spawned under a Seatbelt profile, and where their egress goes", async () => {
       const meta = { confined, unconfined, unknown, stale, profiles, egress: egress ? { port: egress.port, allow: egress.allow } : null };
+      // what is spawned from an older supervisor.json is put right by the re-render `up` does (confirm: the supervisor restarts)
+      if (stale.length) repair = renderFix(`${stale.join(", ")} run from an older supervisor.json`);
       const door = egress ? `egress: 127.0.0.1:${egress.port}, ${egress.allow.length} allowed host(s)` : "egress: no proxy (compose shape, or an install that predates one)";
       const staleNote = stale.length
         ? ` ${stale.join(", ")} ${stale.length === 1 ? "was" : "were"} spawned from a different argv than supervisor.json now holds — it was re-rendered after they started, and \`metistry up\` restarts the supervisor onto it.`
         : "";
       if (unknown.length === config.children.length && config.children.length > 0) {
+        // nothing is read: a fact about the supervisor's answer, never a fix (rule 3)
+        fix = "info";
         return {
           status: "degraded",
           remediation: `could not confirm which children are confined — the supervisor ${children ? "has not spawned any of them yet, or is older than the field that reports what it spawned (its status carries no \`spawned\`)" : "did not answer status"}; \`metistry up\` restarts it onto the current release. Nothing here is read off supervisor.json or ps: a running child's argv never shows sandbox-exec, and the file can be newer than what runs. ${door}`,
@@ -1949,6 +2162,11 @@ export async function confinementRow(config: SupervisorConfig, children?: ChildS
         };
       }
       if (confined.length === 0) {
+        // The trigger is what the supervisor SPAWNED: every reported child with `spawned.profile === null`
+        // (X-48). A running argv never shows sandbox-exec, so it is not read. The render predates
+        // confinement; `up` re-renders it (confirm: the supervisor restarts).
+        if (unconfined.length > 0) repair = renderFix("no child was spawned under a profile");
+        else fix = "info";
         return { status: "degraded", remediation: `no child runs under a profile — ${door}. Under the compose shape the container is the boundary; under launchd this is a gap (docs/ops/deployment-shapes.md)${unknown.length ? `. Could not confirm: ${unknown.join(", ")}` : ""}`, meta };
       }
       const detail = `confined: ${confined.join(", ")}${unconfined.length ? `; ambient: ${unconfined.join(", ")}` : ""}${unknown.length ? `; could not confirm: ${unknown.join(", ")}` : ""}; ${door}`;
@@ -1963,12 +2181,15 @@ export async function confinementRow(config: SupervisorConfig, children?: ChildS
         };
       }
       if (egress && egress.allow.length === 0) {
+        // correct for a local-only install (info); a stale render is the launchd env row's finding
+        fix = "info";
         return { status: "degraded", remediation: `${detail} — the allowlist is empty, so every off-machine call from a confined child is refused. That is correct for a local-only install and a bug for any other (compute.yaml's providers and the instance repo's remotes are where it comes from)${staleNote}`, meta };
       }
       if (stale.length || unknown.length) return { status: "degraded", remediation: `${detail}.${staleNote}`, meta };
       return { meta };
     })),
   };
+  return decorate(row, { repair, fix });
 }
 
 // ---- local model servers ------------------------------------------------------------
@@ -2265,7 +2486,35 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   await checker?.close().catch(() => {});
   rows.push(...componentRows, registries, layout, inbox, ...(envFile ? [envFile] : []), ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...remote, ...supervisor, ...(launchdEnv ? [launchdEnv] : []), ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), ...(targetKeys ? [targetKeys] : []), vaultSync, ...connections);
 
-  return { as_of: new Date().toISOString(), product_dir: deps.productDir, product, shape, ok: !rows.some((r) => r.status === "failed"), rows };
+  return { as_of: new Date().toISOString(), product_dir: deps.productDir, product, shape, ok: !rows.some((r) => r.status === "failed"), rows: classifyRows(rows) };
+}
+
+/**
+ * Every row leaves `doctor()` with a class (X-123). A builder that knows
+ * better has said so; the rest follow the status: a row carrying a fix from
+ * the closed table is `fixable`, an `ok` or `absent` row is a fact (`info`),
+ * and a `degraded` or `failed` row nobody claimed is the owner's hand — the
+ * conservative default, since a fix nobody wrote cannot run.
+ *
+ * One rule is applied across rows rather than inside one (rule 6 — doctor
+ * never starts what the owner stopped): a service whose `child:<name>` row
+ * says `stopped` was stopped by `metistry stop`, so no other row's restart
+ * of it is a repair any more. Its fix becomes the owner's `metistry start`.
+ */
+export function classifyRows(rows: DoctorRow[]): DoctorRow[] {
+  const stopped = new Set(rows.filter((r) => r.kind === "child" && r.meta?.["state"] === "stopped").map((r) => r.name.replace(/^child:/, "")));
+  return rows.map((r) => {
+    let row: DoctorRow = { ...r };
+    if (row.repair?.id === "restart" && row.repair.target && stopped.has(row.repair.target)) {
+      const { repair, ...rest } = row;
+      row = { ...rest, fix: "hand", remediation: `${row.remediation ?? row.probe} — ${repair.target} was stopped with \`metistry stop\`, so doctor does not start it: \`metistry start ${repair.target}\` is yours` };
+    }
+    const fix: FixClass = row.fix ?? (row.repair ? "fixable" : row.status === "ok" || row.status === "absent" ? "info" : "hand");
+    // a class a builder set wins, but a row cannot be both fixable and carry no fix
+    const repair = fix === "fixable" ? row.repair : undefined;
+    const { repair: _dropped, ...rest } = row;
+    return { ...rest, ...(repair ? { repair } : {}), fix, fixed: row.fixed ?? null };
+  });
 }
 
 // ---- rendering ------------------------------------------------------------------
@@ -2300,7 +2549,10 @@ export function renderTable(report: DoctorReport, ui: Ui = defaultUi()): string 
     out.push(ui.heading(kind));
     for (const r of group) {
       const status = padTo(ui.paint(statusName(r.status), r.status), statusWidth);
-      out.push(`  ${ui.statusIcon(r.status)} ${padTo(r.name, nameWidth)}  ${status}  ${ui.dim(`${r.latency_ms}ms`.padStart(6))}`.trimEnd());
+      // who puts a finding right, said on the row (X-123): `fixable` is doctor's, `your hand` is the
+      // owner's; a fact (info) and an ok row carry nothing — the common case stays as quiet as it was
+      const who = r.status === "ok" || r.fix === undefined || r.fix === "info" ? "" : r.fix === "fixable" ? `  ${ui.dim(r.fixed === true ? "fixed" : r.fixed === false ? "still failing" : "fixable")}` : `  ${ui.dim("your hand")}`;
+      out.push(`  ${ui.statusIcon(r.status)} ${padTo(r.name, nameWidth)}  ${status}  ${ui.dim(`${r.latency_ms}ms`.padStart(6))}${who}`.trimEnd());
       // the one thing a red row is read for: what to do about it. Never on
       // an ok row — an ok row's probe is noise between the rows that matter —
       // except the one line an ok row carries on purpose (`meta.info`): a

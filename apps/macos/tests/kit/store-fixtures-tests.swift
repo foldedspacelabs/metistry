@@ -553,7 +553,7 @@ private struct WaitingRow: View {
 // MARK: - Management verbs: §2.2's closed set, at the type
 
 @Test func aManagementCommandIsOnlyEverOneOfSection2point2sVerbs() {
-    #expect(ManagementRow.allCases.map(\.rawValue) == (1...19).map { "M\($0)" })
+    #expect(ManagementRow.allCases.map(\.rawValue) == (1...20).map { "M\($0)" }) // M20: remote access (X-107)
     for row in ManagementRow.allCases {
         #expect(!row.verbs.isEmpty && !row.whyNotTheAPI.isEmpty, "\(row.rawValue)")
     }

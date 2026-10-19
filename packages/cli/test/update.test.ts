@@ -845,7 +845,7 @@ describe("update's closing doctor runs the updated CLI", () => {
     const { r, text, inProcess } = await run(P);
     expect(inProcess()).toBe(false); // the in-process doctor would have said FAILED
     expect(r.code).toBe(0);
-    expect(r.commands.some((c) => c.endsWith(`${join(P, "packages", "cli", "dist", "main.js")} doctor --json --product-dir ${P}`))).toBe(true);
+    expect(r.commands.some((c) => c.endsWith(`${join(P, "packages", "cli", "dist", "main.js")} doctor --check --json --product-dir ${P}`))).toBe(true);
     expect(text).toContain("new-schema");
     expect(text).toContain("update ok");
   });
@@ -864,7 +864,7 @@ describe("update's closing doctor runs the updated CLI", () => {
     const P = await checkout({ git: true });
     await fakeCli(P, reporting(true));
     const { r } = await run(P, { envFile: join(P, "custom.env") });
-    expect(r.commands.some((c) => c.endsWith(`doctor --json --product-dir ${P} --env-file ${join(P, "custom.env")}`))).toBe(true);
+    expect(r.commands.some((c) => c.endsWith(`doctor --check --json --product-dir ${P} --env-file ${join(P, "custom.env")}`))).toBe(true);
   });
 
   it("no updated CLI on disk: falls back to the in-process doctor, and says the answer is the pre-update code's", async () => {

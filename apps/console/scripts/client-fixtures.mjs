@@ -43,6 +43,7 @@ export const NOT_IN_THE_KIT = Object.freeze({
   "POST /auth/login/finish": "the passkey ceremony (as enroll/start)",
   "POST /auth/logout": "ends the calling device's session row; the local owner token has none, so the console answers 403",
   "* /mcp": "the agent door; an owner credential is not an agent principal there",
+  "GET /api/briefing": "the session-start briefing is an agent bearer's door (X-128), as /mcp is; an owner credential is not an agent principal there",
   "GET /api/push/vapid-key": "bound to a device session; the Mac notifies natively and the local owner token has no session to push to",
   "POST /api/push/subscribe": "bound to a device session (as vapid-key)",
   "POST /api/push/test": "bound to a device session (as vapid-key)",

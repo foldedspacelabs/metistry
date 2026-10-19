@@ -538,3 +538,38 @@ export function renderSystemdUnit(t: PlistTemplate, values: { repo: string; node
     "",
   ].join("\n");
 }
+
+/**
+ * A standalone agent plist for a job `up` does not render from a template:
+ * today the remote-access node (`remote/tailscale.ts`), which must run before
+ * `up` ever has — the owner signs in through it first — and under BOTH shapes
+ * (compose has no supervisor to be a child of). KeepAlive, so launchd restarts
+ * it; RunAtLoad, so it comes back at login; the one log file `metistry logs`
+ * conventions expect. Argument arrays only — no `sh -c`, nothing to quote.
+ */
+export function renderAgentPlist(o: { label: string; programArguments: string[]; log: string; environment?: Record<string, string> | undefined; workingDirectory?: string | undefined }): string {
+  if (o.programArguments.length === 0) throw new Error(`refusing to render ${o.label} with no program`);
+  const strings = o.programArguments.map((a) => `    <string>${xmlEscape(a)}</string>`).join("\n");
+  const env = o.environment && Object.keys(o.environment).length > 0 ? `  <key>EnvironmentVariables</key>\n  <dict>\n${renderEnvDict(o.environment, "    ")}\n  </dict>\n` : "";
+  const cwd = o.workingDirectory ? `  <key>WorkingDirectory</key><string>${xmlEscape(o.workingDirectory)}</string>\n` : "";
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    `<!-- ${o.label}: written by \`metistry remote set\`; \`metistry remote off\` removes it. -->`,
+    '<plist version="1.0">',
+    "<dict>",
+    `  <key>Label</key><string>${xmlEscape(o.label)}</string>`,
+    "  <key>ProgramArguments</key>",
+    "  <array>",
+    strings,
+    "  </array>",
+    `${cwd}${env}  <key>RunAtLoad</key><true/>`,
+    "  <key>KeepAlive</key><true/>",
+    "  <key>ProcessType</key><string>Background</string>",
+    `  <key>StandardOutPath</key><string>${xmlEscape(o.log)}</string>`,
+    `  <key>StandardErrorPath</key><string>${xmlEscape(o.log)}</string>`,
+    "</dict>",
+    "</plist>",
+    "",
+  ].join("\n");
+}

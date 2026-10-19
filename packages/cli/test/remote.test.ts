@@ -170,10 +170,11 @@ describe("None — a fresh install (the ticket's acceptance)", () => {
     const code = await main(["remote", "--json", "--product-dir", P, "--instance", I], o);
     expect(code).toBe(0);
     const s = JSON.parse(out.join("\n"));
-    expect(s).toMatchObject({ provider: "none", mode: null, origin: null, settings: {}, origins: [], available: ["none"], ok: true });
+    expect(s).toMatchObject({ provider: "none", mode: null, origin: null, settings: {}, origins: [], available: ["none", "tailscale"], ok: true });
     expect(s.choices.map((c: { id: string }) => c.id)).toEqual(["none", "tailscale", "relay", "cloudflare", "zrok", "ngrok", "port-forward"]);
     expect(s.choices[0]).toMatchObject({ id: "none", tag: "default", available: true });
-    expect(s.choices[1]).toMatchObject({ id: "tailscale", tag: "recommended", available: false });
+    expect(s.choices[1]).toMatchObject({ id: "tailscale", tag: "recommended", available: true });
+    expect(s.choices[2]).toMatchObject({ id: "relay", available: false });
     expect(s.rows).toHaveLength(1);
     expect(s.rows[0]).toMatchObject({ kind: "remote", name: "remote", status: "ok", meta: { provider: "none", origin: null, info: NONE_ROW_INFO } });
     expect(NONE_ROW_INFO).toBe("Remote access: none. Your phone can't reach this Mac. Choose a way in Settings ▸ Remote Access.");
@@ -212,9 +213,9 @@ describe("None — a fresh install (the ticket's acceptance)", () => {
     const P = await checkout();
     const I = await instance();
     const { err, io: o } = io();
-    expect(await main(["remote", "set", "tailscale", "--yes", "--product-dir", P, "--instance", I], o)).toBe(2);
-    expect(err.join("\n")).toContain("tailscale isn't available in this version of Metistry");
-    expect(err.join("\n")).toContain("the choices here today: none");
+    expect(await main(["remote", "set", "relay", "--yes", "--product-dir", P, "--instance", I], o)).toBe(2);
+    expect(err.join("\n")).toContain("relay isn't available in this version of Metistry");
+    expect(err.join("\n")).toContain("the choices here today: none, tailscale");
     expect(existsSync(deploymentPath(I))).toBe(false);
     // the slot is not echoed — a token pasted where the provider goes must not print back
     const typo = io();
@@ -260,12 +261,32 @@ describe("a token never arrives in argv (the `secrets set` rule)", () => {
     const I = await instance();
     const log: string[] = [];
     const providers: RemoteRegistry = { none, zrok: fakeProvider({ id: "zrok", origin: "https://a.share.zrok.io", log }) };
-    const { out, io: o } = io({ remoteProviders: providers, fetchFn: fakeNet(new Set(["https://a.share.zrok.io"])).fetchFn });
+    const { out, err, io: o } = io({ remoteProviders: providers, fetchFn: fakeNet(new Set(["https://a.share.zrok.io"])).fetchFn });
     expect(await main(["remote", "set", "zrok", "--yes", "--dry-run", "--json", "--product-dir", P, "--instance", I], o)).toBe(0);
     expect(log).toEqual(["detect:zrok"]);
     expect(existsSync(deploymentPath(I))).toBe(false);
-    expect(out.join("\n")).toContain("preview only — pass --yes to do this.");
-    expect(JSON.parse(out.filter((l) => l.startsWith("{") || l.startsWith(" ") || l.startsWith("}")).join("\n"))).toMatchObject({ applied: false, provider: "zrok" });
+    // with --json the preview line and every step note are stderr's: stdout is the one document
+    expect(err.join("\n")).toContain("preview only — pass --yes to do this.");
+    expect(err.join("\n")).toContain("would: configure zrok");
+    expect(JSON.parse(out.join("\n"))).toMatchObject({ applied: false, provider: "zrok" });
+  });
+
+  it("with --json, stdout is exactly one document and the step notes — what a driver shows the owner — go to stderr", async () => {
+    const P = await checkout();
+    const I = await instance();
+    const log: string[] = [];
+    const providers: RemoteRegistry = { none, zrok: fakeProvider({ id: "zrok", origin: "https://a.share.zrok.io", log }) };
+    const { out, err, io: o } = io({ remoteProviders: providers, fetchFn: fakeNet(new Set(["https://a.share.zrok.io"])).fetchFn });
+    expect(await main(["remote", "set", "zrok", "--yes", "--json", "--product-dir", P, "--instance", I], o)).toBe(0);
+    const doc = JSON.parse(out.join("\n"));
+    expect(doc).toMatchObject({ from: "none", provider: "zrok", origin: "https://a.share.zrok.io", applied: true });
+    expect(err.join("\n")).toContain("remote access: none → zrok");
+    expect(err.join("\n")).toContain("https://a.share.zrok.io answers from this Mac");
+    // and without --json, nothing moved: the same notes on stdout, as before
+    const plain = io({ remoteProviders: providers, fetchFn: fakeNet(new Set(["https://a.share.zrok.io"])).fetchFn });
+    expect(await main(["remote", "set", "zrok", "--product-dir", P, "--instance", I], plain.io)).toBe(0);
+    expect(plain.out.join("\n")).toContain("preview only — pass --yes to do this.");
+    expect(plain.err).toEqual([]);
   });
 
   it("a bare `--token` means read it from stdin: the switch itself carries no value", async () => {
@@ -323,6 +344,31 @@ describe("switching providers — a fake adapter exercises the ordering", () => 
     expect(log).toEqual(["detect:zrok"]);
     expect(existsSync(deploymentPath(I))).toBe(false);
     expect(lines.join("\n")).toContain("would: configure zrok; wait for its origin to answer from this Mac; write remote: zrok");
+  });
+
+  it("a switch's preview carries what the old provider's revoke would undo and the stranding sentence, so a driver can confirm with the CLI's own words (X-107)", async () => {
+    const log: string[] = [];
+    const zrok = fakeProvider({ id: "zrok", origin: "https://a.share.zrok.io", log });
+    const ngrok = fakeProvider({ id: "ngrok", origin: "https://m.ngrok-free.dev", log });
+    const { I, opts } = await base({ none, zrok, ngrok }, new Set(["https://a.share.zrok.io", "https://m.ngrok-free.dev"]));
+    const first = await remoteSet({ ...opts, provider: "zrok", options: { flags: {} }, yes: true });
+    expect(first).toMatchObject({ applied: true });
+    expect(first.stranding).toBeUndefined();
+    expect(first.revoked).toBeUndefined();
+    log.length = 0;
+    const preview = await remoteSet({ ...opts, provider: "ngrok", options: { flags: {} } });
+    expect(preview).toMatchObject({ from: "zrok", provider: "ngrok", applied: false, revoked: { undone: ["the zrok handler"], left_for_owner: ["the node in zrok's admin console"] } });
+    expect(preview.stranding).toBe("phones added under https://a.share.zrok.io stop working once this changes to https://m.ngrok-free.dev: a passkey is bound to the host it was created on. Add each phone again afterwards; Devices marks the ones to remove.");
+    // the preview ran only detect on the new one and a DRY revoke on the old: nothing changed
+    expect(log).toEqual(["detect:ngrok", "revoke:zrok:dry:record=zrok"]);
+    expect(parseYamlish(readFileSync(deploymentPath(I), "utf8"))).toMatchObject({ remote: { provider: "zrok" } });
+    // a first set-up from none strands nothing and revokes nothing: neither field
+    const fresh = await remoteSet({ ...opts, provider: "ngrok", options: { flags: {} } });
+    expect(fresh.revoked).toBeDefined(); // still zrok in force here
+    const { opts: none0 } = await base({ none, ngrok }, new Set());
+    const firstEver = await remoteSet({ ...none0, provider: "ngrok", options: { flags: {} } });
+    expect(firstEver.stranding).toBeUndefined();
+    expect(firstEver.revoked).toBeUndefined();
   });
 
   it("set: configure → the origin answers from this Mac → the record is written — then `set none` runs that provider's revoke", async () => {
@@ -396,7 +442,7 @@ describe("doctor's `remote:origins` row — a hand-written remote origin the rec
     const row = rows[1]!;
     expect(row.remediation).toContain("METISTRY_ORIGIN in .env also names https://studio.ts.net, which the remote-access record (none) does not");
     expect(row.remediation).toContain("passkeys added at https://studio.ts.net no longer sign in");
-    expect(row.remediation).toContain("Until a provider adapter ships (Tailscale, X-106)");
+    expect(row.remediation).toContain("`metistry remote set tailscale` (or another provider) is how a remote origin is configured");
     expect(row.meta).toMatchObject({ provider: "none", dropped: ["https://studio.ts.net"], origins: ["http://127.0.0.1:8080"] });
     // the same sentence `up` prints
     expect(droppedOriginsNote(["https://studio.ts.net"], REMOTE_NONE)).toBe(row.remediation);
@@ -464,14 +510,14 @@ describe("doctor's `remote` kind for a provider", () => {
     const down = await remoteRows({ ...common, deployment: dep({ provider: "zrok", origin: "https://a.share.zrok.io", settings: { upstream: "http://127.0.0.1:8081" } }) });
     expect(down.find((r) => r.name === "remote:zrok:answers")).toMatchObject({ status: "failed", remediation: expect.stringContaining("https://a.share.zrok.io doesn't answer from this Mac, so your phone won't reach it either. Settings ▸ Remote Access shows what zrok reports.") });
 
-    const unknown = await remoteRows({ ...common, deployment: dep({ provider: "tailscale", mode: "funnel", origin: "https://mac.ts.net", settings: {} }) });
+    const unknown = await remoteRows({ ...common, deployment: dep({ provider: "relay", origin: "https://abc.u.metistry.app", settings: {} }) });
     expect(unknown).toHaveLength(1);
-    expect(unknown[0]).toMatchObject({ kind: "remote", name: "remote", status: "failed", remediation: expect.stringContaining("names tailscale, which this version of Metistry has no adapter for"), action: { kind: "run_verb", command: ["metistry", "remote", "off"] } });
+    expect(unknown[0]).toMatchObject({ kind: "remote", name: "remote", status: "failed", remediation: expect.stringContaining("names relay, which this version of Metistry has no adapter for"), action: { kind: "run_verb", command: ["metistry", "remote", "off"] } });
 
     // and `remote status` carries the same rows, exit 1
-    await writeFile(deploymentPath(I), applyRemoteToYaml(undefined, { provider: "tailscale", mode: "funnel", origin: "https://mac.ts.net", settings: {} }, "compose"));
+    await writeFile(deploymentPath(I), applyRemoteToYaml(undefined, { provider: "relay", origin: "https://abc.u.metistry.app", settings: {} }, "compose"));
     const s = await remoteStatus({ ...common, out: () => {} });
-    expect(s).toMatchObject({ provider: "tailscale", mode: "funnel", origin: "https://mac.ts.net", origins: ["https://mac.ts.net", "http://127.0.0.1:8080"], ok: false });
+    expect(s).toMatchObject({ provider: "relay", mode: null, origin: "https://abc.u.metistry.app", origins: ["https://abc.u.metistry.app", "http://127.0.0.1:8080"], ok: false });
     expect(renderRemoteStatus(s, createUi({ noColor: true }))).toContain("no adapter");
     expect(remoteChoices(providers).filter((c) => c.available).map((c) => c.id)).toEqual(["none", "zrok"]);
   });

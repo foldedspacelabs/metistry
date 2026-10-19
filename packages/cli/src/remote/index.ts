@@ -39,6 +39,8 @@ import { availableProviders, providerFor, remoteChoices, remoteContext, remoteRo
 
 export { REMOTE_PROVIDERS_BUILT_IN, availableProviders, classifyUpstream, droppedOriginsNote, mainPortRemediation, providerFor, proxySocketPath, remoteChoices, remoteContext, remoteRows, sharedRemoteRows, type RemoteRegistry } from "./rows.js";
 export { none, NONE_ROW_INFO } from "./none.js";
+export { tailscale, tailscaleProvider, TAILSCALE_MODES, TAILNET_PHONE_NOTE, stateRows, type TailscaleDeps, type TailscaleMode, type TailscaleStatus, type TailscaleServeConfig } from "./tailscale.js";
+export { ensureRemotePack, findRemotePack, isRemoteTool, MANUAL_INSTALL, REMOTE_TOOLS, remotePackAssetName, remoteToolDir, type EnsureRemotePackResult, type RemotePack, type RemoteTool } from "./packs.js";
 export type { AuthorizeOptions, Configured, Detection, ProviderOptions, RemoteChoice, RemoteContext, RemoteProvider, RemoteRow, Revoked } from "./provider.js";
 
 export const REMOTE_VERBS = ["status", "set", "authorize", "test", "off"] as const;
@@ -265,10 +267,12 @@ export interface RemoteSetResult {
   origin: string | null;
   applied: boolean;
   detail: string;
-  /** the old provider's revoke, when one ran (or would run) */
+  /** the old provider's revoke: what it undid — or, in a preview, what it would undo and leave for the owner */
   revoked?: Revoked | undefined;
   /** what `detect` found on the new provider */
   detection: Detection;
+  /** said before anything changes, when a phone is bound to the origin being left: `strandingNote`'s sentence (plan §2.23, "How the origin flows") */
+  stranding?: string | undefined;
 }
 
 /** Said BEFORE anything changes: a passkey is bound to the host it was created on (plan §2.23, "How the origin flows"). */
@@ -333,10 +337,12 @@ export async function remoteSet(o: RemoteSetOptions): Promise<RemoteSetResult> {
   }
 
   // the informed half of informed consent: said before anything changes
-  if (current.origin && switching) r.note(strandingNote(current.origin, detection.origin ?? null));
+  const stranding = current.origin && switching ? strandingNote(current.origin, detection.origin ?? null) : undefined;
+  if (stranding) r.note(stranding);
+  let wouldRevoke: Revoked | undefined;
   if (switching && current.provider !== "none") {
     if (old) {
-      const wouldRevoke = await old.revoke(await contextFor(o, current, { dryRun: true, note: (l) => r.note(l) }));
+      wouldRevoke = await old.revoke(await contextFor(o, current, { dryRun: true, note: (l) => r.note(l) }));
       for (const u of wouldRevoke.undone) r.note(`then undo at ${current.provider}: ${u}`);
       for (const l of wouldRevoke.left_for_owner) r.note(`left for you at ${current.provider}: ${l}`);
     } else {
@@ -351,7 +357,9 @@ export async function remoteSet(o: RemoteSetOptions): Promise<RemoteSetResult> {
       ...(switching && current.provider !== "none" ? [`revoke ${current.provider}`] : []),
     ];
     r.note(`would: ${steps.join("; ")}`);
-    return { from: current.provider, provider: o.provider, origin: detection.origin ?? null, applied: false, detail: "preview only — nothing configured, written or revoked", detection };
+    // the preview carries what the switch would undo and what it strands, so a
+    // driver can put both in front of the owner before asking for --yes
+    return { from: current.provider, provider: o.provider, origin: detection.origin ?? null, applied: false, detail: "preview only — nothing configured, written or revoked", ...(wouldRevoke ? { revoked: wouldRevoke } : {}), detection, ...(stranding ? { stranding } : {}) };
   }
 
   // 1. configure the NEW provider; a throw changes nothing here
@@ -406,7 +414,7 @@ export async function remoteSet(o: RemoteSetOptions): Promise<RemoteSetResult> {
     }
   }
   r.note(`it takes effect at \`metistry up\`, which renders METISTRY_ORIGIN from the record${next.origin ? ` (${next.origin} first, the loopback origin second)` : " (the loopback origin alone)"} and restarts the console`);
-  return { from: current.provider, provider: o.provider, origin: next.origin ?? null, applied: delivery.how !== "none", detail: delivery.detail, revoked, detection };
+  return { from: current.provider, provider: o.provider, origin: next.origin ?? null, applied: delivery.how !== "none", detail: delivery.detail, revoked, detection, ...(stranding ? { stranding } : {}) };
 }
 
 // ---- test -----------------------------------------------------------------------------------

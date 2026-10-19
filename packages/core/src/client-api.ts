@@ -153,6 +153,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
     principals: ["session", "local_owner", "owner_token", "agent"],
     idempotent: "key",
   }),
+  route("GET", "/api/briefing", "the session-start briefing for one repository (`repo`, `remote`): the owner's project page, open tasks, folds and recent sessions as handles plus owner text, under the agent's grant (X-128)", { reach: ["agent"], principals: ["agent"] }),
 
   // ----- who you are, and your devices -----
   route("GET", "/api/whoami", "which credential this is and whether it reaches management", { principals: OWNER_AND_CAPTURE_TOKEN }),

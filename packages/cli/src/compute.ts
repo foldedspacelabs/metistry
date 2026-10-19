@@ -974,7 +974,7 @@ export async function modelsList(opts: ComputeOptions & { provider?: string | un
       providers.push({ name, ok: false, detail: e instanceof Error ? e.message : String(e), models: [] });
     }
   }
-  const detected = opts.provider ? [] : (await probeLocalServers({ compute, env: opts.env, fetchFn: opts.fetchFn })).filter((r) => r.ok && r.provider === undefined);
+  const detected = opts.provider ? [] : (await probeLocalServers({ compute, env: opts.env, fetchFn: opts.fetchFn, scanDefaults: true })).filter((r) => r.ok && r.provider === undefined);
   return { providers, detected };
 }
 

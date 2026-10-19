@@ -32,6 +32,7 @@ import * as actors from "./actors.js";
 import type { AssistantDefinitionSource } from "./actors.js";
 import type { SessionPolicy } from "./session-policy.js";
 import { parseCookies, readBody, readJson, sendError, sendJson, sendRateLimited, sendRefusal, sendUnrouted, sessionCookie, setProxySecurityHeaders } from "./http-util.js";
+import { BRIEFING_ROUTE, briefingRoute } from "./briefing-route.js";
 import * as wa from "./webauthn.js";
 import { checkLocalOwner, type Listener, type LocalOwnerConfig } from "./local-owner.js";
 import { hostAllowed, remoteHostsOf } from "./proxy-listener.js";
@@ -272,6 +273,8 @@ export interface ConsoleConfig {
    * bridge, and the route answers 503.
    */
   vaultRevert?: VaultReverter | undefined;
+  /** The session-start briefing (X-128): the owner's budget in tokens (METISTRY_BRIEFING_TOKENS). Absent = core's default. */
+  briefing?: { budgetTokens?: number | undefined } | undefined;
 }
 
 // ----- since-cursors (docs/ops/client-api.md) -----
@@ -896,6 +899,14 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     if (key === "POST /auth/enroll/start") {
       const body = (await readJson(req)) as { code?: string };
       if (!body.code || !(await store.peekEnrollmentCode(db, body.code))) return sendError(res, "unauthenticated");
+      // The phone reached this console with a live code (§2.23 step 7, X-114):
+      // stamp which listener answered. `proxy` is the proof from outside the
+      // sheet shows as *Opened on your phone*; `main` is recorded and never
+      // offered as it. Stamping is not using — the code is untouched — and it
+      // is audited once, when a stamp was actually written. The code itself is
+      // never in the record, only its row id.
+      const stamped = await store.stampEnrollmentOpened(db, body.code, listener);
+      if (stamped !== undefined) await audit("auth", "enroll_opened", true, { code_id: stamped, listener });
       const from = wa.requestOrigin(rp, req.headers);
       if (!from) {
         const err = wa.unconfiguredOrigin(rp, req.headers);
@@ -1049,6 +1060,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
         await finishRun(db, runId, { ok: false, error: String(err) });
         throw err;
       }
+    }
+
+    // ----- the session-start briefing (X-128): agent bearers only, under their grant -----
+    // The table files it under reach `agent` with `agent` as its one
+    // principal: an owner credential is not an agent principal here, exactly
+    // as at `/mcp`, so a session, the local owner token and the capture token
+    // all get the uniform `forbidden` before the door is reached. The role
+    // among agent bearers (`agent` served; the assistant and a crew not) is
+    // `may`'s, inside the route.
+    if (key === BRIEFING_ROUTE) {
+      if (auth.kind !== "agent") return sendError(res, "forbidden");
+      return briefingRoute({ db, queries, budgetTokens: cfg.briefing?.budgetTokens, now: cfg.now ?? (() => new Date()) }, res, url, auth.agent, principalOf(auth));
     }
 
     // ----- agent tokens stop here: uniform 403 on everything else, never 404 -----

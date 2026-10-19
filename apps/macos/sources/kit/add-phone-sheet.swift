@@ -4,8 +4,11 @@
 // says which state it is in and nothing it has not been told: Checking while
 // `metistry enroll --json` runs; the refusal's own words, with Learn How, and
 // NO QR when the CLI refused; the QR, the URL, Copy Link and the countdown
-// when it minted; *This code expired* in the QR's place when the ten minutes
-// ran out; *“iPhone” was added* when the phone arrived. Done in every state —
+// when it minted; *Opened on your phone* in the QR's place once the console saw
+// the phone's request arrive through the proxy listener (X-114); *This code
+// expired* in the QR's place when the ten minutes ran out (and, when no phone
+// ever reached the origin, what to try); *“iPhone” was added* when the phone
+// arrived. Done in every state —
 // and closing cancels a live code (the model's `close()`).
 //
 // Accessibility (§2.18): the QR is an image VoiceOver names *QR code for
@@ -48,6 +51,12 @@ public struct AddPhoneSheet: View {
         #if os(macOS)
         .onExitCommand { onDone() }
         #endif
+        // The window or the wizard closing under an open sheet never calls the
+        // presenter's binding setter, so the code would stay live for its
+        // ten minutes. A model that is still open when its view goes away is
+        // closed the way Done closes it; one already closed (Done, Esc) is not
+        // — which also keeps a late disappearance from closing a newer sheet.
+        .onDisappear { if !model.isClosed { onDone() } }
     }
 
     // MARK: - The states
@@ -68,11 +77,38 @@ public struct AddPhoneSheet: View {
             refused(refusal, p)
         case .ready(let code):
             ready(code, p)
-        case .expired:
+        case .openedOnPhone(let code, let provider):
+            VStack(alignment: .leading, spacing: MetistrySpace.s2) {
+                HStack(spacing: MetistrySpace.s2) {
+                    StatusDot(.ok)
+                    Text(AddPhoneWords.openedTitle).metistryText(.headline, p)
+                }
+                Text(AddPhoneWords.opened(through: provider))
+                    .metistryText(.callout, p)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(AddPhoneWords.openedNote)
+                    .metistryText(.callout, p, .textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(code.countdown(at: context.date))
+                        .metistryText(.footnote, p, .textSecondary)
+                        .monospacedDigit()
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .metistryCard(p)
+        case .expired(let code):
             VStack(alignment: .leading, spacing: MetistrySpace.s2) {
                 HStack(spacing: MetistrySpace.s2) {
                     Image(systemName: CheckStatus.absent.symbolName).foregroundStyle(p[.absent]).accessibilityHidden(true)
                     Text(AddPhoneWords.expired).metistryText(.headline, p)
+                }
+                if !model.phoneReachedMac {
+                    // the console never heard from a phone on the proxy listener: say so, and what to try
+                    Text(AddPhoneWords.notReached(code.origin))
+                        .metistryText(.callout, p)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Text("A code works for 10 minutes. Make a new one and scan it with your phone.")
                     .metistryText(.callout, p, .textSecondary)
@@ -168,7 +204,7 @@ public struct AddPhoneSheet: View {
             switch model.phase {
             case .refused:
                 Button(AddPhoneWords.learnHow) { openURL(AddPhoneWords.guideURL) }
-            case .ready, .expired, .unavailable:
+            case .ready, .openedOnPhone, .expired, .unavailable:
                 Button(AddPhoneWords.makeANewCode) { Task { await model.makeNewCode() } }
             case .checking, .added:
                 EmptyView()

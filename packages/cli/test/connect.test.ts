@@ -110,7 +110,7 @@ interface Row {
   id: string;
   display_name: string;
   kind: string;
-  grants: { tier: string; areas: string[] };
+  grants: { tier: string; areas: string[]; queries?: boolean; connections?: string[]; briefing?: false };
   projects: string[];
   revoked: boolean;
   last_seen_at: string | null;
@@ -162,7 +162,15 @@ function fakeConsole(seed: Partial<Row>[] = []) {
         if ((g.areas ?? []).some((a) => !/^[A-Z][A-Za-z0-9 _.'-]*(\/[A-Z][A-Za-z0-9 _.'-]*)*$/.test(a))) {
           return json(400, { error: { code: "invalid_request", message: "area must be a TitleCase vault prefix (e.g. Areas/Fsl)" } });
         }
-        row.grants = { tier: g.tier, areas: g.areas ?? [] };
+        // the console REPLACES the envelope with what validateGrants keeps (apps/console/src/agents.ts): tier, areas, and the optional fields
+        const b = body as { queries?: unknown; connections?: unknown; briefing?: unknown };
+        row.grants = {
+          tier: g.tier,
+          areas: g.areas ?? [],
+          ...(b.queries === true ? { queries: true } : {}),
+          ...(Array.isArray(b.connections) && b.connections.length > 0 ? { connections: b.connections } : {}),
+          ...(b.briefing === false ? { briefing: false } : {}),
+        } as Row["grants"];
         return json(200, { ok: true, grants: row.grants });
       }
       row.projects = (body as { projects: string[] }).projects;
@@ -1285,7 +1293,7 @@ describe("metistry connect --remove (argv)", () => {
     const kc = fakeSecurity();
     const exec = withOwner(kc);
     const c = fakeConsole();
-    for (const extra of [["--rotate"], ["--remote"], ["--areas", "Areas/A"], ["--project", "x"]]) {
+    for (const extra of [["--rotate"], ["--remote"], ["--areas", "Areas/A"], ["--project", "x"], ["--briefing", "off"]]) {
       const r = await run(["--remove", "cursor", ...extra], { exec, fetchFn: c.fetchFn, home, instanceDir });
       expect(r.code).toBe(2);
       expect(r.err).toMatch(/cannot be combined/);
@@ -1310,5 +1318,116 @@ describe("metistry connect --remove (argv)", () => {
     const out: string[] = [];
     await main(["help"], { out: (x) => out.push(x), err: () => {} });
     expect(out.join("\n")).toContain("metistry connect --remove <cursor|opencode|devin|claude-code>");
+  });
+});
+
+describe("connect: the session-start briefing (X-129; ruled 2026-10-04: on by default, opt-out per agent)", () => {
+  const putBodies = (c: ReturnType<typeof fakeConsole>) => c.calls.filter((x) => x.method === "PUT" && x.path.endsWith("/grants")).map((x) => x.body);
+
+  it("is ON by default and says what carries it, with no write to the grants", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const r = await connect({ tool: "claude-code", ...base(home, instanceDir, fakeClaude(kc, home).exec, c.fetchFn) });
+    expect(r.briefing).toEqual({ state: "on", via: "session-start-hook", plugin: "plugins/claude-code" });
+    expect(putBodies(c)).toEqual([]);
+    const text = renderConnect(r);
+    expect(text).toMatch(/briefing {2}on \(the default\): the plugins\/claude-code plugin's SessionStart hook/);
+    expect(text).toContain("served nothing until this agent has a read grant"); // a new row's grants are default-deny
+    expect(text).toContain("--briefing off");
+  });
+
+  it("--briefing off writes {briefing:false} WITH the rest of the envelope, and a second off writes nothing", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole([{ id: "claude-code", grants: { tier: "areas", areas: ["Areas/Engineering"], queries: true, connections: ["linear"] } }]);
+    const b = () => base(home, instanceDir, fakeClaude(kc, home).exec, c.fetchFn);
+    const r = await connect({ tool: "claude-code", briefing: "off", ...b() });
+    expect(putBodies(c)).toEqual([{ tier: "areas", areas: ["Areas/Engineering"], queries: true, connections: ["linear"], briefing: false }]);
+    expect(r.briefing.state).toBe("off");
+    expect(r.grants).toMatchObject({ briefing: false, queries: true, connections: ["linear"] });
+    expect(c.rows.get("claude-code")!.grants).toMatchObject({ briefing: false });
+    expect(renderConnect(r)).toContain("briefing  OFF for this agent");
+    expect(renderConnect(r)).toContain("--briefing on");
+
+    // no flag leaves it as the owner set it; the same flag again changes nothing
+    expect((await connect({ tool: "claude-code", ...b() })).briefing.state).toBe("off");
+    await connect({ tool: "claude-code", briefing: "off", ...b() });
+    expect(putBodies(c)).toHaveLength(1);
+  });
+
+  it("--briefing on takes the opt-out back, and nothing else changes", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole([{ id: "claude-code", grants: { tier: "areas", areas: ["Projects"], briefing: false } }]);
+    const r = await connect({ tool: "claude-code", briefing: "on", ...base(home, instanceDir, fakeClaude(kc, home).exec, c.fetchFn) });
+    expect(putBodies(c)).toEqual([{ tier: "areas", areas: ["Projects"] }]);
+    expect(r.briefing.state).toBe("on");
+  });
+
+  it("--areas never takes an opt-out back: widening the grant carries briefing:false through", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole([{ id: "claude-code", grants: { tier: "none", areas: [], briefing: false } }]);
+    const r = await connect({ tool: "claude-code", areas: ["Areas/Fsl"], ...base(home, instanceDir, fakeClaude(kc, home).exec, c.fetchFn) });
+    expect(putBodies(c)).toEqual([{ tier: "areas", areas: ["Areas/Fsl"], briefing: false }]);
+    expect(r.grants).toMatchObject({ tier: "areas", briefing: false });
+  });
+
+  it("a revoked row comes back at the defaults: on, as a new row is", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole([{ id: "claude-code", revoked: true, grants: { tier: "areas", areas: ["Projects"], briefing: false } }]);
+    const r = await connect({ tool: "claude-code", ...base(home, instanceDir, fakeClaude(kc, home).exec, c.fetchFn) });
+    expect(r.reconnected).toBe(true);
+    expect(r.briefing.state).toBe("on");
+  });
+
+  it("a tool that cannot carry it yet says so, and still keeps the owner's setting", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const r = await connect({ tool: "cursor", briefing: "off", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(r.briefing).toMatchObject({ state: "off", via: "none" });
+    expect(c.rows.get("cursor")!.grants).toMatchObject({ briefing: false });
+    const on = await connect({ tool: "cursor", briefing: "on", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(renderConnect(on)).toContain("Cursor cannot carry it yet");
+  });
+
+  it("--list shows on / off / n/a per tool", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole([
+      { id: "claude-code", grants: { tier: "areas", areas: ["Projects"] } },
+      { id: "opencode", grants: { tier: "areas", areas: ["Projects"], briefing: false } },
+      { id: "cursor" },
+    ]);
+    const listed = await connectList({ ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    const by = Object.fromEntries(listed.tools.map((t) => [t.tool, t.briefing]));
+    expect(by).toEqual({ "claude-code": "on", opencode: "off", cursor: "n/a", devin: "n/a" });
+  });
+
+  it("the harness registry: every entry says how the briefing is delivered, and a delivering one names a plugin that exists", () => {
+    const root = join(__dirname, "..", "..", "..");
+    for (const tool of CONNECT_TOOLS) {
+      const d = HARNESSES[tool].briefing;
+      expect(["session-start-hook", "system-transform", "none"]).toContain(d.via);
+      if (d.via === "none") expect(d.why.length).toBeGreaterThan(10);
+      else expect(existsSync(join(root, d.plugin, "scripts", "briefing.mjs")), `${d.plugin} must ship scripts/briefing.mjs`).toBe(true);
+    }
+  });
+
+  it("argv: --briefing takes on or off only, with exit 2 and nothing sent", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    for (const argv of [["--briefing"], ["--briefing", "maybe"]]) {
+      const out: string[] = [];
+      const err: string[] = [];
+      const code = await main(["connect", "claude-code", ...argv, "--instance", instanceDir], { out: (x) => out.push(x), err: (x) => err.push(x), platform: "darwin", home, exec: kc.exec, fetchFn: c.fetchFn });
+      expect(code).toBe(2);
+      expect(err.join("\n")).toMatch(/--briefing takes on or off/);
+    }
+    expect(c.calls).toEqual([]);
   });
 });

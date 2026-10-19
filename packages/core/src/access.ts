@@ -515,7 +515,16 @@ export type Decision = { readonly ok: true } | Refusal;
 export type KnowledgeDoor = "read" | "list" | "grep" | "links" | "write" | "resources" | "console_page";
 export type QueryDoor = "queries_run" | "console_query";
 export type ProjectDoor = "task" | "task_create";
-export type ConsoleDoor = "console_agent" | "console_management";
+/**
+ * `console_briefing` (X-128): `GET /api/briefing`, the session-start briefing
+ * an external agent is handed under its grant. Agent bearers only — the
+ * route admits the credential class before `may` is asked, as `/mcp` does
+ * (an owner credential is not an agent principal there, docs/ops/client-api.md),
+ * so the owner's rule in `may` never meets this door; what `may` decides is
+ * the ROLE among agent bearers: `agent` is served, the assistant and a crew
+ * are not (the review proposed it for external agents alone).
+ */
+export type ConsoleDoor = "console_agent" | "console_management" | "console_briefing";
 /** The proxy's two doors (§2.6's lazy pair on `/mcp`). */
 export type ConnectionDoor = "connections_list" | "connections_call";
 
@@ -914,6 +923,7 @@ export function may(p: Principal, verb: Verb, r: Resource): Decision {
       // outside /capture and /mcp; `console_management` is the `isUser`
       // gate, which excludes the capture owner token by name.
       if (r.door === "console_agent" && p.role === "tool") return OK;
+      if (r.door === "console_briefing" && p.role === "agent") return OK;
       return hidden("forbidden", "role_required");
   }
   // Unreachable while `Resource` is a closed union; kept so a new variant

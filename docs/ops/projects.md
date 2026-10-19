@@ -89,8 +89,9 @@ worse than none. No route was added (ruled 2026-10-04).
 carries a vault path or the owner's own text is never served by the generic
 door), so `GET /api/q/project_for_repo` answers only your passkey session,
 and an agent's `queries_run` gets the unknown-query refusal whatever its
-grant. The consumer is CM-1's session-start briefing, which applies
-`canSeeUnder` to the page before handing the handle on.
+grant. The consumer is the session-start briefing, `GET /api/briefing`
+(X-128, `docs/ops/client-api.md`), which judges the page against the caller's
+grant before handing the handle on.
 
 **Case.** The host is lowercased; the path is kept as you wrote it, because
 some hosts keep `Org/Repo` and `org/repo` apart. If a repository's path case

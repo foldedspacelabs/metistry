@@ -1,6 +1,7 @@
 // One-time passkey enrolment codes (plan §4.2, §2.22) — the table
 // `auth_enrollment_codes` (migration 0003) and the four things anything may do
-// to a row: mint, peek, consume, cancel.
+// to a row: mint, peek, consume, cancel — plus the two X-114 adds: `stamp` (the
+// phone's start reached the console, §2.23 step 7) and `status` (read it back).
 //
 // This lives in core so the two callers share ONE implementation and can never
 // disagree on the hash, the lifetime or what "spent" means: the console spends
@@ -90,4 +91,61 @@ export async function cancelEnrollmentCode(db: EnrollmentDb, codeId: number): Pr
   const { rows } = await db.query(`SELECT used_at FROM auth_enrollment_codes WHERE id = $1`, [codeId]);
   if (rows.length !== 1) return "not_found";
   return (rows[0] as { used_at: unknown }).used_at ? "already_used" : "already_expired";
+}
+
+/** The console listener that answered a phone's `start`: `proxy` came from outside (a provider is pointed at it), `main` is loopback. */
+export type EnrollmentListener = "proxy" | "main";
+
+/**
+ * Record that the phone's `POST /auth/enroll/start` reached the console with
+ * this code (§2.23 step 7, X-114): `opened_at` and `opened_via`. **Stamping is
+ * not using** — `used_at` is untouched, the code stays single-use and expires
+ * when it would have. Only a LIVE code is stamped (an unknown, used or expired
+ * code changes nothing). The first stamp stands, except that `proxy` replaces
+ * `main`: the owner opening the link on this Mac must not hide the phone
+ * arriving, and nothing replaces a `proxy` stamp. Returns the row's id when a
+ * stamp was written (so the caller can audit exactly once), undefined when not.
+ */
+export async function stampEnrollmentOpened(db: EnrollmentDb, code: string, via: EnrollmentListener): Promise<number | undefined> {
+  const { rows } = await db.query(
+    `UPDATE auth_enrollment_codes SET opened_at = now(), opened_via = $2
+     WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+       AND (opened_via IS NULL OR (opened_via = 'main' AND $2 = 'proxy'))
+     RETURNING id`,
+    [tokenHash(code), via],
+  );
+  return rows.length === 1 ? Number((rows[0] as { id: unknown }).id) : undefined;
+}
+
+/** Where a code is in its life: `live` (usable), `used` (a phone finished with it), `expired` (the ten minutes ran out, or it was cancelled). */
+export type EnrollmentState = "live" | "used" | "expired";
+
+/** What `metistry enroll --status <code_id>` prints: never the code, never its hash. */
+export interface EnrollmentStatus {
+  code_id: number;
+  state: EnrollmentState;
+  expires_at: string;
+  /** ISO-8601, when the phone's `start` arrived; null until it has */
+  opened_at: string | null;
+  opened_via: EnrollmentListener | null;
+}
+
+/** Read a code's state and its opened stamp by id; undefined for an id that never existed. */
+export async function enrollmentStatus(db: EnrollmentDb, codeId: number): Promise<EnrollmentStatus | undefined> {
+  if (!Number.isSafeInteger(codeId) || codeId <= 0) return undefined;
+  const { rows } = await db.query(
+    `SELECT id, used_at, expires_at, expires_at > now() AS live, opened_at, opened_via
+     FROM auth_enrollment_codes WHERE id = $1`,
+    [codeId],
+  );
+  if (rows.length !== 1) return undefined;
+  const r = rows[0] as { id: unknown; used_at: unknown; expires_at: string | Date; live: boolean; opened_at: string | Date | null; opened_via: unknown };
+  const state: EnrollmentState = r.used_at ? "used" : r.live ? "live" : "expired";
+  return {
+    code_id: Number(r.id),
+    state,
+    expires_at: new Date(r.expires_at).toISOString(),
+    opened_at: r.opened_at ? new Date(r.opened_at).toISOString() : null,
+    opened_via: r.opened_via === "proxy" || r.opened_via === "main" ? r.opened_via : null,
+  };
 }

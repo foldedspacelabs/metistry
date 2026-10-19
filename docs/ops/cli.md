@@ -38,7 +38,7 @@ All of them are real.
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
 | `templates check [<file>]` | does the vault's `Templates/` read — every directive, with the line number Obsidian shows — before the next run reads it (a template change takes effect at the next run) |
-| `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
+| `doctor [--check \| --fix [--yes]] [--json]` | validate every manifest and probe every bridge, service, container, launchd job — then **repair** what it finds: in a terminal a bare `doctor` applies every fixable row's fix and re-checks once; `--check` is read-only; `--fix` repairs without a terminal (`--yes` for a fix that moves files or restarts a running service) |
 | `up` | bring an install to running: containers/host jobs, then doctor — and exit |
 | `down` | stop every host job and container for this instance, then confirm nothing is left running |
 | `update` | move an install forward: pull/build, migrate, restart what changed, pin, doctor |
@@ -830,6 +830,7 @@ metistry connect devin                      # prints the fields to paste (no API
 metistry connect claude-code                # registers /mcp with Claude Code (reads) + prints the plugin's env lines (capture)
 metistry connect cursor --rotate            # a replacement bearer; the old one dies at once
 metistry connect cursor --areas Areas/Engineering --project second-instance
+metistry connect claude-code --briefing off # opt this agent out of the session-start briefing (on, the default, is --briefing on)
 metistry connect devin --remote             # enrols PENDING: its token works once you let it in
 metistry connect --list [--json]
 metistry connect --remove cursor            # the way back: revoke, delete the Keychain item, restore ~/.cursor/mcp.json
@@ -876,7 +877,55 @@ no per-tool branches for a config, so adding a harness is one entry, and the
 registry's conformance test (`connect.test.ts`, "the harness registry") holds
 every entry to the same rules: no file `connect` writes, and no argv it runs,
 contains a bearer's value; a second write changes nothing; `--list` reads the
-entry back; `--remove` takes away that entry and nothing else.
+entry back; `--remove` takes away that entry and nothing else. Each entry also
+declares how the session-start briefing reaches its agent (`briefing`, below),
+and one that delivers it must name a plugin that ships `scripts/briefing.mjs`.
+
+### The session-start briefing: on by default, `--briefing off` to opt out (X-129)
+
+A new session in a coding tool starts out knowing the project it was opened
+in: the project page for the checkout, its open tasks, the owner's recent
+sessions there and the evening folds that name it, as handles plus the owner's
+own text, assembled by the console under the agent's grant
+(`GET /api/briefing`, `docs/ops/client-api.md`). **It is on for every agent
+with a read grant** (the owner's ruling of 2026-10-04: getting the right
+knowledge to the right place is the core feature), and the opt-out is the
+owner's, per agent:
+
+```sh
+metistry connect claude-code --briefing off   # this agent is served the empty briefing
+metistry connect claude-code --briefing on    # take the opt-out back
+```
+
+`--briefing` takes `on` or `off` (anything else is exit 2, nothing sent) and is
+refused with `--remove`. The opt-out is one field, `briefing: false`, in the
+agent's **grants** on the console, so it goes where a revoke goes: revoking
+and connecting again brings the agent back at the default, on. It is enforced
+at the console — an opted-out agent is answered the empty briefing and the
+`runs` row says `opted_out` — not by the plugin, so a stale or edited plugin
+cannot read what the owner withheld. Two behaviours worth knowing:
+
+- **A grants write carries the whole envelope.** `PUT …/grants` replaces it, so
+  `connect` sends the tier, areas, `queries`, `connections` and `briefing` the
+  row already holds with whatever you changed. `--areas` after `--briefing off`
+  therefore leaves the opt-out in place (and no longer drops `queries` or
+  `connections` — it used to).
+- **No read grant, no briefing.** A new row is default-deny (`tier: none`), so
+  an agent is served nothing until `--areas` widens it; `connect` says so.
+
+What carries the briefing into the session is the harness's `briefing` entry in
+`HARNESSES`, and `connect` prints it:
+
+| tool | delivery | plugin |
+| --- | --- | --- |
+| `claude-code` | the plugin's `SessionStart` hook, once, on `startup` and `clear` | `plugins/claude-code` |
+| `opencode` | `experimental.chat.system.transform`: asked once per session, the same text added to every turn | `plugins/opencode` |
+| `cursor` | not delivered — Cursor's session-start hook is not verified | — |
+| `devin` | not delivered — Devin is a cloud agent with no plugin `connect` can reach | — |
+
+For a tool that does not deliver it the setting is still stored, so an opt-out
+holds the day delivery exists. `connect --list` has a `briefing` column: `on`,
+`off`, or `n/a` (no live row, or nothing in that tool delivers it).
 
 ### `--remove`: the way back, and coming back (HS-7)
 
@@ -917,7 +966,7 @@ are yours to delete — the output says so — and `devin` has neither file nor
 Keychain item.
 Steps 2 and 3 are independent: one failing is reported as a `PROBLEM` line and
 exits 1, the other still runs, and re-running finishes the job. `--remove`
-refuses `--rotate`, `--remote`, `--areas` and `--project` (exit 2), and
+refuses `--rotate`, `--remote`, `--areas`, `--project` and `--briefing` (exit 2), and
 `--json` prints the result.
 
 **A revoked tool can be connected again.** `metistry connect <tool>` on a
@@ -2157,6 +2206,7 @@ prints the rows `GET /api/connections` serves; `show --json` the body of `GET
 ```
 metistry remote [status] [--json] [--instance <dir>]
 metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags] [--yes] [--dry-run] [--timeout <seconds>] [--json]
+  tailscale [--mode funnel|tailnet] [--use-app|--bundled] [--no-browser]
 metistry remote authorize <tailscale|cloudflare> [--no-browser] [--timeout 300] [--json]
 metistry remote test [--json]
 metistry remote off [--yes] [--json]
@@ -2187,13 +2237,25 @@ origin to answer from this Mac (never: nothing written, nothing revoked);
 write the record; revoke the old provider. So the phone is never left with
 nothing mid-change. **`off`** is `set none` with the old provider's revoke.
 A provider this version has no adapter for is refused by name, with the
-choices that exist — this release ships None; the others arrive with their
-own tickets.
+choices that exist — this release ships None and Tailscale (Funnel by
+default, `docs/ops/remote-access.md`, "Tailscale"); the others arrive with
+their own tickets.
 
 **A token never arrives in argv.** `--token` is a switch meaning *read it
 from stdin* (piped, or typed hidden at a prompt in a terminal — the
 `secrets set` reader). `--token abc`, `--token=abc`, or a value pasted after
 the provider's name is refused with exit 2 and is not echoed.
+
+**The provider's tool arrives with `set`, not with the install.** A provider
+that bundles a tool (Tailscale, Cloudflare Tunnel, zrok) fetches its **pack**
+inside `configure`: one release asset per tool, verified against
+`checksums.txt` and its own manifest, unpacked to
+`<product>/runtime/remote/<tool>/` only once both held — a mismatch fails
+`set`, writes nothing and leaves `runtime/remote/` as it was. Nothing is
+fetched for a provider you did not pick, nothing is in the DMG, and `metistry
+update` moves a fetched pack forward with the release. `METISTRY_RUNTIME_DEPS=0`
+keeps `set` off the network and the refusal names the tool's manual install
+instead (`docs/ops/bundled-runtime.md`, "Provider tool packs").
 
 **`remote --json`** is one document: `provider`, `mode`, `origin`,
 `settings`, `from` (which file the record came from), `origins` (the rendered
@@ -2201,7 +2263,15 @@ the provider's name is refused with exit 2 and is not echoed.
 can run), `choices` (the chooser's rows, in the plan's order, each with
 `available`), `rows` (doctor's `remote` rows) and `ok`. Exit 1 when a row is
 `failed`. `remote set --json` prints `{from, provider, origin, applied,
-detail, revoked?, detection}`.
+detail, revoked?, detection, stranding?}` — `revoked` is what the old
+provider's revoke undid and left for you, or in a preview what it **would**
+undo; `stranding` is the sentence about the phones a switch strands, present
+whenever the origin being left has one. **With `--json` the step notes go to
+stderr** — the provider's sign-in link, each approval page, *Waiting for
+<name> to appear on the internet*, the preview's `would:` line and its
+*preview only — pass --yes* — so stdout is exactly the one document and a
+driver (the Mac app's guided flow, X-107) can show the owner where the flow
+is while it waits for the result.
 
 **Doctor's `remote` kind.** None is one `ok` row — *"Remote access: none.
 Your phone can't reach this Mac. Choose a way in Settings ▸ Remote Access."*
@@ -2215,6 +2285,7 @@ remote set <provider>`."* — and *answers from this Mac*, then its own rows.
 ```
 metistry enroll [--json] [--instance <dir>] [--env-file <path>]
 metistry enroll --cancel <code_id> [--json] [--instance <dir>] [--env-file <path>]
+metistry enroll --status <code_id> [--json] [--instance <dir>] [--env-file <path>]
 ```
 
 A phone gets its own passkey by opening a one-time **enrolment code** (plan
@@ -2277,8 +2348,26 @@ id, never the code. A code already used or expired is reported, exit 0
 (`already_used`, `already_expired`); an id nothing has is exit 1
 (`not_found`). `--json`: `{"code_id":42,"outcome":"cancelled","cancelled":true}`.
 
-Both acts land in `runs` (`auth` / `enroll`, `enroll_cancel`) with the id,
-never the code. The database comes from `METISTRY_DB_*` in the install's
+**`--status <code_id>`** (X-114, §2.23 step 7) is read-only: whether the
+phone's `POST /auth/enroll/start` has reached the console with this code, and
+through which listener — what the Mac's sheet polls to turn to **Opened on
+your phone**. It takes the id, never the code, and writes nothing (no `runs`
+row). `--json`:
+
+```json
+{"code_id":42,"state":"live","expires_at":"2026-10-18T14:52:10.123Z","opened_at":"2026-10-18T14:44:02.511Z","opened_via":"proxy","provider":"tailscale"}
+```
+
+`state` is `live`, `used` or `expired` (a cancelled code is `expired`);
+`opened_at` / `opened_via` are `null` until a start has arrived; `provider` is
+`remote.provider` from `deployment.yaml`, `null` with none. **Only `proxy` is
+the proof** — the start came through the listener a provider is pointed at.
+`main` means it arrived over loopback (the owner opened the link on this
+Mac), is recorded, and is never shown as the phone arriving. An id nothing has
+is exit 1.
+
+The mint and the cancel land in `runs` (`auth` / `enroll`, `enroll_cancel`)
+with the id, never the code. The database comes from `METISTRY_DB_*` in the install's
 environment (`--instance <dir>` picks up `<instance>/.metistry/state/.env`);
 without `METISTRY_DB_PASSWORD` the verb exits 2 and says so — it never
 guesses a database.
@@ -2428,7 +2517,8 @@ terminal's locale is not UTF-8, come from `docs/ops/cli-style.md`;
 
 One row per thing that can be wrong; every row is a `core` `CheckResult`
 (`name`, `status`, `latency_ms`, `probe`, `remediation`, `meta`) plus a
-`kind`, and — additively, T4-21 — an optional `action`. Statuses mean what
+`kind`, and — additively, T4-21 — an optional `action`; since X-123 every row
+also carries `fix` and `fixed` (*Doctor repairs*, below). Statuses mean what
 they mean everywhere else in the product:
 
 | status | meaning | exit code |
@@ -2442,6 +2532,111 @@ they mean everywhere else in the product:
 how optional bridges are designed to behave (a Linux box has no apple-fm).
 Something you rely on that shows `absent` is still a finding — read the
 column, not just the exit code.
+
+### Doctor repairs
+
+> "Regardless of the problems found, the user only needs to run `metistry
+> doctor` to fix it and get the instance working correctly." — the owner,
+> 2026-10-04
+
+Doctor's purpose is repair, not a status pane (X-123). **Every row is
+classified**, in code, per finding — never by reading its own sentence:
+
+| `fix` | meaning | the table shows |
+| --- | --- | --- |
+| `fixable` | doctor does it: the row carries a `repair` — an id from a closed table, what it acts on, and whether it asks first | `fixable`, then `fixed` or `still failing` after a repair run |
+| `hand` | the owner does it, and the remediation says the exact step: a TCC grant (System Settings), a credential another service issues, a download, `sudo`, choosing the instance directory, a password nothing holds | `your hand` |
+| `info` | a fact, not a fault: a feature that is off, a server nobody runs, a schedule that has never run, a row that follows another's finding | nothing |
+
+**Modes.** Which one runs is decided by the flags, and for a bare `doctor` by
+whether there is a person to ask:
+
+- **`metistry doctor`** in a terminal checks, then **applies every fixable
+  row's fix**, asking once (`y/N`) per fix that moves files or restarts a
+  running service, then **re-checks once** — never a loop — and prints the
+  fixes as `up` prints its steps (`$ argv`), then **before → after** for each
+  row a fix was for, then the re-check's tally. Exit 0 when nothing is
+  `failed`, no fix failed, and none is waiting for a `--yes`.
+- **`--check`** is read-only — exactly the report, as before. It is what
+  `up`'s and `update`'s closing doctor, CI, the wave checkpoint and the Mac
+  app's refresh run (the app's M6 door is `doctor --json`, which is `--check`
+  by construction: see below).
+- **`--fix [--yes]`** repairs without a terminal. A destructive fix runs only
+  with `--yes`; without it, it is previewed, left, and the run exits non-zero.
+- **A bare `doctor` with nobody to ask** — a pipe, a script, an agent, the Mac
+  app, or `--json` (the question would land in the document) — is `--check`,
+  and ends with one line — *N fixable — `metistry doctor` in a terminal applies
+  the fixes, or `metistry doctor --fix`*. So every script and agent that
+  runs `metistry doctor` today stays read-only, and the only way to repair
+  without a terminal is to say `--fix`.
+
+**The closed table** (`RepairId`, `packages/cli/src/doctor.ts`; the fixes,
+`doctor-fix.ts`). Each is an existing audited service, run through the same
+`StepRunner` as `up`'s and `update`'s steps — no new shell-out, no raw git,
+nothing a row's prose could add (invariants 9 and 10):
+
+| id | what runs | for | asks first |
+| --- | --- | --- | --- |
+| `restart <service>` | `metistry restart <service>` (service-control.ts: the supervisor's socket for a child, `launchctl kickstart -k` for an agent, `docker compose restart` for a container) | the console down; a bridge unreachable or answering without a `check()` body; the db unreachable; a supervisor child crash-looping or exited; a launchd job bootstrapped and not running; a container not running | no — nothing running is interrupted. **Yes** when the service answers and is bounced for a newer `.env` value: the console refusing `METISTRY_LOCAL_OWNER_TOKEN`, a bridge refusing its token (never a re-mint), the reconciler predating `/vault/status`; and for the supervisor itself (every child restarts) |
+| `migrate` | the migration runner under `pg_advisory_lock`, one transaction per file — `update`'s step alone, never the rest of `update`, and never `pnpm db:migrate`, which a release install does not have | `migrations` pending, or no `schema_migrations` table (a fresh launchd install whose `up` never migrated crash-loops its console until this runs) | no |
+| `render` | `up`, inside doctor exactly as `update` runs it inside itself — one renderer | a launchd job not bootstrapped; no `supervisor.json`; `launchd env` drift or never rendered; `supervisor.json` without the assistant child; a child spawned from an older render; nothing spawned under a Seatbelt profile (`spawned.profile === null`, X-48); keep-awake with no state file or released when the supervisor stopped; a compose service with no container | **yes** — it restarts the supervisor and every child |
+| `cli_shim` | write this install's cli shim (`up`'s step) | `cli on PATH` with no shim yet | no |
+| `seed_templates` | re-seed the templates the vault lacks (`update`'s step; a file you have is never touched) | a schedule row skipped `template_missing` | no |
+| `vault_case` | rename product files to the seed's spelling through the reconciler (`update`'s step) | `vault case` | no |
+| `migrate_scope` | `secrets migrate-scope` — copies, deletes nothing (`update`'s step) | `shared scope` with credentials still only in the retired scope | no |
+| `migrate_layout` | `metistry migrate-layout` | `instance layout` legacy | **yes** — a `git mv` storm |
+| `migrate_inbox` | `metistry migrate-inbox` | `inbox` pre-#156 | **yes** — files move |
+
+What stays the owner's hand, with the exact step on the row: a TCC grant; a
+credential another service issues (a provider key, a connection's secret); a
+download (the app behind the lock, Docker); `sudo pmset`; choosing the
+instance directory; linking the shim onto `PATH` (invariant 2); a database
+password nothing holds (never minted over a data dir); removing the shared
+originals (`secrets purge-shared`, its own preview); a schedule the runner
+stopped or blocked; a conflict in the vault; `Me/profile.md`'s working days;
+the keep-awake setting (`seed/deployment.yaml` says the product may not
+decide it). Informational: a feature that is off (turning it on is yours), a
+local server nobody runs, a child **you stopped** (`metistry stop` — doctor
+never starts it; `metistry start` is yours, rule 6), rows that follow
+another's finding (the brain while the console is down; migrations and
+schedules while the db is unreachable).
+
+**Rules a repairing tool is held to**, each a code path with a test:
+
+- **No fix on a false reading.** X-122's grace and X-48's "read what the
+  supervisor spawned" land first; a row whose age nothing can tell is not
+  fixed on a guess.
+- **One pass, never a loop.** Each fix runs at most once per invocation, the
+  re-check fixes nothing, and a fix that ran without clearing its row reads
+  `tried X; still failing`. A **restart-class fix** (`restart`, `render`) is
+  not repeated for the same target within `METISTRY_DOCTOR_RESTART_WINDOW_MIN`
+  (default 30) across invocations — the fix log is the evidence — and the row
+  becomes yours, with when doctor tried and the log to read. A repair run
+  pressed repeatedly cannot restart-storm a crash loop.
+- **Dependency order, and a dependent row waits.** The db, then its schema,
+  then the render, then the supervisor, then what it runs, then the files. A
+  `render` restarts everything, so no restart runs beside it; the
+  supervisor's restart takes its children's with it. Rows those would have
+  fixed are re-evaluated by the re-check, not fixed separately.
+- **Never a declaration.** Doctor never turns a feature on or off, never
+  mints or rotates a credential, never changes `keep_awake`, a sandbox switch
+  or a host list, and never starts what you stopped.
+- **Audited.** The `$ argv` lines a terminal shows are the runner's, as
+  `up`'s are; and every fix — what, for which rows, its steps, its outcome,
+  an error — is appended to `<instance>/.metistry/state/doctor-fixes.jsonl`
+  (derived state, `0600`; names and argv, never a value).
+
+**`--json`** adds, additively: `mode` (`check` | `fix`); on every row `fix`
+(`fixable` | `hand` | `info`) and `fixed` (`true` when a repair run cleared
+the row, `false` when a fix ran — or failed — and it is still a finding,
+`null` when no fix was for it), and `repair` (`{ id, target?, confirm, does }`)
+on a fixable row; and in fix mode `fixes[]` — one per fix that was planned,
+in the order it ran: `id`, `target`, `rows`, `does`, `confirm`, `outcome`
+(`fixed` | `applied` | `failed` | `declined` | `needs_confirm`), `steps`
+(the runner's ledger), `error`, `before` and `after` (status per row). The
+rows of a fix-mode document are the **re-check's**. `action` is unchanged
+beside all this — the Status window's **Fix All** (X-125) reads `fix`,
+`fixed` and `fixes[]`.
 
 **A collector's row is the collector's own `check()`** (X-87). Every
 collector exports `check()` (CLAUDE.md; one CI test holds it — no allowlist),
@@ -3022,7 +3217,7 @@ install forward, in this order:
 
 | step | git mode (the product is a checkout) | release mode (`.metistry/metistry.lock`: `source: release`, or `--channel release`) |
 | --- | --- | --- |
-| product | `git fetch` + `git pull --ff-only` — a diverged checkout stops the update (exit code git's) | resolve the release, download its runtime pack + `checksums.txt`, **verify the sha256**, unpack to `releases/<version>/`, point `current` at it (`docs/ops/releases.md`) |
+| product | `git fetch` + `git pull --ff-only` — a diverged checkout stops the update (exit code git's) | resolve the release, download its runtime pack + `checksums.txt`, **verify the sha256**, unpack to `releases/<version>/`, point `current` at it (`docs/ops/releases.md`); then the deps pack to `runtime/`, and **every provider tool pack already under `runtime/remote/`** to the same release — a tool whose provider was never chosen is not fetched (`docs/ops/bundled-runtime.md`, "Provider tool packs") |
 | app | — (a checkout's app is Sparkle's or a local build's) | **macOS, launchd shape:** `Metistry-<version>.dmg` from the same release, sha256-verified the same way, swapped into `/Applications/Metistry.app` with the old one kept as `Metistry.app.previous` (below) |
 | build | `pnpm install --frozen-lockfile` + `pnpm -r build` (`--skip-build` to reuse `dist/`) | no build — the pack is compiled output |
 | migrations | `db/migrations/*.sql` not yet in `schema_migrations`, in filename order, one transaction each, under `pg_advisory_lock` (below); `--skip-migrate` leaves them to doctor to report | same, read from `current` |
@@ -3251,8 +3446,9 @@ the new release's manifests with the old manifest schema — and an update
 that changed the schema would end "updated, and doctor is not happy" (exit 1)
 while a standalone `metistry doctor` is clean. So the closing doctor runs as
 a child of the updated product's own CLI: `node
-<run-dir>/packages/cli/dist/main.js doctor --json --product-dir <run-dir>`
-(`<run-dir>` is the checkout, or `current` in release mode; `node` is the
+<run-dir>/packages/cli/dist/main.js doctor --check --json --product-dir <run-dir>`
+(`--check`: the closing doctor reports and never repairs — repair is your own
+`metistry doctor` afterwards; `<run-dir>` is the checkout, or `current` in release mode; `node` is the
 bundled runtime's when there is one, as for the `metistry` shim), and its
 report is the verdict — exit 0 when it is ok, 1 when not, exactly as
 before. When there is no built CLI there, it cannot be spawned, or it

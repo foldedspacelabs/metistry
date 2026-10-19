@@ -39,10 +39,10 @@
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, cp, lstat, mkdir, readdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, readdir, readFile, readlink, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CURRENT_LINK, RELEASES_DIRNAME, RUNTIME_PACK_MANIFEST, releaseDir, releasesDir, switchCurrent } from "./release.js";
-import { RUNTIME_DIRNAME, RUNTIME_MANIFEST_FILE, RUNTIME_RELEASE_FILE, runtimeDir, runtimeManifestPath } from "./runtime-deps.js";
+import { keptRemoteDir, remoteDir, restoreKeptRemote, RUNTIME_DIRNAME, RUNTIME_MANIFEST_FILE, RUNTIME_RELEASE_FILE, runtimeDir, runtimeManifestPath } from "./runtime-deps.js";
 import { StepFailed, type StepRunner } from "./steps.js";
 
 /** The receipt at the product dir's root: what was installed, from where, and the two manifest digests that make a re-run a no-op. */
@@ -279,11 +279,20 @@ export async function installRuntime(r: StepRunner, opts: RuntimeInstallOptions)
 
   if (seed.runtime) {
     const rt = runtimeDir(productDir);
+    // The provider tool packs under runtime/remote/ are the OWNER's choice
+    // (`metistry remote set`, plan §2.23 / X-112), never in a seed: they step
+    // aside while the bundled runtime is replaced and come back after —
+    // restore-first, so a run that crashed between the renames loses nothing.
+    await restoreKeptRemote(productDir);
+    const remote = remoteDir(productDir);
+    const keep = keptRemoteDir(productDir);
+    if (existsSync(remote)) await rename(remote, keep);
     await rm(rt, { recursive: true, force: true });
     // NOT dereferenced: runtime/postgres/lib is a symlink farm (libpq's
     // versioned names), and flattening it breaks the install-name rewrites
     await cp(seed.runtime.dir, rt, { recursive: true, verbatimSymlinks: true });
     await makeWritable(rt);
+    await restoreKeptRemote(productDir);
     // `runtime/.release` is what runtime-deps.ts compares a release against,
     // so a bundled runtime and a downloaded one are indistinguishable to it
     await writeFile(join(rt, RUNTIME_RELEASE_FILE), `${seed.version}\n`);

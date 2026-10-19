@@ -117,6 +117,14 @@ Running `metistry connect cursor` again with no flags **leaves grants
 exactly as you set them** — it is not a verb that quietly narrows a tool you
 had widened.
 
+## The session-start briefing is not delivered to Cursor yet
+
+`GET /api/briefing` (X-128) is on by default for an agent with a read grant, but
+Cursor has no hook this repo has verified for injecting context at session
+start, so nothing carries it (`docs/ops/cli.md`, "The session-start briefing").
+`metistry connect cursor --briefing off` still stores your opt-out with the
+agent's grants, so it holds the day delivery exists.
+
 ## Rotate, revoke, check
 
 ```sh

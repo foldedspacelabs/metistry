@@ -107,6 +107,13 @@ the console with a `runs` row. There is no tool to violate it with.
   server. None of that applies to the bearer *this* verb mints — that one is
   Metistry's, minted by `POST /api/agents`, and revocable here.
 
+## The session-start briefing is not delivered to Devin
+
+Devin runs in its own cloud with no plugin `connect` can reach, so nothing
+carries the session-start briefing (`GET /api/briefing`, X-128) to it; it reads
+the vault through `/mcp` only. `metistry connect devin --briefing off` stores
+your opt-out with the agent's grants all the same.
+
 ## Rotate, revoke, check
 
 ```sh

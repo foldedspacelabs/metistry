@@ -235,6 +235,7 @@ public enum KeyTable {
         KeySite("kit/settings-panes/instance-sheets.swift", ".keyboardShortcut(.defaultAction)", "everywhere.default"),
         KeySite("kit/components/undo-and-confirm.swift", ".keyboardShortcut(.defaultAction)", "everywhere.default"),
         KeySite("kit/add-phone-sheet.swift", ".keyboardShortcut(.defaultAction)", "everywhere.default"),
+        KeySite("kit/settings-panes/remote-access-pane.swift", ".keyboardShortcut(.defaultAction)", "everywhere.default"),
         KeySite("kit/chat-view.swift", ".keyboardShortcut(.cancelAction)", "everywhere.escape"),
         KeySite("kit/variables-view.swift", ".keyboardShortcut(.cancelAction)", "everywhere.escape"),
         KeySite("kit/secrets-view.swift", ".keyboardShortcut(.cancelAction)", "everywhere.escape"),
@@ -254,6 +255,7 @@ public enum KeyTable {
         KeySite("kit/agents-view.swift", ".onExitCommand", "everywhere.escape"),
         KeySite("kit/components/undo-and-confirm.swift", ".onExitCommand", "everywhere.escape"),
         KeySite("kit/add-phone-sheet.swift", ".onExitCommand", "everywhere.escape"),
+        KeySite("kit/settings-panes/remote-access-pane.swift", ".onExitCommand", "everywhere.escape"),
     ]
 }
 

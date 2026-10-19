@@ -30,8 +30,8 @@ import { openDbFromEnv, type Db } from "./doctor.js";
 import { readInstanceId } from "./instance.js";
 import type { Ui } from "./ui.js";
 
-/** limit: fixed — §2.22's own number: `GET <origin>/health` must answer from this Mac within 5 s */
-export const ENROLL_HEALTH_TIMEOUT_MS = 5000;
+/** How long `GET <origin>/health` has to answer from this Mac. */
+export const ENROLL_HEALTH_TIMEOUT_MS = 5000; // limit: fixed — §2.22's own number ("within 5 s"); a refusal rule, not a tunable
 
 export type EnrollRefusalCase = "origin_unset" | "origin_invalid" | "loopback" | "http" | "ip_literal" | "unreachable" | "other_instance";
 

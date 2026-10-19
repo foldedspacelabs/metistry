@@ -19,12 +19,8 @@ export interface EnrollmentDb {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
 }
 
-/**
- * limit: fixed — a one-shot enrolment code's lifetime is a security parameter,
- * not a setting (§2.22: "the 10 minutes stays a fixed security parameter"). It
- * is interpolated into SQL, which is why it is a constant and not a parameter.
- */
-export const ENROLLMENT_CODE_TTL_MIN = 10;
+/** A one-shot enrolment code's lifetime; interpolated into SQL, which is why it is a constant and not a parameter. */
+export const ENROLLMENT_CODE_TTL_MIN = 10; // limit: fixed — a security parameter, not a setting (§2.22: "the 10 minutes stays a fixed security parameter")
 
 export interface MintedEnrollmentCode {
   /** the secret the phone presents — printed once, never stored */

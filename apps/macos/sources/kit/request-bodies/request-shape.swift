@@ -25,7 +25,8 @@
 //     one reading that can fire no consequence this build has not reviewed.
 //   * `meeting` — a meeting is not a kind (§2.12: "`group_id` over note,
 //     to-do and transcript rows"), so no row is ever served its reading.
-//     `REQUEST_TYPE_TABLE.meeting`, verbatim, until the group is.
+//     `REQUEST_TYPE_TABLE.meeting`, verbatim, and the card it reads is the
+//     rows' shared `group_id` (`MeetingGroup.cards`, meeting-group.swift).
 
 import Foundation
 
@@ -176,7 +177,7 @@ public extension RequestRow {
         RequestRow(
             id: id, ts: ts, kind: kind, payload: payload, decision: decision, cursor: cursor,
             snoozedUntil: snoozedUntil, sourceAgent: sourceAgent, trust: trust, decidedAt: decidedAt,
-            workID: workID, request: request ?? shape, source: source
+            workID: workID, request: request ?? shape, source: source, groupID: groupID
         )
     }
 }

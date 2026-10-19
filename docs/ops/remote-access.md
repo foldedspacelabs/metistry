@@ -225,6 +225,57 @@ it as a value in a record or a return.
 The registry (`remote/rows.ts`, `REMOTE_PROVIDERS_BUILT_IN`) holds the
 adapters this release ships: **None**. Each later ticket adds its own.
 
+## The tool packs
+
+A provider's tool — `tailscaled` + `tailscale`, `cloudflared`, the zrok CLI
+— is **bundled as a pack** (ruled 2026-09-30; X-112): one release asset per
+tool, `metistry-remote-<tool>-<version>-darwin-arm64.tar.gz`, built from a
+pinned version and sha256 in `ops/release/runtime-versions.env`, its licence
+beside it, every Mach-O signed with the runtime pack's rule and checked for
+the release identity. It lands at `<product>/runtime/remote/<tool>/` **only
+when the owner picks that provider**; nothing is fetched at install, nothing
+goes in the DMG, and `metistry update` moves forward only a pack that is
+already there. The build, the layout and the verification are
+`docs/ops/bundled-runtime.md`, "Provider tool packs".
+
+The API an adapter uses is `packages/cli/src/remote/packs.ts`, and it is
+the whole of it:
+
+```ts
+findRemotePack(productDir, tool): Promise<RemotePack | undefined>   // detect: read-only, never the network
+ensureRemotePack(ctx, tool, { version?, target?, force? }): Promise<
+  | { pack: RemotePack; fetched: boolean }
+  | { pack: undefined; skipped: "dry-run" | "off-network" | "no-target" | "already" | "no-asset" | "downgrade"; reason: string }>
+MANUAL_INSTALL[tool]                                                // the sentence for a pack that cannot be fetched
+
+interface RemotePack {
+  tool: "tailscale" | "cloudflared" | "zrok";
+  dir: string;                 // <product>/runtime/remote/<tool>
+  version: string;             // the TOOL's version — doctor's `tool present` row
+  release: string | undefined; // the product release it came from
+  binaries: string[];          // every Mach-O, relative: bin/tailscaled, bin/zrok (or bin/zrok2)
+  signed: boolean;
+  bin(relative: string): string | undefined;
+}
+```
+
+`detect` asks `findRemotePack` and reports `from: "pack"` with the pack's
+version (or the owner's own install, where the adapter looks for one).
+`configure` asks `ensureRemotePack(ctx, tool)`: a pack already here is
+returned without a fetch; a preview (`ctx.dryRun`) fetches nothing and says
+so; otherwise the pack is resolved from the release, verified against
+`checksums.txt` **and** its own manifest, and swapped in. **A corrupt
+download throws**, so `configure` fails, the verb writes no record and
+`runtime/remote/` is as it was. With `METISTRY_RUNTIME_DEPS=0` (or a release
+that carries no pack) the result is `pack: undefined` with a reason that
+already names `MANUAL_INSTALL[tool]` — the adapter refuses with that
+sentence, so the owner is told what to install rather than left with a
+silent absence.
+
+A pack from an **older** release than the one installed is not moved
+backwards (`skipped: "downgrade"`) unless forced; `metistry update` never
+downgrades a pack either.
+
 ## Tests
 
 `packages/cli/test/remote.test.ts`: a fresh install's `remote --json` says
@@ -237,4 +288,9 @@ one is revoked only after the new origin answers, and an origin that never
 answers writes and revokes nothing; doctor fails a provider whose upstream is
 the main console port, and passes the proxy port, the socket and a namespaced
 block's slot. `packages/core/test/deployment.test.ts` holds the schema and
-the whole-block overlay.
+the whole-block overlay. `packages/cli/test/remote-packs.test.ts` (X-112):
+a checksum mismatch and a tampered pack each leave `runtime/remote/`
+byte-for-byte as it was; a downgrade is refused; `set none`, a preview and an
+`update` with no pack fetch nothing; choosing a provider fetches exactly its
+tool's pack through `configure`; `METISTRY_RUNTIME_DEPS=0` fetches nothing and
+names the manual install.

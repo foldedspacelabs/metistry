@@ -114,6 +114,7 @@ rather than in every PR that touches it (`docs/product/record/README.md`).
 | `metistry-runtime-<version>-darwin-arm64.tar.gz` | the built product, for an Apple-silicon Mac |
 | `metistry-runtime-<version>-linux-x64.tar.gz` | the same, for a Linux host |
 | `metistry-runtime-deps-<version>-darwin-arm64.tar.gz` | the **bundled runtime**: Node, Postgres 17 + pgvector, git — `docs/ops/bundled-runtime.md` |
+| `metistry-remote-<tool>-<version>-darwin-arm64.tar.gz` (×3: `tailscale`, `cloudflared`, `zrok`) | the **provider tool packs** — `tailscaled` + `tailscale` built from the pinned tag, the official `cloudflared`, the zrok CLI — each pinned by sha256, signed, fetched by `metistry remote set <provider>` only when the owner picks that provider; never in the DMG — `docs/ops/bundled-runtime.md`, "Provider tool packs" |
 | `Metistry-<version>.dmg` | the **Mac app**: the SwiftUI front end for the CLI, with both packs above embedded as `Contents/Resources/metistry/`, Developer ID signed with the hardened runtime, notarized and stapled — `docs/ops/mac-app.md` |
 | `appcast.xml` | the EdDSA-signed **Sparkle feed** an installed app polls. `latest/download/appcast.xml` is the URL in the app's `Info.plist`, so it always resolves to the newest release |
 | `checksums.txt` | `sha256sum` of every asset, the DMG and the appcast included; `metistry update` verifies the runtime packs against it |
@@ -173,6 +174,17 @@ set, and caches the Postgres/git compiles on that versions file so a later
 run is a few minutes rather than fifteen. Its tarball holds a single
 top-level `runtime/`, which is why `metistry update` unpacks it with
 `tar -C <product-dir>`. Full account: `docs/ops/bundled-runtime.md`.
+
+The **provider tool packs** (`ops/release/build-remote-packs.sh`, the
+`remote-packs (darwin-arm64)` job) are the same idea for what a remote-access
+provider needs: `tailscaled` + `tailscale` from the pinned Tailscale tag
+(built with `go`), the official `cloudflared` binary re-signed, the zrok CLI
+re-signed — one `remote/<tool>/` tree each, licence beside it, pinned in the
+same versions file, signed with the same rule (`ops/release/pack-lib.sh`)
+and checked for the release identity on every Mach-O. Each tree is its own
+asset so `metistry remote set <provider>` fetches one tool and not three,
+and `publish` is gated on the job like `runtime-deps`. Nothing from them
+goes in the DMG. Full account: `docs/ops/bundled-runtime.md`.
 
 The **DMG** (`ops/release/build-app.sh`, the `macos-app` job) is the Mac
 app with both packs above unpacked inside it as

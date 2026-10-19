@@ -2130,6 +2130,17 @@ from stdin* (piped, or typed hidden at a prompt in a terminal — the
 `secrets set` reader). `--token abc`, `--token=abc`, or a value pasted after
 the provider's name is refused with exit 2 and is not echoed.
 
+**The provider's tool arrives with `set`, not with the install.** A provider
+that bundles a tool (Tailscale, Cloudflare Tunnel, zrok) fetches its **pack**
+inside `configure`: one release asset per tool, verified against
+`checksums.txt` and its own manifest, unpacked to
+`<product>/runtime/remote/<tool>/` only once both held — a mismatch fails
+`set`, writes nothing and leaves `runtime/remote/` as it was. Nothing is
+fetched for a provider you did not pick, nothing is in the DMG, and `metistry
+update` moves a fetched pack forward with the release. `METISTRY_RUNTIME_DEPS=0`
+keeps `set` off the network and the refusal names the tool's manual install
+instead (`docs/ops/bundled-runtime.md`, "Provider tool packs").
+
 **`remote --json`** is one document: `provider`, `mode`, `origin`,
 `settings`, `from` (which file the record came from), `origins` (the rendered
 `METISTRY_ORIGIN` list), `dropped_origins`, `available` (the ids this release
@@ -2973,7 +2984,7 @@ install forward, in this order:
 
 | step | git mode (the product is a checkout) | release mode (`.metistry/metistry.lock`: `source: release`, or `--channel release`) |
 | --- | --- | --- |
-| product | `git fetch` + `git pull --ff-only` — a diverged checkout stops the update (exit code git's) | resolve the release, download its runtime pack + `checksums.txt`, **verify the sha256**, unpack to `releases/<version>/`, point `current` at it (`docs/ops/releases.md`) |
+| product | `git fetch` + `git pull --ff-only` — a diverged checkout stops the update (exit code git's) | resolve the release, download its runtime pack + `checksums.txt`, **verify the sha256**, unpack to `releases/<version>/`, point `current` at it (`docs/ops/releases.md`); then the deps pack to `runtime/`, and **every provider tool pack already under `runtime/remote/`** to the same release — a tool whose provider was never chosen is not fetched (`docs/ops/bundled-runtime.md`, "Provider tool packs") |
 | app | — (a checkout's app is Sparkle's or a local build's) | **macOS, launchd shape:** `Metistry-<version>.dmg` from the same release, sha256-verified the same way, swapped into `/Applications/Metistry.app` with the old one kept as `Metistry.app.previous` (below) |
 | build | `pnpm install --frozen-lockfile` + `pnpm -r build` (`--skip-build` to reuse `dist/`) | no build — the pack is compiled output |
 | migrations | `db/migrations/*.sql` not yet in `schema_migrations`, in filename order, one transaction each, under `pg_advisory_lock` (below); `--skip-migrate` leaves them to doctor to report | same, read from `current` |

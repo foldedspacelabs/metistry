@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, ACKNOWLEDGED, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal, type ToolGroup, type ToolMode } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, CLIENT_API, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, ACKNOWLEDGED, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal, type ToolGroup, type ToolMode } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type ConnectionFold, type ConnectionLimits, type ConnectionsProxy, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -31,10 +31,11 @@ import * as agents from "./agents.js";
 import * as actors from "./actors.js";
 import type { AssistantDefinitionSource } from "./actors.js";
 import type { SessionPolicy } from "./session-policy.js";
-import { parseCookies, readBody, readJson, sendError, sendJson, sendRefusal, sendUnrouted, sessionCookie } from "./http-util.js";
+import { parseCookies, readBody, readJson, sendError, sendJson, sendRateLimited, sendRefusal, sendUnrouted, sessionCookie, setProxySecurityHeaders } from "./http-util.js";
 import * as wa from "./webauthn.js";
 import { checkLocalOwner, type Listener, type LocalOwnerConfig } from "./local-owner.js";
 import { hostAllowed, remoteHostsOf } from "./proxy-listener.js";
+import { clientKeyOf, DEFAULT_PROXY_LIMITS, RateLimiter, Toll, type ProxyLimits, type Verdict } from "./rate-limit.js";
 import { serveStatic } from "./static.js";
 import { capabilitiesOf, type PublicIdentity } from "./identity.js";
 import { loadInstances } from "./instances.js";
@@ -101,6 +102,14 @@ export interface ConsoleConfig {
   origins?: string | undefined;
   /** METISTRY_LOCAL_OWNER_TOKEN + the peer addresses that count as this machine (local-owner.ts). Absent = no local owner door at all. */
   localOwner?: LocalOwnerConfig | undefined;
+  /**
+   * The PROXY listener's rate limits (plan §2.23, X-111; rate-limit.ts):
+   * how often a client — by the provider's client-address header — and the
+   * listener as a whole may be answered without a session, per window.
+   * Absent fields take rate-limit.ts's defaults (`METISTRY_CONSOLE_PROXY_*`,
+   * main.ts). The main listener is never limited.
+   */
+  proxyLimits?: Partial<ProxyLimits> | undefined;
   /** Fallback capture directory when no sink is injected (tests, and a console with no vault bridge). */
   inboxDir: string;
   /** Where captures land: `vaultSink(vault)` — `Inbox/` through the reconciler's bridge (docs/ops/inbox.md). Absent → `dirSink(inboxDir)`. */
@@ -656,6 +665,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
    * listener refuses every request there is no provider to carry yet.
    */
   const remoteHosts = remoteHostsOf(cfg.origins ?? cfg.origin);
+  /**
+   * The proxy listener's limiter (plan §2.23, X-111): one per console, so
+   * the TCP port and the Unix socket share every count — a client is one
+   * client however the provider dialled in. Nothing on the main listener
+   * ever touches it.
+   */
+  const { now: limiterClock, ...limitOverrides } = cfg.proxyLimits ?? {};
+  const limiter = new RateLimiter({ ...DEFAULT_PROXY_LIMITS, ...limitOverrides }, limiterClock);
+  /** The routes that answer without a session, read off the client API table — a `public` row added there is limited here with no second list. */
+  const publicKeys = new Set(CLIENT_API.filter((r) => r.reach.includes("public")).map(routeKey));
   // ONE capture sink for every door: POST /capture, the `/note` fast path,
   // the bridge's `capture` tool (docs/ops/inbox.md).
   const inbox = cfg.inbox ?? dirSink(cfg.inboxDir);
@@ -766,20 +785,57 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     // sentence rather than a decode failure.
     res.setHeader(API_VERSION_HEADER, String(API_VERSION));
 
+    // ----- the proxy listener is on the internet (plan §2.23, X-111) -----
+    // Two things are decided here, before the Host gate, so that every
+    // answer the listener gives — a 421, a 429, the shell, a 500 from the
+    // handler's catch — carries them:
+    //
+    //   * the security headers (http-util.ts `PROXY_SECURITY_HEADERS`);
+    //   * the request's TOLL: whether answering it WITHOUT a session is
+    //     still within what its client, and this listener, may draw this
+    //     window. The client is the address the provider wrote into its
+    //     client-address header, read here and nowhere else, for this and
+    //     nothing else (rate-limit.ts). A session is never limited — the
+    //     toll is taken only where a request is about to be answered with
+    //     no credential: the Host gate, the shell, the public routes, and
+    //     the 401 that ends anything else.
+    //
+    // The main listener has no toll and no headers: loopback, plain HTTP, the
+    // Mac app and the CLI — every forwarded-address header it receives is
+    // ignored, as it always was.
+    if (listener === "proxy") setProxySecurityHeaders(res);
+    const toll = listener === "proxy" ? new Toll(limiter, clientKeyOf(req.headers, limiter.limits.clientHeader, req.socket.remoteAddress)) : undefined;
+    /** Charge this request as answered without a session. The FIRST refusal of a burst writes the one `runs` row the burst gets. */
+    const charge = async (): Promise<Verdict> => {
+      const v = toll!.take();
+      if (!v.ok && v.first) await audit("auth", "rate_limited", false, { listener, scope: v.scope, client: toll!.key, route: key, limit: v.limit, window_s: limiter.limits.windowMs / 1000 });
+      return v;
+    };
+    /** On the proxy listener, charge — and if the limit refuses, answer 429 (true = answered; the caller returns). The main listener: never. */
+    const refusedByLimit = async (): Promise<boolean> => {
+      if (!toll) return false;
+      const v = await charge();
+      if (v.ok) return false;
+      sendRateLimited(res, v.retryAfterS, v.scope);
+      return true;
+    };
+
     // ----- the proxy listener answers for the configured remote host alone (plan §2.23, X-103) -----
     // Before anything — the shell, the ceremonies, /health — because a
     // request through a tunnel for a host this console is not configured
     // for is a misconfigured proxy (or a scanner on the provider's
     // address), and nothing here is for it. Not audited per request on
-    // purpose: an internet-facing listener's refused bursts are X-111's,
-    // one row per burst, and a row per probe would make the audit table
-    // the thing a scanner fills. The main listener never asks about Host.
+    // purpose: a refused burst is one row (X-111, `charge` above), and a
+    // row per probe would make the audit table the thing a scanner fills.
+    // The main listener never asks about Host.
     if (listener === "proxy" && !hostAllowed(req.headers.host, remoteHosts)) {
+      if (await refusedByLimit()) return;
       return sendError(res, "misdirected", misdirectedMessage(req.headers.host, remoteHosts.length > 0));
     }
 
     // ----- public: the PWA shell (login page must render unauthenticated) -----
     if (req.method === "GET" && cfg.webRoot && !url.pathname.startsWith("/api/") && url.pathname !== "/health") {
+      if (await refusedByLimit()) return; // a GET that is not a file falls through below, already charged: one request, one toll
       if (url.pathname === "/vendor/simplewebauthn.js") {
         // exports map hides subpaths; resolve the entry, walk to the UMD bundle
         const entry = require_.resolve("@simplewebauthn/browser");
@@ -799,6 +855,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     // `capabilities` (S1) is coarse tool-GROUP names derived from this
     // console's own wiring (identity.ts capabilitiesOf) — never tool names,
     // never counts. The full `tools/list` on /mcp stays token-gated.
+    //
+    // Every `public` row of the client API table — identity, health, the four
+    // ceremonies — is answered without a session, so on the proxy listener
+    // each takes the toll first (X-111). A ceremony's own 401 for a wrong
+    // code is still one answer: the toll was taken here, once.
+    if (publicKeys.has(key) && (await refusedByLimit())) return;
     if (key === "GET /api/identity") {
       if (!cfg.identity) return sendError(res, "not_available", "no identity is configured in this deployment — METISTRY_IDENTITY_FILES names the files to read (default seed/identity.yaml plus the instance's own)");
       return sendJson(res, 200, {
@@ -916,11 +978,31 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     // Agent bearer only; the bridge does its own 401 envelope and owns the
     // body (the MCP transport reads it), so this sits before the console's
     // authenticate/readJson. Owner credentials are not agent principals.
-    if (url.pathname === "/mcp") return brain.handle(req, res);
+    if (url.pathname === "/mcp") {
+      if (toll) {
+        // The bridge checks the bearer itself, after it has the body, so the
+        // toll cannot wait for its verdict the way it does for `authenticate`
+        // below: a client already past its limit is answered 429 here, bearer
+        // or not — an agent sharing an exhausted address waits one window —
+        // and a 401 the bridge sends is charged as it ends, so a bearer
+        // guessed at /mcp spends the same allowance as one guessed anywhere.
+        if (toll.exhausted() && (await refusedByLimit())) return;
+        res.on("finish", () => {
+          if (res.statusCode === 401 && !toll.charged) void charge().catch((err) => console.error(err));
+        });
+      }
+      return brain.handle(req, res);
+    }
 
     // ----- everything below authenticates -----
     const auth = await authenticate(req, listener);
-    if (!auth) return sendError(res, "unauthenticated");
+    if (!auth) {
+      // The credential is checked FIRST, then the toll: a session or a bearer
+      // this console accepts is never limited, however busy the address it
+      // shares; what is bounded is how often an address may be told 401.
+      if (await refusedByLimit()) return;
+      return sendError(res, "unauthenticated");
+    }
 
     if (key === "POST /capture") {
       // Tier 0 (§4.11): a capture-only agent needs nothing more than this

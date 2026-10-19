@@ -80,6 +80,7 @@ import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { defaultGatewayFrom, parseTrustedProxies } from "./local-owner.js";
 import { listenProxySocket, proxySocketPath, remoteHostsOf } from "./proxy-listener.js";
+import { DEFAULT_PROXY_CLIENT_HEADER, DEFAULT_PROXY_CLIENT_LIMIT, DEFAULT_PROXY_GLOBAL_LIMIT, DEFAULT_PROXY_WINDOW_S } from "./rate-limit.js";
 import { canonicalOrigin } from "./webauthn.js";
 import { loadPublicIdentity } from "./identity.js";
 import { hubFromEnv, startEventFeed } from "./events.js";
@@ -653,6 +654,19 @@ const server = makeServer(pool, queries, {
   version: consoleVersion,
   events,
   ...(localOwner ? { localOwner } : {}),
+  // The proxy listener's limits (plan §2.23, X-111; rate-limit.ts): how often
+  // an address, and the listener as a whole, may be answered without a
+  // session per window, and which header the provider writes the client's
+  // address into (read on that listener alone, for limiting alone). The
+  // defaults suit every provider that sets X-Forwarded-For; a provider
+  // adapter (X-105…) that knows a better header — Cloudflare's
+  // CF-Connecting-IP — names it here. The main listener is never limited.
+  proxyLimits: {
+    clientHeader: optionalEnv("METISTRY_CONSOLE_PROXY_CLIENT_HEADER", DEFAULT_PROXY_CLIENT_HEADER).toLowerCase(),
+    perClient: intEnv("METISTRY_CONSOLE_PROXY_CLIENT_LIMIT", DEFAULT_PROXY_CLIENT_LIMIT),
+    global: intEnv("METISTRY_CONSOLE_PROXY_GLOBAL_LIMIT", DEFAULT_PROXY_GLOBAL_LIMIT),
+    windowMs: intEnv("METISTRY_CONSOLE_PROXY_WINDOW_S", DEFAULT_PROXY_WINDOW_S) * 1000,
+  },
   inboxDir,
   inbox,
   policy: {

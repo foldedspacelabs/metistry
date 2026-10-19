@@ -12,8 +12,31 @@
 // a real terminal; `readSecretValue` wires the real ones in.
 
 import { secretValueIssue } from "@foldedspacelabs/metistry-core";
-import { readStdin } from "./connect-repo.js";
 import { StepFailed } from "./steps.js";
+
+/** Read a whole stream to EOF. Trimmed: a trailing newline from a paste is not part of the value. A terminal's stdin only ends on Ctrl-D, so a caller that may be in a terminal prompts first (`readTextInput`, `promptHiddenLine`). */
+export async function readStdin(stream: AsyncIterable<Buffer | string> = process.stdin): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const c of stream) chunks.push(Buffer.from(c));
+  return Buffer.concat(chunks).toString("utf8").trim();
+}
+
+/**
+ * A terminal this process is attached to: the stream the owner types into and
+ * the one a prompt is written on. Present only when stdin IS a terminal —
+ * every terminal read in the CLI asks `realTerminal()` and takes the piped
+ * path when it answers nothing. A parameter so a test can hand in a fake
+ * "terminal" and watch exactly what reaches its stderr, and what does not.
+ */
+export interface Terminal {
+  stdin: HiddenLineStdin & AsyncIterable<Buffer | string>;
+  stderr: HiddenLineStderr;
+}
+
+/** This process's terminal, or `undefined` when stdin is piped, redirected or closed (a script, the Mac app, CI). */
+export function realTerminal(): Terminal | undefined {
+  return process.stdin.isTTY === true ? { stdin: process.stdin, stderr: process.stderr } : undefined;
+}
 
 /** The minimum a readable stream needs for `readHiddenLine` — a structural type so a fake stdin in a test never has to impersonate all of `NodeJS.ReadStream`. */
 export interface HiddenLineStdin {
@@ -90,11 +113,26 @@ export async function readHiddenLine(stdin: HiddenLineStdin, stderr: HiddenLineS
 }
 
 /** The TTY path: prompt on STDERR (never stdout, which `--json` reads), read one hidden line, then restore the cursor to its own line for whatever prints next. */
-export async function promptHiddenLine(name: string): Promise<string> {
-  process.stderr.write(`Paste the value for ${name} and press Enter (input is hidden): `);
-  const value = await readHiddenLine(process.stdin, process.stderr);
-  process.stderr.write("\n");
+export async function promptHiddenLine(name: string, term: Terminal = { stdin: process.stdin, stderr: process.stderr }): Promise<string> {
+  term.stderr.write(`Paste the value for ${name} and press Enter (input is hidden): `);
+  const value = await readHiddenLine(term.stdin, term.stderr);
+  term.stderr.write("\n");
   return value;
+}
+
+/**
+ * A block of text that is neither secret nor one line — a request body, an
+ * operating prompt. Piped, it is read to EOF as always. In a terminal a
+ * silent read would sit waiting for a Ctrl-D nobody was told about, so it
+ * says so first — on STDERR, never stdout, which `--json` and a pipeline
+ * read — and then reads with the terminal's own echo on: unlike a token, a
+ * body is something the owner wants to see as they type it.
+ */
+export async function readTextInput(what: string, terminal?: Terminal | null): Promise<string> {
+  const term = terminal === undefined ? realTerminal() : (terminal ?? undefined); // `null` = a test's "no terminal"
+  if (!term) return await readStdin();
+  term.stderr.write(`Type or paste ${what}, then press Ctrl-D on an empty line to finish (what you type is shown):\n`);
+  return await readStdin(term.stdin);
 }
 
 export interface ReadSecretValueOptions {

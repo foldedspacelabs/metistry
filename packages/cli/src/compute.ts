@@ -70,7 +70,6 @@ import {
   type ProviderTag,
   type Registry,
 } from "@foldedspacelabs/metistry-core";
-import { readStdin } from "./connect-repo.js";
 import { consoleCall, renderConsoleCallError } from "./console-client.js";
 import { realExec, type Exec } from "./exec.js";
 import {
@@ -569,7 +568,7 @@ async function storeProviderSecret(opts: ProvidersAddOptions, provider: string, 
   const path = secretsFilePath(opts.instanceDir);
   const named = existsSync(path) && Object.hasOwn(parseSecretsFile(await readFile(path, "utf8")).secrets, name);
   const host = egressDestination(p.base_url)?.entry;
-  opts.out(`paste the ${provider} API key, then Ctrl-D (read from stdin, never echoed, never in argv):`);
+  opts.out(`storing the ${provider} API key as ${name} — pipe it on stdin, or paste it at the hidden prompt when asked (it is never echoed, never in argv):`);
   const r = named ? await secretsReplace(name, {}, namedSecretsOptions(opts, instanceId)) : await secretsSet(name, { hosts: host ? [host] : [] }, namedSecretsOptions(opts, instanceId));
   opts.out(`the engine reads it as ${deliverAs} once \`metistry secrets sync --to env\` has written that line (then \`metistry restart assistant\`).`);
   return { status: "stored", delivery: r.delivery };

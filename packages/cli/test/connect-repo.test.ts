@@ -9,11 +9,12 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { connectRepo, deviceFlow, parseRemote, DEVICE_CODE_URL, DEVICE_TOKEN_URL, DEVICE_GRANT_TYPE } from "../src/connect-repo.js";
 import { DEFAULT_GITHUB_OAUTH_CLIENT_ID } from "../src/connect-repo.js";
 import { realExec, type Exec, type ExecOptions } from "../src/exec.js";
 import { resolveGitBin } from "../src/sandbox.js";
+import { fakeTerminal } from "./fake-terminal.js";
 import { startHttpsGitServer, type HttpsGitServer } from "./https-git-server.js";
 
 const REPO = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
@@ -281,6 +282,52 @@ describe("device flow", () => {
     await expect(
       connectRepo({ url: "https://github.com/octocat/x.git", instanceDir: "/tmp/instance", auth: "token", out: () => {}, exec: fakeExec().exec, fetchFn, env: {}, platform: "darwin", readSecret: async () => "  " }),
     ).rejects.toThrow(/no token on stdin/);
+  });
+
+  it("**a token typed at a terminal is never echoed** — --auth token prompts on stderr, reads one hidden line, and the token reaches only the Keychain's stdin", async () => {
+    const { exec, calls } = fakeExec();
+    const lines: string[] = [];
+    const PAT = "github_pat_TYPEDATTERMINAL";
+    const term = fakeTerminal();
+    const fetchFn = (async () => json({ login: "octocat" })) as unknown as typeof fetch;
+    const p = connectRepo({ url: "https://github.com/octocat/instance.git", instanceDir: "/tmp/instance", auth: "token", out: (l) => lines.push(l), exec, fetchFn, env: {}, platform: "darwin", terminal: term });
+    await vi.waitFor(() => expect(term.stderrText()).toContain("press Enter (input is hidden)"));
+    term.type(PAT.slice(0, 10));
+    term.type(`${PAT.slice(10)}\n`);
+    await p;
+    expect(calls.find((c) => c.cmd === "security" && c.args[0] === "-i")?.opts.stdin).toBe(`"add-internet-password" "-a" "octocat" "-s" "github.com" "-r" "htps" "-A" "-w" "${PAT}"\n`);
+    // not one typed character reached the terminal's stderr, and the token is in no printed line
+    expect(term.stderrText()).not.toContain("github_pat");
+    expect(term.stderrText()).not.toContain(PAT.slice(0, 4));
+    for (const l of lines) expect(l).not.toContain(PAT);
+    // the old "then Ctrl-D ... never echoed" line, which a terminal made untrue, is gone
+    expect([...lines, term.stderrText()].join("\n")).not.toMatch(/Ctrl-D/);
+    expect(term.raw).toEqual([true, false]); // raw for the read, the terminal restored after
+    expect(term.iterations()).toBe(0); // it did not wait for an EOF a terminal never sends
+  });
+
+  it("a blank line at the terminal prompt is refused as no token and never reaches the Keychain", async () => {
+    const { exec, calls } = fakeExec();
+    const term = fakeTerminal();
+    const fetchFn = (async () => json({ login: "octocat" })) as unknown as typeof fetch;
+    const p = connectRepo({ url: "https://github.com/octocat/x.git", instanceDir: "/tmp/instance", auth: "token", out: () => {}, exec, fetchFn, env: {}, platform: "darwin", terminal: term });
+    const settled = expect(p).rejects.toThrow(/no token on stdin/);
+    await vi.waitFor(() => expect(term.stderrText()).toContain("input is hidden"));
+    term.type("\n");
+    await settled;
+    expect(calls.some((c) => c.cmd === "security" && c.args[0] === "-i")).toBe(false);
+  });
+
+  it("piped stdin (no terminal) is read to EOF as before, and says so on stdout without a Ctrl-D instruction", async () => {
+    const { exec, calls } = fakeExec();
+    const lines: string[] = [];
+    const PAT = "github_pat_PIPED";
+    const fetchFn = (async () => json({ login: "octocat" })) as unknown as typeof fetch;
+    await connectRepo({ url: "https://github.com/octocat/instance.git", instanceDir: "/tmp/instance", auth: "token", out: (l) => lines.push(l), exec, fetchFn, env: {}, platform: "darwin", terminal: null, readSecret: async () => PAT });
+    expect(calls.find((c) => c.cmd === "security" && c.args[0] === "-i")?.opts.stdin).toContain(`"-w" "${PAT}"`);
+    expect(lines.join("\n")).toContain("from stdin");
+    expect(lines.join("\n")).not.toMatch(/Ctrl-D/);
+    for (const l of lines) expect(l).not.toContain(PAT);
   });
 
   it("uses the product's OAuth App when no client id is configured, and prints the Linux remediation instead of a Keychain", async () => {

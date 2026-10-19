@@ -1880,13 +1880,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     if (key === "POST /api/agents") {
       const body = (await readJson(req)) as { id?: unknown; display_name?: unknown; kind?: unknown; remote?: unknown };
       try {
-        const { id, token, pending } = await agents.createAgent(db, body);
+        const { id, token, pending, revived } = await agents.createAgent(db, body);
         // S2: a remote enrolment starts pending and asks the owner, in the
         // one queue that needs the user (D7). The token is returned here
         // all the same — the console shows a token exactly once — and it
         // authenticates nothing until the answer arrives.
         const proposalId = pending ? await agents.enrollmentProposal(db, { id, display_name: String(body.display_name) }) : undefined;
-        await audit("agent_admin", "mint", true, { agent: id, op: "mint", remote: pending, ...(proposalId ? { proposal: proposalId } : {}) });
+        await audit("agent_admin", "mint", true, { agent: id, op: "mint", remote: pending, ...(revived ? { revived: true } : {}), ...(proposalId ? { proposal: proposalId } : {}) });
         return sendJson(res, 201, { id, token, pending, ...(proposalId ? { proposal_id: proposalId } : {}) }); // the ONE time the token crosses the wire
       } catch (err) {
         if (err instanceof agents.AgentError) return sendError(res, err.code, err.message); // the validator already named the field; do not throw that away

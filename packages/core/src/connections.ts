@@ -328,8 +328,8 @@ export type ConnectionImplementation = z.infer<typeof connectionImplementationSc
 
 /**
  * The dispatchers the console implements for an `agent` connection — today's
- * two HTTP targets (`targets/github-issues`, `targets/devin-sessions`) moved
- * into connection types. Code, so closed (§2.7): a new dispatcher is a
+ * two HTTP targets (the former `targets/github-issues` and
+ * `targets/devin-sessions`, removed in 0.17.0) moved into connection types. Code, so closed (§2.7): a new dispatcher is a
  * product change, never a manifest line. An agent type names one; the
  * console refuses an agent connection whose type names none it knows.
  */

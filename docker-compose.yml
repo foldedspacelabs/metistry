@@ -79,10 +79,6 @@ services:
       # note contents for mcp-brain's knowledge_read. Degrades absent when unset.
       METISTRY_RECONCILER_URL: ${METISTRY_RECONCILER_URL:-}
       METISTRY_BRIDGE_TOKEN_RECONCILER: ${METISTRY_BRIDGE_TOKEN_RECONCILER:-}
-      # NOT READ since 0.17.0 (X-85): the github-state sync and the github-issues
-      # target are agent connections. Passed through only so the console can log
-      # that a key still set in .env is ignored.
-      METISTRY_GITHUB_TOKEN: ${METISTRY_GITHUB_TOKEN:-}
       METISTRY_TARGETS_DIRS: ${METISTRY_TARGETS_DIRS:-targets:.metistry/targets}
       # compute.yaml (docs/ops/compute.md): providers, assignments, budgets.
       # The seed's copy ships in the image and assigns nothing; an instance
@@ -98,10 +94,7 @@ services:
       METISTRY_AWS_ACCESS_KEY_ID: ${METISTRY_AWS_ACCESS_KEY_ID:-}
       METISTRY_AWS_SECRET_ACCESS_KEY: ${METISTRY_AWS_SECRET_ACCESS_KEY:-}
       METISTRY_AWS_SESSION_TOKEN: ${METISTRY_AWS_SESSION_TOKEN:-}
-      # Devin (docs/ops/devin.md) is the `devin` agent connection; its key is
-      # not read from here since 0.17.0 (passed through only for the console's
-      # "ignored" log line).
-      METISTRY_DEVIN_API_KEY: ${METISTRY_DEVIN_API_KEY:-}
+      # Devin (docs/ops/devin.md) is the `devin` agent connection, not a variable.
       METISTRY_DEVIN_MAX_ITEMS: ${METISTRY_DEVIN_MAX_ITEMS:-}
       # user's timezone for brief/schedule rendering (Me/profile.md drives this later)
       TZ: ${METISTRY_TZ:-UTC}

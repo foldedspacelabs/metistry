@@ -59,7 +59,7 @@ export interface Db {
 export interface GithubCtx {
   /** the legacy read-only token — the console stopped setting it from METISTRY_GITHUB_TOKEN in 0.17.0 (X-85); a direct caller (a test) may still hand one in */
   githubToken?: string;
-  githubRepos?: string[]; // ["owner/repo", ...] — the legacy list (METISTRY_GITHUB_REPOS), beside githubToken
+  githubRepos?: string[]; // ["owner/repo", ...] — the legacy list, beside githubToken (the console stopped setting it with METISTRY_GITHUB_REPOS, X-85)
   fetchFn?: typeof fetch;
   /** the runner's resolved Needs You switches (`syncs.github-state.raise`); absent = the manifest's defaults */
   raise?: Readonly<Record<string, boolean>>;

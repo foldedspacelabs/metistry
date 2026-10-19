@@ -35,6 +35,8 @@ import type { Db } from "../github-state/run.js";
 import { replaceCalendarWindow, saveSyncState, toRow, type CalendarRow } from "../eventkit-calendar/run.js";
 import { SYNC_DAYS, syncWindow } from "../ics-calendar/run.js";
 import { INVITATION_RULE, RSVP_CAPABILITY, reconcileInvitations } from "../invitations.js";
+import { syncConnectionCheck, type CheckExtras } from "../check-context.js";
+import type { CheckResult } from "@foldedspacelabs/metistry-core";
 
 export { SYNC_DAYS };
 
@@ -56,6 +58,23 @@ export interface CaldavCtx {
 export const COMPONENT = "caldav-calendar";
 /** The manifest's `needs_you` defaults (a test holds this to manifest.yaml). */
 export const RAISE_DEFAULTS: Readonly<Record<typeof INVITATION_RULE, boolean>> = { invitation: true };
+
+/**
+ * Behavioral probe (X-87): the CalDAV connection resolves (the app password
+ * delivered, the server pinned to its own origin) and, when doctor hands in
+ * the shared connection check, the server still answers. Reads no events.
+ */
+export async function check(ctx: CaldavCtx & CheckExtras = {}): Promise<CheckResult> {
+  const { openSync } = ctx;
+  return syncConnectionCheck({
+    name: COMPONENT,
+    probe: "the CalDAV connection opens (app password delivered, server pinned to its own origin) and answers the shared connection check",
+    noInstance: "no instance to read a connection from (METISTRY_INSTANCE_DIR is unset) — the sync reads the CalDAV connection of an instance; degrades absent",
+    addHint: "`metistry connections add` a caldav connection (docs/ops/connections.md, CalDAV)",
+    open: openSync ? () => openSync({ sync: CALDAV_SYNC, module: CALDAV_MODULE }) : undefined,
+    extras: ctx,
+  });
+}
 
 /** One pass. Returns rows inserted, changed or removed. */
 export async function run(db: Db, ctx: CaldavCtx = {}): Promise<number> {

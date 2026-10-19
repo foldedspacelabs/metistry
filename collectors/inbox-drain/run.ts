@@ -49,6 +49,7 @@ import {
   type TemplateQueries,
 } from "@foldedspacelabs/metistry-core";
 import { completeJson, type ComputeAccess } from "../compute-client.js";
+import { resolveOnMachineCall, runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { intentMeta, intentPlacement, scoreIntent, type IntentOutcome } from "./intent-tier.js";
 
 export interface Db {
@@ -510,6 +511,26 @@ function jotClassification(c: Classification, anchor: JotAnchor): Record<string,
 }
 
 /** One drain pass. Returns how many rows were classified. */
+/**
+ * Behavioral probe (X-87): the drain needs no credential — the deterministic
+ * rules always run — so the only thing to report is its optional on-device
+ * tier: whether `uses_model:` resolves against the `compute.yaml` in force
+ * (provider declared, switched on, on this machine, credential present).
+ * Always `ok` when it does or when the tier is simply off (the drain works
+ * either way). The money rule is the one thing that is not: a `uses_model:`
+ * on an off-machine provider THROWS in `resolveOnMachineCall`, and that reads
+ * `failed` with the refusal, because the unattended job would start spending.
+ * Nothing is sent to a model, and no row is read: the database's own row says
+ * whether the inbox table answers.
+ */
+export async function check(ctx: CollectorCtx = {}): Promise<CheckResult> {
+  return runCheck("inbox-drain", "uses_model: resolves to an on-machine provider in compute.yaml (or the tier is off); no model is called", async () => {
+    const resolved = resolveOnMachineCall(ctx, "inbox-drain", ctx.usesModel, "inbox-drain declares no uses_model:, so it classifies by rules alone");
+    if ("ok" in resolved) return { meta: { model_tier: "off", why: resolved.why } };
+    return { meta: { model_tier: "on", model: resolved.ref.ref, provider: resolved.ref.provider } };
+  });
+}
+
 export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
   const { rows } = await db.query(
     `SELECT id, path, mime, note, source, source_agent FROM inbox WHERE status = 'new' ORDER BY ts LIMIT 50`,

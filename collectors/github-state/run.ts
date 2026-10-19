@@ -51,6 +51,8 @@
 
 import { GITHUB_API_ORIGIN, GITHUB_SOURCE_KIND, PULL_REQUEST_KIND, RESOLVED_AT_SOURCE, githubPullRef, githubPullSource, lastMirror, raiseMirror, resolveAtSource, type RequestSource } from "@foldedspacelabs/metistry-core";
 import type { SyncOpener } from "@foldedspacelabs/metistry-connections";
+import { runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
+import { connectionReachability, type CheckExtras } from "../check-context.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -501,6 +503,29 @@ async function reconcileMirror(db: Db, ctx: ReadCtx, get: typeof fetch, p: OpenP
 }
 
 /** One reconcile pass. Returns rows upserted + closed, and requests raised or cleared. */
+/**
+ * Behavioral probe (X-87): the access a pass would read GitHub with resolves
+ * — a GitHub connection with repos (pinned to api.github.com, token filled at
+ * the door) or the legacy token and repo list — and, for a connection, the
+ * shared connection check still answers. Reads no pull request. A connection
+ * the sync cannot use throws exactly as the run would, and reads `failed`.
+ */
+export async function check(ctx: GithubCtx & CheckExtras = {}): Promise<CheckResult> {
+  return runCheck(COMPONENT, "a GitHub connection (or the legacy token and repo list) resolves, and the connection answers the shared connection check", async () => {
+    const access = await githubAccess(ctx);
+    if (!access) {
+      return {
+        status: "absent" as const,
+        remediation:
+          "no GitHub connection with repos (`metistry connections add` a github connection and set config.repos, docs/ops/connections.md) and no METISTRY_GITHUB_TOKEN + METISTRY_GITHUB_REPOS — nothing is read meanwhile (degrades absent)",
+      };
+    }
+    if (!access.connection) return { status: "ok" as const, meta: { source: "legacy token", repos: access.repos.length } };
+    const seen = await connectionReachability(access.connection, ctx);
+    return { ...seen, meta: { ...(seen.meta ?? {}), source: "connection", repos: access.repos.length } };
+  });
+}
+
 export async function run(db: Db, runCtx: GithubCtx = {}): Promise<number> {
   const access = await githubAccess(runCtx);
   if (!access) return 0; // degrades absent

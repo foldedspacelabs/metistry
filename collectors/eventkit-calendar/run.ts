@@ -34,6 +34,8 @@
 
 import type { Db } from "../github-state/run.js";
 import { INVITATION_RULE, reconcileInvitations } from "../invitations.js";
+import { checkResultSchema, runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
+import { DEFAULT_CHECK_TIMEOUT_MS, type CheckExtras } from "../check-context.js";
 
 /** The `connection` every row this sync writes carries — the bridge's name (manifest.yaml), until the eventkit bridge becomes a connection of its own (§2.6). */
 export const EVENTKIT_CONNECTION = "eventkit";
@@ -209,6 +211,37 @@ export async function saveSyncState(db: Db, connection: string, entries: Readonl
   const keys = Object.keys(entries);
   if (keys.length === 0) return;
   await db.query(SAVE_STATE, [connection, keys, keys.map((k) => entries[k]!)]);
+}
+
+/**
+ * Behavioral probe (X-87): the EventKit bridge's own `GET /check` — the one
+ * contract every bridge implements — answered with this collector's bearer.
+ * Its verdict rides through (a Calendar permission the Mac has not granted is
+ * the bridge's `degraded`, with the System Settings pane named); a bridge that
+ * does not answer, or refuses the token, is a failed probe. No URL or token is
+ * `absent`: the sync reads nothing without them. No events are read.
+ */
+export async function check(ctx: EventkitCtx & CheckExtras = {}): Promise<CheckResult> {
+  return runCheck(COMPONENT, "GET /check on the EventKit bridge with the bridge token answers a check() body", async () => {
+    if (!ctx.ekUrl || !ctx.ekToken) {
+      return {
+        status: "absent" as const,
+        remediation: "no EventKit bridge configured: set METISTRY_EK_URL and METISTRY_BRIDGE_TOKEN_EVENTKIT in .env (docs/ops/automation.md) — nothing is synced meanwhile (degrades absent)",
+      };
+    }
+    const base = ctx.ekUrl.replace(/\/+$/, "");
+    const ms = ctx.timeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS;
+    let res: Response;
+    try {
+      res = await (ctx.fetchFn ?? fetch)(`${base}/check`, { headers: { authorization: `Bearer ${ctx.ekToken}` }, signal: AbortSignal.timeout(ms) });
+    } catch (err) {
+      throw new Error(`the EventKit bridge did not answer GET /check at ${base} within ${ms} ms (${err instanceof Error ? err.message : String(err)})`);
+    }
+    if (res.status === 401 || res.status === 403) throw new Error(`the EventKit bridge at ${base} refused METISTRY_BRIDGE_TOKEN_EVENTKIT (HTTP ${res.status})`);
+    const body = checkResultSchema.safeParse(await res.json().catch(() => undefined));
+    if (!body.success) throw new Error(`the EventKit bridge answered HTTP ${res.status} without a check() body at ${base}`);
+    return { status: body.data.status, ...(body.data.remediation ? { remediation: body.data.remediation } : {}), meta: { bridge_status: body.data.status } };
+  });
 }
 
 export async function run(db: Db, ctx: EventkitCtx = {}): Promise<number> {

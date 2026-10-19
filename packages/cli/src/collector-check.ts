@@ -79,8 +79,6 @@ export function collectorCheckContext(o: CollectorCheckContextOptions): Collecto
   };
   set("ekUrl", env.METISTRY_EK_URL?.trim() ? o.hostLocal(env.METISTRY_EK_URL.trim(), o.shape) : undefined);
   set("ekToken", env.METISTRY_BRIDGE_TOKEN_EVENTKIT?.trim());
-  set("githubToken", env.METISTRY_GITHUB_TOKEN?.trim());
-  set("githubRepos", list(env.METISTRY_GITHUB_REPOS));
   if (env.METISTRY_AWS_ACCESS_KEY_ID && env.METISTRY_AWS_SECRET_ACCESS_KEY) {
     ctx.aws = {
       accessKeyId: env.METISTRY_AWS_ACCESS_KEY_ID,

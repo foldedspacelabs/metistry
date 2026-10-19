@@ -130,9 +130,9 @@ describe("collectorCheckContext", () => {
   it("reads the same environment variables the console reads for run(), and rewrites the bridge URL for the host", () => {
     const ctx = collectorCheckContext({
       ...o,
-      env: { METISTRY_EK_URL: "http://host.docker.internal:7811", METISTRY_BRIDGE_TOKEN_EVENTKIT: "t", METISTRY_GITHUB_TOKEN: "g", METISTRY_GITHUB_REPOS: "a/b, c/d", METISTRY_AWS_ACCESS_KEY_ID: "k", METISTRY_AWS_SECRET_ACCESS_KEY: "s" },
+      env: { METISTRY_EK_URL: "http://host.docker.internal:7811", METISTRY_BRIDGE_TOKEN_EVENTKIT: "t", METISTRY_DEVIN_REPOS: "a/b, c/d", METISTRY_AWS_ACCESS_KEY_ID: "k", METISTRY_AWS_SECRET_ACCESS_KEY: "s" },
     });
-    expect(ctx).toMatchObject({ ekUrl: "http://127.0.0.1:7811", ekToken: "t", githubToken: "g", githubRepos: ["a/b", "c/d"], aws: { accessKeyId: "k", secretAccessKey: "s" }, timeoutMs: 1234 });
+    expect(ctx).toMatchObject({ ekUrl: "http://127.0.0.1:7811", ekToken: "t", aws: { accessKeyId: "k", secretAccessKey: "s" }, timeoutMs: 1234 });
     expect(typeof (ctx.compute as () => unknown)()).toBe("object");
   });
 

@@ -509,16 +509,15 @@ async function reconcileMirror(db: Db, ctx: ReadCtx, get: typeof fetch, p: OpenP
  * the sync cannot use throws exactly as the run would, and reads `failed`.
  */
 export async function check(ctx: GithubCtx & CheckExtras = {}): Promise<CheckResult> {
-  return noteUndialled(await runCheck(COMPONENT, "a GitHub connection (or the legacy token and repo list) resolves, and the connection answers the shared connection check", async () => {
-    const access = await githubAccess(ctx);
-    if (!access) {
+  return noteUndialled(await runCheck(COMPONENT, "a GitHub connection with repos resolves, and answers the shared connection check", async () => {
+    // the legacy token and repo list are not read (the console stopped feeding them, X-85): only a connection counts
+    const access = await githubAccess({ ...ctx, githubToken: undefined as unknown as string, githubRepos: undefined as unknown as string[] });
+    if (!access?.connection) {
       return {
         status: "absent" as const,
-        remediation:
-          "no GitHub connection with repos (`metistry connections add` a github connection and set config.repos, docs/ops/connections.md) and no METISTRY_GITHUB_TOKEN + METISTRY_GITHUB_REPOS — nothing is read meanwhile (degrades absent)",
+        remediation: "no GitHub connection with repos (`metistry connections add` a github connection and set config.repos, docs/ops/connections.md) — nothing is read meanwhile (degrades absent)",
       };
     }
-    if (!access.connection) return { status: "ok" as const, meta: { source: "legacy token", repos: access.repos.length } };
     const seen = await connectionReachability(access.connection, ctx);
     return { ...seen, meta: { ...(seen.meta ?? {}), source: "connection", repos: access.repos.length } };
   }));

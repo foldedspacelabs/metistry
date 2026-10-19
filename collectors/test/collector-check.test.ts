@@ -185,18 +185,18 @@ describe("eventkit-calendar check()", () => {
 });
 
 describe("github-state check()", () => {
-  it("is absent with no connection and no legacy pair", async () => {
+  it("is absent with no connection, and says how to add one", async () => {
     const r = await githubState({});
     shape(r, "github-state");
     expect(r.status).toBe("absent");
-    expect(r.remediation).toMatch(/metistry connections add.*METISTRY_GITHUB_TOKEN/s);
+    expect(r.remediation).toMatch(/metistry connections add/);
   });
 
-  it("is ok on the legacy token and repo list, dialling nothing", async () => {
-    const fetchFn = (async () => { throw new Error("no network in a check of a token"); }) as unknown as typeof fetch;
-    const r = await githubState({ githubToken: "t", githubRepos: ["a/b", "c/d"], fetchFn });
-    expect(r.status).toBe("ok");
-    expect(r.meta).toMatchObject({ source: "legacy token", repos: 2 });
+  it("does not read the retired token and repo list (the console stopped feeding them, X-85), and dials nothing", async () => {
+    const fetchFn = (async () => { throw new Error("no network in a check"); }) as unknown as typeof fetch;
+    const r = await githubState({ githubToken: "t", githubRepos: ["a/b"], fetchFn });
+    expect(r.status).toBe("absent");
+    expect(r.remediation).not.toMatch(/METISTRY_GITHUB_TOKEN/);
   });
 
   it("checks the connection it resolved through the shared check", async () => {

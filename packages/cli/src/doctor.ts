@@ -86,7 +86,8 @@ import { driftedNames, launchdEnvDrift } from "./env-follow.js";
 import { MIGRATE_SCOPE_COMMAND, sharedScopeStatus } from "./secrets.js";
 import { appDmgAssetName, compareVersions, resolveAppPath } from "./mac-app.js";
 import { instanceLockPath, readLock } from "./lock.js";
-import { connectionDoctorRows } from "./connection-check.js";
+import { connectionChecker, connectionDoctorRows, type ConnectionChecker, type ConnectionsOptions } from "./connection-check.js";
+import { collectorCheckContext, mergeCollectorCheck, runCollectorCheck, type CollectorCheckContext } from "./collector-check.js";
 import { releaseRootAbove, resolveSeedDir } from "./env.js";
 import { CURRENT_LINK, RELEASES_DIRNAME } from "./release.js";
 
@@ -371,6 +372,10 @@ async function componentRow(
     compute: Compute;
     /** the launchd shape's supervisor, asked once (`supervisorSnapshot`); undefined under any other shape */
     supervisor?: Promise<SupervisorSnapshot> | undefined;
+    /** what a collector's own `check()` is handed (X-87); built once and shared */
+    collectorCtx: CollectorCheckContext;
+    /** the product checkout or release pack the collectors' compiled entries are in */
+    productDir: string;
   },
 ): Promise<DoctorRow> {
   const kind = m.result.ok ? m.result.manifest.type : m.type;
@@ -495,6 +500,15 @@ async function componentRow(
       })),
     };
     return action ? { ...row, action } : row;
+  }
+
+  // A collector answers for itself (CLAUDE.md: every collector exports
+  // `check()` so doctor is generic): its verdict is laid over this row, so the
+  // collector keeps ONE row here and the schedule row below stays as it is.
+  if (man.type === "collector") {
+    const base = await runCheck(man.name, `${m.dir}/manifest.yaml validates`, async () => {});
+    const own = await runCollectorCheck({ productDir: deps.productDir, name: man.name, usesModel: man.uses_model, ctx: deps.collectorCtx });
+    return { kind, ...mergeCollectorCheck(base, own) };
   }
 
   const via =
@@ -1867,26 +1881,31 @@ export async function localModelRows(env: NodeJS.ProcessEnv, productDir: string,
  * policy says. A cold `npx -y …` downloads before it answers, so the dial gets
  * its own timeout (`METISTRY_CONNECTION_CHECK_TIMEOUT_MS`, default 15 s).
  */
-export async function connectionRows(o: { instanceDir: string; productDir: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; exec: Exec; keychain?: KeychainBackend }): Promise<DoctorRow[]> {
+export async function connectionsOptionsFor(o: { instanceDir: string; productDir: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; exec: Exec; keychain?: KeychainBackend }): Promise<ConnectionsOptions> {
   let seedDir: string | undefined;
   try {
     seedDir = resolveSeedDir(o.productDir);
   } catch {
     seedDir = undefined;
   }
+  return {
+    instanceDir: o.instanceDir,
+    instanceId: await readInstanceId(o.instanceDir).catch(() => undefined),
+    ...(seedDir ? { seedDir } : {}),
+    env: o.env,
+    platform: o.platform,
+    uid: o.uid,
+    exec: o.exec,
+    ...(o.keychain ? { keychain: o.keychain } : {}),
+    timeoutMs: intEnv("METISTRY_CONNECTION_CHECK_TIMEOUT_MS", 15_000, o.env),
+    out: () => undefined,
+  };
+}
+
+/** The connection rows over a checker the caller shares (and closes). */
+export async function connectionRowsOver(opts: ConnectionsOptions, checker: ConnectionChecker): Promise<DoctorRow[]> {
   try {
-    return await connectionDoctorRows({
-      instanceDir: o.instanceDir,
-      instanceId: await readInstanceId(o.instanceDir).catch(() => undefined),
-      ...(seedDir ? { seedDir } : {}),
-      env: o.env,
-      platform: o.platform,
-      uid: o.uid,
-      exec: o.exec,
-      ...(o.keychain ? { keychain: o.keychain } : {}),
-      timeoutMs: intEnv("METISTRY_CONNECTION_CHECK_TIMEOUT_MS", 15_000, o.env),
-      out: () => undefined,
-    });
+    return await connectionDoctorRows(opts, checker);
   } catch (err) {
     return [{ kind: "connection", name: "connections", status: "degraded", latency_ms: 0, probe: "read .metistry/connections/", remediation: err instanceof Error ? err.message : String(err) }];
   }
@@ -1920,6 +1939,16 @@ function versionOf(dir: string): { version?: string } {
     return typeof v === "string" && v !== "" ? { version: v } : {};
   } catch {
     return {};
+  }
+}
+
+export async function connectionRows(o: Parameters<typeof connectionsOptionsFor>[0]): Promise<DoctorRow[]> {
+  const opts = await connectionsOptionsFor(o);
+  const checker = connectionChecker(opts);
+  try {
+    return await connectionRowsOver(opts, checker);
+  } finally {
+    await checker.close();
   }
 }
 
@@ -1979,9 +2008,24 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // the launchd shape's supervisor, asked ONCE and shared: its own rows and
   // the assistant's row both read this answer
   const supervised = platform === "darwin" && shape === "launchd" ? supervisorSnapshot(instanceDir) : undefined;
-  const envFiles = envPaths({ instanceDir, productDir: productDir })?.read ?? [];
+  // The instance's connections, dialled ONCE and shared: a connection's own
+  // row and the check() of the collector that reads it ask the same checker,
+  // so a calendar is not dialled twice for one report (X-87). No instance, no
+  // connections, and a collector's check() is handed no opener.
+  const connOpts = env.METISTRY_INSTANCE_DIR ? await connectionsOptionsFor({ instanceDir, productDir, env, platform, uid, exec, ...(deps.keychain ? { keychain: deps.keychain } : {}) }) : undefined;
+  const checker = connOpts ? connectionChecker({ ...connOpts, timeoutMs: connOpts.timeoutMs ?? 15_000 }) : undefined;
+  const collectorCtx = collectorCheckContext({
+    env,
+    fetchFn,
+    shape,
+    hostLocal,
+    compute,
+    timeoutMs,
+    ...(connOpts && checker ? { instance: { dir: connOpts.instanceDir, seedDir: connOpts.seedDir, checker } } : {}),
+  });
+  const envFiles = envPaths({ instanceDir, productDir })?.read ?? [];
   const [componentRows, registries, layout, inbox, profile, vaultCase, cli, app, dbAndSchedules, launchd, keepAwake, supervisor, launchdEnv, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
-    (async () => Promise.all((await walkManifests(productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute, supervisor: supervised }))))(),
+    (async () => Promise.all((await walkManifests(productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute, supervisor: supervised, collectorCtx, productDir }))))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
     registriesRow(productDir, env),
     layoutRow(instanceDir),
@@ -2031,9 +2075,11 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // each connection's own check() (plan §2.6): dialled, listed, compared
     // with its file — never `failed` here either, since a connection is
     // someone else's server (docs/ops/connections.md)
-    env.METISTRY_INSTANCE_DIR ? connectionRows({ instanceDir, productDir: productDir, env, platform, uid, exec, ...(deps.keychain ? { keychain: deps.keychain } : {}) }) : Promise.resolve([]),
+    connOpts && checker ? connectionRowsOver(connOpts, checker) : Promise.resolve([]),
   ]);
   const targetKeys = retiredTargetKeysRow(env);
+  // after every reader of it has finished: the pool the connection rows and the collectors' checks shared
+  await checker?.close().catch(() => {});
   rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...(launchdEnv ? [launchdEnv] : []), ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), ...(targetKeys ? [targetKeys] : []), vaultSync, ...connections);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, product, shape, ok: !rows.some((r) => r.status === "failed"), rows };

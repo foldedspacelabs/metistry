@@ -141,7 +141,14 @@ describe("metistry up", () => {
     const ef = join(inst, ".metistry", "state", ".env");
     // …and the secrets policy mirror compose mounts is written first (X-7)
     const mirror = `mirror ${join(inst, ".metistry", "secrets.yaml")} → ${join(inst, ".metistry", "state", "policy", "secrets.yaml")}`;
-    expect(r.commands).toEqual([mirror, `(cd ${P} && docker compose --env-file ${ef} pull)`, `(cd ${P} && docker compose --env-file ${ef} up -d --no-build)`, "metistry doctor"]);
+    // …after the instance's .env is derived (X-124), which a dry run plans and does not write
+    expect(r.commands).toEqual([
+      expect.stringContaining(`derive ${ef} from .metistry/*.yaml and the login Keychain`),
+      mirror,
+      `(cd ${P} && docker compose --env-file ${ef} pull)`,
+      `(cd ${P} && docker compose --env-file ${ef} up -d --no-build)`,
+      "metistry doctor",
+    ]);
   });
 
   it("on Linux prints the systemd user units instead of touching launchd, and writes nothing", async () => {

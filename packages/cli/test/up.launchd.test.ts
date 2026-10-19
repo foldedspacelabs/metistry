@@ -324,6 +324,9 @@ describe("metistry up --dry-run, launchd shape", () => {
       `/bin/rm -f ${I}/.metistry/state/pg.pwfile`,
       `write ${I}/.metistry/state/pg/postgresql.conf  (from metistry managed block: loopback listen + unix socket)`,
       `mkdir -p ${I}/.metistry/state/assistant`,
+      // 0b. the instance's .env, derived once the Postgres password is in it
+      // and before any job sources it (X-124)
+      expect.stringContaining(`derive ${I}/.metistry/state/.env from .metistry/*.yaml and the login Keychain`),
       // 1. the pre-supervisor agents go, once: every one of them is a child now
       ...["db", "console", "assistant", "reconciler", "watchdog", "eventkit", "apple-fm", "eventkit-helper"].flatMap((s) => [
         `launchctl bootout gui/501/${SUP}.${s}`,

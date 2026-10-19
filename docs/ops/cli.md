@@ -1354,16 +1354,18 @@ chosen beside what the rules served. Until a `policy:` block exists that
 section says every consultation was `absent`; `--json` carries it as
 `policy`. Details in `docs/ops/compute.md`.
 
-## Secrets: the Keychain is the store, `.env` is generated
+## Secrets: the Keychain is the store, `.env` is derived
 
 `metistry secrets` makes the macOS login Keychain the canonical home of
 every secret this install holds, under the service name
-`metistry:<VAR>`; `.env` becomes a file generated from it rather than one
-edited by hand (`docs/product/desktop-app-plan.md`, first-run step 4).
+`metistry:<VAR>`; `.metistry/state/.env` is a file **derived** from it and
+from `.metistry/*.yaml` by `metistry up`, never edited by hand (X-124; the
+owner's 2026-10-04 ruling, `docs/product/decisions-log.md` "M7 reversed";
+`docs/product/desktop-app-plan.md`, first-run step 4).
 
 ```sh
 metistry secrets sync --to keychain               # import .env's secret lines into the Keychain
-metistry secrets sync --to env                    # regenerate .env's secret lines from the Keychain
+metistry secrets sync --to env                    # derive .env again — the same render `metistry up` runs
 metistry secrets mint METISTRY_ASSISTANT_TOKEN    # a new random token, into both
 metistry secrets mint                             # the recorder's three tokens (METISTRY_LIVE_CAPTURE_URL set): the ones missing, kept if present
 metistry secrets list                             # names, scopes and where each lives — never a value
@@ -1405,13 +1407,76 @@ and `METISTRY_AWS_ACCESS_KEY_ID` is not. The names themselves come from
 your `.env` plus `.env.example`, including the commented-out
 declarations — that is where a not-yet-set variable is documented.
 
-**`--to env` rewrites in place.** Only the lines that assign a secret
-variable change; every comment, blank line, ordering and non-secret
-assignment survives byte-for-byte (a test asserts exactly that), because
-`.env` also carries hand-written configuration this command must not own.
-A commented declaration (`# METISTRY_GITHUB_TOKEN=`) is uncommented in
-place; a secret the file never named is appended under one marker
-comment. The file is written `0600`.
+**`.env` is derived (X-124).** `metistry up` writes the whole of
+`.metistry/state/.env` — once per run, after every mint and before compose
+or a launchd job reads it — and `sync --to env` is the same render without
+the restart. The file opens with a fixed header and one line,
+`# metistry-env-sha256: <hash of everything below it>`, and its body is
+three sections in a fixed order, each sorted by name, so two renders from
+the same yaml and Keychain are byte-identical (a test asserts exactly that):
+
+- **derived from `.metistry/*.yaml`** — what the instance's yaml decides for
+  the environment. A value the file had that the yaml now decides otherwise
+  is **superseded**: rendered from the yaml, named in `up`'s plan and in
+  doctor's `env` row, and kept in `.env.pre-render` (below). The first key:
+  `METISTRY_ORIGIN`, from the remote-access record (`deployment.yaml`
+  `remote:`, X-105; `docs/ops/remote-access.md`) — the provider's origin
+  first, the loopback origin second, or with `none` the loopback origin
+  alone. A remote origin written into the file by hand is superseded, named,
+  and kept in `.env.pre-render` — and `up`'s plan and doctor's `env` row say
+  what that costs, in the remote rows' own words: the console no longer
+  answers for that origin and **passkeys added at it no longer sign in**; a
+  tunnel to the console's main port is not honoured, the dropped line is kept
+  in `.env.pre-render`, and `metistry remote set tailscale` (or another
+  provider; `docs/ops/remote-access.md`) is how a remote origin is
+  configured.
+- **from the login Keychain** — every secret-shaped variable this install
+  knows (your `.env`, `.env.example`, the last render), from this
+  instance's account; a `GENERATED_SECRETS` one minted when no store has it;
+  the named secrets a service reads delivered as `METISTRY_SECRET_<NAME>`
+  (below). **Adopt before mint:** a secret-shaped line the file holds and
+  the Keychain lacks is copied *into* the Keychain first, so the value a
+  running service was started with is what is rendered. A delivery nothing
+  names any more is dropped, and said; when the sources could not be read
+  this run it is carried instead.
+- **carried from the previous `.env`** — every other assignment, with the
+  right-hand side it had: ports, URLs, knobs, anything nothing in
+  `.metistry/*.yaml` decides yet. Where these go is the self-managing
+  design note's open question 3; until the owner rules they stay here, by
+  name, and `up` lists them. On a host without a Keychain the secret lines
+  are carried too: the file is the store there.
+
+The first render of a hand-written file loses nothing: its secrets are
+adopted, its configuration carried, and the file as it was is kept beside
+the render as `.metistry/state/.env.pre-render` (0600). That first copy is
+never overwritten — it is the only copy of a value the render stopped
+honouring — and a later hand-edited file is kept as `.env.pre-render.1`,
+`.2`, …; nothing in the product deletes any of them (delete them yourself
+once the install is proven). The rendered file itself is written whole, via
+a temporary file and a rename, so a crash mid-write never loses the carried
+section's only copy. Beside the file `up` writes
+`.metistry/state/env-render.json`: every rendered name, the section it was
+written in and a sha256 of its `NAME=value` line — names and hashes, never
+a value.
+
+**A hand edit is a code path, not a warning.** Doctor's **`env`** row
+(kind `instance`) recomputes the body's hash: `ok` when it matches the
+header; `degraded` **pre-render** when the file has no header (written by
+hand, or by a release before this one — `metistry up` derives it);
+`degraded` **hand-edited** when it does not match, naming the changed,
+added and removed lines from the record (`action: run_verb metistry up`).
+The next `up` honours each edit before it overwrites the file, and says
+what it did: an edited secret goes **into** the Keychain (`metistry secrets
+mint <VAR>` or `secrets replace <name>` is the verb for next time), an
+edited carried line keeps its new value, a line removed by hand that a store
+still holds comes back, one in no store stays gone. An in-place CLI write —
+`secrets mint`, the recorder's tokens, the owner bearer,
+`retire-legacy-env --yes`, `migrate-layout` — re-stamps a rendered file, so
+only a hand reaches `hand-edited`. A product checkout's `.env` (an install
+with no instance directory) is not derived: it is the deprecated
+environment `secrets retire-legacy-env` retires. A Keychain value that needs
+quoting is quoted the way the parser reads it back; one with a single quote
+or a newline is refused, not mangled. The file is written `0600`.
 
 **Values never travel in argv.** Every Keychain write is `security -i`
 (its interactive mode) with the one command line — value included — on the
@@ -2871,11 +2936,14 @@ half-installed.
 ## Bringing an install up
 
 `metistry up [--no-compose] [--no-launchd] [--namespace] [--dry-run] [--instance <dir>]`
-takes a product checkout plus an instance with a filled-in
-`.metistry/state/.env` to *running*. It prints which dotenv file that is, renders it
-into the plists as `__ENV_FILE__`, and hands it to `docker compose` as
+takes a product checkout plus an instance to *running*. It derives the
+instance's `.metistry/state/.env` from `.metistry/*.yaml` and the login
+Keychain (the `env` section; "Secrets" above, X-124), renders that file into
+the plists as `__ENV_FILE__`, and hands it to `docker compose` as
 `--env-file` (compose interpolates from its own `./.env` otherwise, which
-is no longer the install's environment).
+is no longer the install's environment). A dry run plans the derive and
+writes nothing; an install with no instance directory keeps its checkout's
+`.env` as it is.
 
 **What it starts is the same in every deployment shape; where depends on
 `.metistry/deployment.yaml`** (`docs/ops/deployment-shapes.md`). The default is

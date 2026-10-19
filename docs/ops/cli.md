@@ -2198,7 +2198,15 @@ instead (`docs/ops/bundled-runtime.md`, "Provider tool packs").
 can run), `choices` (the chooser's rows, in the plan's order, each with
 `available`), `rows` (doctor's `remote` rows) and `ok`. Exit 1 when a row is
 `failed`. `remote set --json` prints `{from, provider, origin, applied,
-detail, revoked?, detection}`.
+detail, revoked?, detection, stranding?}` — `revoked` is what the old
+provider's revoke undid and left for you, or in a preview what it **would**
+undo; `stranding` is the sentence about the phones a switch strands, present
+whenever the origin being left has one. **With `--json` the step notes go to
+stderr** — the provider's sign-in link, each approval page, *Waiting for
+<name> to appear on the internet*, the preview's `would:` line and its
+*preview only — pass --yes* — so stdout is exactly the one document and a
+driver (the Mac app's guided flow, X-107) can show the owner where the flow
+is while it waits for the result.
 
 **Doctor's `remote` kind.** None is one `ok` row — *"Remote access: none.
 Your phone can't reach this Mac. Choose a way in Settings ▸ Remote Access."*

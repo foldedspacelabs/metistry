@@ -261,12 +261,32 @@ describe("a token never arrives in argv (the `secrets set` rule)", () => {
     const I = await instance();
     const log: string[] = [];
     const providers: RemoteRegistry = { none, zrok: fakeProvider({ id: "zrok", origin: "https://a.share.zrok.io", log }) };
-    const { out, io: o } = io({ remoteProviders: providers, fetchFn: fakeNet(new Set(["https://a.share.zrok.io"])).fetchFn });
+    const { out, err, io: o } = io({ remoteProviders: providers, fetchFn: fakeNet(new Set(["https://a.share.zrok.io"])).fetchFn });
     expect(await main(["remote", "set", "zrok", "--yes", "--dry-run", "--json", "--product-dir", P, "--instance", I], o)).toBe(0);
     expect(log).toEqual(["detect:zrok"]);
     expect(existsSync(deploymentPath(I))).toBe(false);
-    expect(out.join("\n")).toContain("preview only — pass --yes to do this.");
-    expect(JSON.parse(out.filter((l) => l.startsWith("{") || l.startsWith(" ") || l.startsWith("}")).join("\n"))).toMatchObject({ applied: false, provider: "zrok" });
+    // with --json the preview line and every step note are stderr's: stdout is the one document
+    expect(err.join("\n")).toContain("preview only — pass --yes to do this.");
+    expect(err.join("\n")).toContain("would: configure zrok");
+    expect(JSON.parse(out.join("\n"))).toMatchObject({ applied: false, provider: "zrok" });
+  });
+
+  it("with --json, stdout is exactly one document and the step notes — what a driver shows the owner — go to stderr", async () => {
+    const P = await checkout();
+    const I = await instance();
+    const log: string[] = [];
+    const providers: RemoteRegistry = { none, zrok: fakeProvider({ id: "zrok", origin: "https://a.share.zrok.io", log }) };
+    const { out, err, io: o } = io({ remoteProviders: providers, fetchFn: fakeNet(new Set(["https://a.share.zrok.io"])).fetchFn });
+    expect(await main(["remote", "set", "zrok", "--yes", "--json", "--product-dir", P, "--instance", I], o)).toBe(0);
+    const doc = JSON.parse(out.join("\n"));
+    expect(doc).toMatchObject({ from: "none", provider: "zrok", origin: "https://a.share.zrok.io", applied: true });
+    expect(err.join("\n")).toContain("remote access: none → zrok");
+    expect(err.join("\n")).toContain("https://a.share.zrok.io answers from this Mac");
+    // and without --json, nothing moved: the same notes on stdout, as before
+    const plain = io({ remoteProviders: providers, fetchFn: fakeNet(new Set(["https://a.share.zrok.io"])).fetchFn });
+    expect(await main(["remote", "set", "zrok", "--product-dir", P, "--instance", I], plain.io)).toBe(0);
+    expect(plain.out.join("\n")).toContain("preview only — pass --yes to do this.");
+    expect(plain.err).toEqual([]);
   });
 
   it("a bare `--token` means read it from stdin: the switch itself carries no value", async () => {
@@ -324,6 +344,31 @@ describe("switching providers — a fake adapter exercises the ordering", () => 
     expect(log).toEqual(["detect:zrok"]);
     expect(existsSync(deploymentPath(I))).toBe(false);
     expect(lines.join("\n")).toContain("would: configure zrok; wait for its origin to answer from this Mac; write remote: zrok");
+  });
+
+  it("a switch's preview carries what the old provider's revoke would undo and the stranding sentence, so a driver can confirm with the CLI's own words (X-107)", async () => {
+    const log: string[] = [];
+    const zrok = fakeProvider({ id: "zrok", origin: "https://a.share.zrok.io", log });
+    const ngrok = fakeProvider({ id: "ngrok", origin: "https://m.ngrok-free.dev", log });
+    const { I, opts } = await base({ none, zrok, ngrok }, new Set(["https://a.share.zrok.io", "https://m.ngrok-free.dev"]));
+    const first = await remoteSet({ ...opts, provider: "zrok", options: { flags: {} }, yes: true });
+    expect(first).toMatchObject({ applied: true });
+    expect(first.stranding).toBeUndefined();
+    expect(first.revoked).toBeUndefined();
+    log.length = 0;
+    const preview = await remoteSet({ ...opts, provider: "ngrok", options: { flags: {} } });
+    expect(preview).toMatchObject({ from: "zrok", provider: "ngrok", applied: false, revoked: { undone: ["the zrok handler"], left_for_owner: ["the node in zrok's admin console"] } });
+    expect(preview.stranding).toBe("phones added under https://a.share.zrok.io stop working once this changes to https://m.ngrok-free.dev: a passkey is bound to the host it was created on. Add each phone again afterwards; Devices marks the ones to remove.");
+    // the preview ran only detect on the new one and a DRY revoke on the old: nothing changed
+    expect(log).toEqual(["detect:ngrok", "revoke:zrok:dry:record=zrok"]);
+    expect(parseYamlish(readFileSync(deploymentPath(I), "utf8"))).toMatchObject({ remote: { provider: "zrok" } });
+    // a first set-up from none strands nothing and revokes nothing: neither field
+    const fresh = await remoteSet({ ...opts, provider: "ngrok", options: { flags: {} } });
+    expect(fresh.revoked).toBeDefined(); // still zrok in force here
+    const { opts: none0 } = await base({ none, ngrok }, new Set());
+    const firstEver = await remoteSet({ ...none0, provider: "ngrok", options: { flags: {} } });
+    expect(firstEver.stranding).toBeUndefined();
+    expect(firstEver.revoked).toBeUndefined();
   });
 
   it("set: configure → the origin answers from this Mac → the record is written — then `set none` runs that provider's revoke", async () => {

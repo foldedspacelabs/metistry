@@ -1855,7 +1855,11 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         ...(io.exec ? { exec: io.exec } : {}),
         ...(io.remoteProviders ? { providers: io.remoteProviders } : {}),
         ...(io.readToken ? { readToken: io.readToken } : {}),
-        out: json ? () => {} : out,
+        // With --json the one document is stdout's; the step notes — the
+        // sign-in link, each approval page, "waiting for <name>…" — go to
+        // stderr, so a driver (the Mac's guided flow, X-107) can show the
+        // owner where the flow is and still parse the result.
+        out: json ? err : out,
       };
       let timeoutS: number | undefined;
       try {
@@ -1918,7 +1922,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           ...(timeoutS !== undefined ? { waitMs: timeoutS * 1000 } : { waitMs: REMOTE_WAIT_DEFAULT_MS }),
         });
         if (json) out(JSON.stringify(r, null, 2));
-        if (!yes) out("preview only — pass --yes to do this.");
+        if (!yes) (json ? err : out)("preview only — pass --yes to do this.");
         return 0;
       } catch (e) {
         err(`metistry remote ${verb}: ${e instanceof Error ? e.message : String(e)}`);

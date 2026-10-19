@@ -902,7 +902,12 @@ run twice (the second run says there is nothing left). In this order:
    block and OpenCode `$schema` line `connect` added) goes, and your edits
    stay. A file `connect` created is deleted again. The backup is removed
    with the entry. Another server in the file, and another instance's entry,
-   are never touched; a file that is not JSON is left alone and named;
+   are never touched; a file that is not JSON is left alone and named. An
+   entry under `connect`'s own key whose Authorization header is not the one
+   `connect` writes (a hand-made server that happens to be called `metistry`,
+   with its own bearer) is yours, for every tool: it is left alone and
+   reported as a `PROBLEM` line, the header is never echoed, and the Keychain
+   item still goes;
 3. **the Keychain item is deleted** — this instance's
    `METISTRY_AGENT_TOKEN_<TOOL>` under this instance's account, and nothing
    else. A host with no Keychain never held one.

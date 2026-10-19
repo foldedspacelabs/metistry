@@ -756,7 +756,7 @@ export const HARNESSES: Record<ConnectTool, Harness> = {
       entry: cursorServerEntry,
       write: async (c) => ({ state: await writeCursorConfig(cursorConfigFile(c.home), c.key, c.mcpUrl, c.varName) }),
       read: ({ home, key }) => readCursorServer(cursorConfigFile(home), key),
-      remove: (c) => removeConfigEntry(cursorConfigFile(c.home), c.key, "mcpServers"),
+      remove: (c) => removeConfigEntry(cursorConfigFile(c.home), c.key, "mcpServers", { headers: cursorServerEntry(c.mcpUrl, c.varName).headers }),
     },
   },
   devin: { spec: TOOL_SPECS.devin },
@@ -768,7 +768,7 @@ export const HARNESSES: Record<ConnectTool, Harness> = {
       entry: opencodeServerEntry,
       write: async (c) => ({ state: await writeOpencodeConfig(opencodeConfigFile(c.home, c.env), c.key, c.mcpUrl, c.varName) }),
       read: ({ home, env, key }) => readOpencodeServer(opencodeConfigFile(home, env), key),
-      remove: (c) => removeConfigEntry(opencodeConfigFile(c.home, c.env), c.key, "mcp", OPENCODE_SCHEMA),
+      remove: (c) => removeConfigEntry(opencodeConfigFile(c.home, c.env), c.key, "mcp", { schema: OPENCODE_SCHEMA, headers: opencodeServerEntry(c.mcpUrl, c.varName).headers }),
     },
   },
 };
@@ -807,8 +807,23 @@ export type ConfigRemoval =
  * from before backups) a result with nothing left in it removes the file.
  * Never touches another server's entry, and never writes a file it cannot
  * parse.
+ *
+ * Only the entry `connect` wrote (X-134, "exactly the entries `connect`
+ * wrote"): with `headers` given, an entry under this verb's own key whose
+ * Authorization header is not the one `connect` writes — a hand-made server
+ * that happens to be called `metistry`, with its own bearer — is the owner's.
+ * It is left where it is and named in the error, never read back any further
+ * than that comparison, and the backup (if any) stays for the run that
+ * follows. The same rule Claude Code's entry already lives by
+ * (`removeClaudeConfig`), so the registry's three entries now refuse alike.
  */
-export async function removeConfigEntry(file: string, key: string, container: "mcpServers" | "mcp", schema?: string): Promise<ConfigRemoval> {
+export async function removeConfigEntry(
+  file: string,
+  key: string,
+  container: "mcpServers" | "mcp",
+  opts: { schema?: string | undefined; headers?: Record<string, string> | undefined } = {},
+): Promise<ConfigRemoval> {
+  const { schema, headers } = opts;
   const bak = backupFile(file, key);
   const done = async (r: ConfigRemoval): Promise<ConfigRemoval> => {
     await rm(bak, { force: true }); // ours, and it holds a copy of the owner's other servers — it goes with the entry
@@ -829,6 +844,17 @@ export async function removeConfigEntry(file: string, key: string, container: "m
   }
   const servers = doc[container];
   if (servers === null || typeof servers !== "object" || Array.isArray(servers) || !(key in (servers as object))) return done("no-entry");
+
+  if (headers !== undefined) {
+    const have = (servers as Record<string, unknown>)[key];
+    const haveHeaders = have !== null && typeof have === "object" && !Array.isArray(have) ? (have as { headers?: unknown }).headers : undefined;
+    if (!isDeepStrictEqual(haveHeaders, headers)) {
+      const varName = /\$?\{(?:env:)?([A-Z0-9_]+)\}/.exec(headers.Authorization ?? "")?.[1] ?? "the token variable";
+      throw new Error(
+        `${file} has a "${container}.${key}" entry that is not the one connect wrote (its Authorization header does not name ${varName}), so it was left alone — delete it by hand if it is yours to delete`,
+      );
+    }
+  }
 
   const rest = { ...(servers as Record<string, unknown>) };
   delete rest[key];

@@ -4,22 +4,23 @@
 // and the return path — the poll collector turning a finished session into a
 // `report` proposal, closing the work row and writing the reported ACUs back
 // onto the dispatch `runs` row. Devin itself is a fake; nothing here touches
-// the network.
+// the network. The target is the `devin` agent connection (X-85: the
+// `targets/devin-sessions` manifest and its environment key are gone), its
+// key filled at its door.
 import type { AddressInfo } from "node:net";
-import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { mintToken } from "@foldedspacelabs/metistry-core";
 import { collectorCode } from "@metistry-apps/collectors";
 import { makeServer } from "../src/server.js";
-import { TargetRegistry } from "../src/dispatch.js";
+import { instanceSyncOpener } from "@foldedspacelabs/metistry-connections";
+import { agentRegistry, root, type AgentRegistry } from "./agent-registry.js";
 import * as store from "../src/auth-store.js";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
-const root = fileURLToPath(new URL("../../../", import.meta.url));
 const pollCode = await collectorCode("devin-sessions"); // the registry's lookup: the product's code, by name
 if (typeof pollCode !== "function") throw new Error(pollCode.missing);
 const pollDevin = pollCode;
@@ -33,17 +34,17 @@ function devinFake(state: { next: number; sessions: Map<string, Record<string, u
       const id = `devin-${RUN}-${state.next++}`;
       state.posts.push(JSON.parse(String(init.body)));
       state.sessions.set(id, { session_id: id, url: `https://app.devin.ai/sessions/${id}`, status: "running", status_detail: "working", acus_consumed: 0 });
-      return { ok: true, status: 200, json: async () => ({ session_id: id, url: `https://app.devin.ai/sessions/${id}` }) };
+      return Response.json({ session_id: id, url: `https://app.devin.ai/sessions/${id}` });
     }
-    if (url.endsWith("/v3/self")) return { ok: true, status: 200, json: async () => ({ org_id: "org-abc" }), text: async () => "" };
+    if (url.endsWith("/v3/self")) return Response.json({ org_id: "org-abc" });
     const id = url.split("/").pop()!;
     const s = state.sessions.get(id);
-    if (!s) return { ok: false, status: 404, text: async () => "no such session" };
-    return { ok: true, status: 200, json: async () => s, text: async () => "" };
+    if (!s) return new Response("no such session", { status: 404 });
+    return Response.json(s);
   }) as unknown as typeof fetch;
 }
 
-describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
+describe.skipIf(!hasDb)("devin connection as a target (integration)", () => {
   let pool: pg.Pool;
   let base: string;
   let server: ReturnType<typeof makeServer>;
@@ -51,18 +52,22 @@ describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
   let ownerToken: string;
   const devin = { next: 1, sessions: new Map<string, Record<string, unknown>>(), posts: [] as Record<string, unknown>[] };
   const fetchFn = devinFake(devin);
-  const env = { METISTRY_DEVIN_API_KEY: "cog_test", METISTRY_DEVIN_ORG_ID: "org-abc" };
-  // the collector's context: the same key, the same fake Devin, and the
-  // organization it reads off each work row's meta (never from here)
-  const pollCtx = { devinApiKey: "cog_test", fetchFn };
+  let fixture: AgentRegistry;
+  // the collector's context: the same fake Devin, and the organization it
+  // reads off each work row's meta (never from here)
+  // — read through the same connection the dispatch went out through, its key
+  // filled at the door (a row dispatched through a connection is polled home
+  // through it only)
+  const KEY = ["cog", "devinIntegrationKey0123456789"].join("_");
+  let pollCtx: Parameters<typeof pollDevin>[1];
 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
-    const targets = new TargetRegistry({ env, fetchFn });
-    await targets.loadDir(`${root}targets`);
-    // The instance overlay (D4) is what widens the empty product allow list;
-    // here it is done inline so the policy under test is a real one.
-    targets.add({ ...targets.get("devin-sessions")!, data_policy: { allow: ["Projects"], deny_sources: ["comms", "devin"], max_brief_bytes: 16384 } });
+    // The instance's overlay of the type (D4) is what widens the empty product
+    // allow list; the helper writes one so the policy under test is a real one.
+    fixture = await agentRegistry({ fetchFn, devin: { org: "org-abc", key: KEY, allow: ["Projects"] } });
+    pollCtx = { openSync: instanceSyncOpener({ instanceDir: fixture.dir, seedDir: `${root}seed`, env: { METISTRY_SECRET_DEVIN_API_KEY: KEY }, fetch: fetchFn }) };
+    const targets = fixture.registry;
     server = makeServer(pool, new QueryStore(pool), {
       origin: "http://127.0.0.1:0",
       inboxDir: `/tmp/metistry-test-inbox-${Date.now()}`,
@@ -81,6 +86,7 @@ describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
   afterAll(async () => {
     await new Promise<void>((r) => server.close(() => r()));
     await pool.end();
+    await fixture.cleanup();
   });
 
   async function newTask(title: string): Promise<number> {
@@ -90,7 +96,7 @@ describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
     return Number(rows[0].id);
   }
   const dispatchAs = (auth: Record<string, string>, id: number, body: Record<string, unknown>) =>
-    fetch(`${base}/api/tasks/${id}/dispatch`, { method: "POST", headers: { "content-type": "application/json", ...auth }, body: JSON.stringify({ target: "devin-sessions", ...body }) });
+    fetch(`${base}/api/tasks/${id}/dispatch`, { method: "POST", headers: { "content-type": "application/json", ...auth }, body: JSON.stringify({ target: "devin", ...body }) });
   const row = async (id: number) => (await pool.query(`SELECT status, external_ref, meta, closed_at, history FROM work WHERE id = $1`, [id])).rows[0];
 
   it("dispatch is the OWNER's action: a capture owner token is 403, an unknown bearer is 401", async () => {
@@ -127,7 +133,7 @@ describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
     const w = await row(id);
     expect(w.status).toBe("in_progress");
     expect(w.external_ref).toBe(body.ref);
-    expect(w.meta.devin).toMatchObject({ org: "org-abc", max_acu: 3, purpose: "knowledge_research", target: "devin-sessions", dispatch_run_id: body.run_id });
+    expect(w.meta.devin).toMatchObject({ org: "org-abc", max_acu: 3, purpose: "knowledge_research", target: "devin", dispatch_run_id: body.run_id, connection: "devin" });
 
     // still running: the poll records status and changes nothing else
     expect(await pollDevin(pool, pollCtx)).toBe(0);
@@ -161,8 +167,8 @@ describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
 
     // the ACU cap went out on the dispatch runs row; the reported spend came back to it
     const { rows: runs } = await pool.query(`SELECT ok, tool, meta FROM runs WHERE id = $1`, [body.run_id]);
-    expect(runs[0]).toMatchObject({ ok: true, tool: "devin-sessions" });
-    expect(runs[0].meta).toMatchObject({ target: "devin-sessions", purpose: "knowledge_research", max_acu: 3, acus_consumed: 2.5, outcome: "answered" });
+    expect(runs[0]).toMatchObject({ ok: true, tool: "devin" });
+    expect(runs[0].meta).toMatchObject({ target: "devin", purpose: "knowledge_research", max_acu: 3, acus_consumed: 2.5, outcome: "answered" });
 
     // a second poll finds nothing: the row is no longer in_progress
     expect(await pollDevin(pool, pollCtx)).toBe(0);
@@ -193,7 +199,7 @@ describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
     expect((await res.json()).violations[0].kind).toBe("path_outside_allow");
     expect(devin.posts).toHaveLength(before);
     expect((await row(id)).external_ref).toBeNull();
-    const { rows } = await pool.query(`SELECT ok, error, meta FROM runs WHERE kind = 'dispatch' AND tool = 'devin-sessions' AND ok = false ORDER BY id DESC LIMIT 1`);
+    const { rows } = await pool.query(`SELECT ok, error, meta FROM runs WHERE kind = 'dispatch' AND tool = 'devin' AND ok = false ORDER BY id DESC LIMIT 1`);
     expect(rows[0].error).toMatch(/^data_policy: path_outside_allow$/);
     expect(rows[0].meta.violations[0].paths).toEqual(["Journal/Daily/2026-09-15.md"]);
   });
@@ -201,7 +207,7 @@ describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
   it("GET /api/targets lists the target with its live check", async () => {
     const res = await fetch(`${base}/api/targets`, { headers: { cookie: session } });
     const { targets } = (await res.json()) as { targets: { name: string; transport: string; check: { status: string } }[] };
-    const t = targets.find((x) => x.name === "devin-sessions")!;
+    const t = targets.find((x) => x.name === "devin")!;
     expect(t).toMatchObject({ transport: "http", check: { status: "ok" } });
   });
 });

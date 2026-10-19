@@ -2,22 +2,22 @@
 // auth (owner token → 403, session → ok), the external_ref write under the
 // partial unique index, the runs row, and the return path — github-state's
 // reconcile upserts onto the SAME work row and closes it when the issue
-// closes. GitHub itself is a fake; nothing here touches the network.
+// closes. GitHub itself is a fake; nothing here touches the network. The
+// target is a `github-issues` agent connection (X-85: the `targets/` manifest
+// and its environment key are gone), its write token filled at its door.
 import type { AddressInfo } from "node:net";
-import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { mintToken } from "@foldedspacelabs/metistry-core";
 import { collectorCode } from "@metistry-apps/collectors";
 import { makeServer } from "../src/server.js";
-import { TargetRegistry } from "../src/dispatch.js";
+import { agentRegistry, type AgentRegistry } from "./agent-registry.js";
 import * as store from "../src/auth-store.js";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
-const root = fileURLToPath(new URL("../../../", import.meta.url));
 // unique per run: external_ref is unique, and a verbose re-run reuses the scratch db
 const REPO = `o/r-${Date.now().toString(36)}`;
 
@@ -27,17 +27,13 @@ function githubFake(state: { next: number; open: { number: number; title: string
     state.calls.push(`${init?.method ?? "GET"} ${url}`);
     if (init?.method === "POST") {
       const n = state.next++;
-      return { ok: true, status: 201, json: async () => ({ number: n, html_url: `https://github.com/${REPO}/issues/${n}` }) };
+      return Response.json({ number: n, html_url: `https://github.com/${REPO}/issues/${n}` }, { status: 201 });
     }
-    if (url.endsWith("/user")) return { ok: true, status: 200, json: async () => ({ login: "owner" }) };
+    if (url.endsWith("/user")) return Response.json({ login: "owner" });
     if (url.includes("/issues?state=open")) {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => state.open.map((i) => ({ ...i, state: "open", html_url: `https://github.com/${REPO}/issues/${i.number}`, updated_at: "2026-09-06T00:00:00Z" })),
-      };
+      return Response.json(state.open.map((i) => ({ ...i, state: "open", html_url: `https://github.com/${REPO}/issues/${i.number}`, updated_at: "2026-09-06T00:00:00Z" })));
     }
-    return { ok: true, status: 200, json: async () => ({}) };
+    return Response.json({});
   }) as unknown as typeof fetch;
 }
 
@@ -47,13 +43,15 @@ describe.skipIf(!hasDb)("dispatch (integration)", () => {
   let server: ReturnType<typeof makeServer>;
   let session: string;
   let ownerToken: string;
+  let fixture: AgentRegistry;
   const gh = { next: 42, open: [] as { number: number; title: string }[], calls: [] as string[] };
   const fetchFn = githubFake(gh);
 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
-    const targets = new TargetRegistry({ env: { METISTRY_GITHUB_WRITE_TOKEN: "write-t", METISTRY_GITHUB_DISPATCH_REPO: REPO }, fetchFn });
-    await targets.loadDir(`${root}targets`);
+    // a Devin connection is there too: the purposes a dispatch may name are the connection types' (plan §2.7)
+    fixture = await agentRegistry({ fetchFn, github: { repo: REPO, key: ["gh" + "p", "dispatchIntegrationWriteToken01"].join("_") }, devin: { org: "org-abc", key: ["cog", "dispatchIntegrationKey0123456789"].join("_") } });
+    const targets = fixture.registry;
     server = makeServer(pool, new QueryStore(pool), {
       origin: "http://127.0.0.1:0",
       inboxDir: `/tmp/metistry-test-inbox-${Date.now()}`,
@@ -72,6 +70,7 @@ describe.skipIf(!hasDb)("dispatch (integration)", () => {
   afterAll(async () => {
     await new Promise<void>((r) => server.close(() => r()));
     await pool.end();
+    await fixture.cleanup();
   });
 
   async function newTask(title: string): Promise<number> {

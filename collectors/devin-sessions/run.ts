@@ -1,6 +1,6 @@
 // devin-sessions: the RETURN path of a Devin dispatch — the `devin` agent
-// connection's (T4-11), and `targets/devin-sessions`' for one release (W6 of
-// docs/plan-refresh-2026-09-13.md §4b). The console dispatches a work row by
+// connection's (T4-11; the `targets/devin-sessions` manifest and its key are
+// gone, X-85) (W6 of docs/plan-refresh-2026-09-13.md §4b). The console dispatches a work row by
 // creating a Devin session and binding `external_ref = devin:<session_id>`;
 // this collector polls those rows and, when a session is done, files the
 // structured answer as a `report` proposal for the owner to triage.
@@ -204,7 +204,7 @@ export async function check(ctx: DevinSessionsCtx = {}): Promise<CheckResult> {
       return {
         status: "absent" as const,
         remediation:
-          "no Devin connection — the one devin-knowledge reads, and the one a task is dispatched to. Nothing can be dispatched to Devin without it, so there is nothing to poll; `metistry connections add devin --type agent --provider devin …` (docs/ops/connections.md, Agent connections); for one release METISTRY_DEVIN_API_KEY still works",
+          "no Devin connection — the one devin-knowledge reads, and the one a task is dispatched to. Nothing can be dispatched to Devin without it, so there is nothing to poll; `metistry connections add devin --type agent --provider devin …` (docs/ops/connections.md, Agent connections); METISTRY_DEVIN_API_KEY is no longer read (0.17.0)",
       };
     }
     return { status: "ok" as const, ...(access.connection ? { meta: { connection: access.connection } } : {}) };

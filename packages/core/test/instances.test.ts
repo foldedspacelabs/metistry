@@ -34,7 +34,7 @@ describe("qualifyAgentId (misuse)", () => {
   });
 
   it("refuses an instance_id that is not the UUID `metistry init` mints — an origin is not an identity", () => {
-    for (const bad of ["", "local", "https://metis.example", ID.toUpperCase(), ID.slice(0, -1), `${ID} `]) {
+    for (const bad of ["", "local", "https://assistant.example", ID.toUpperCase(), ID.slice(0, -1), `${ID} `]) {
       expect(() => qualifyAgentId("cursor", bad), bad).toThrow(/not an instance_id/);
     }
   });
@@ -77,7 +77,7 @@ describe("instances.yaml", () => {
 instances:
   - instance_id: "${ID}"
     name: Studio
-    origin: https://metis.example.com
+    origin: https://assistant.example.com
     capabilities: [knowledge, capture]
   - instance_id: "${OTHER}"
     name: Second
@@ -101,7 +101,7 @@ instances:
 instances:
   - instance_id: "${ID}"
     name: Studio
-    origin: https://metis.example.com
+    origin: https://assistant.example.com
     resources: [{ kind: mcp, name: brain }]
 `);
     expect(r.ok).toBe(false);
@@ -109,7 +109,7 @@ instances:
   });
 
   it("refuses an origin with a path or a trailing slash, and a name that is not a UUID's", () => {
-    for (const origin of ["https://metis.example.com/", "https://metis.example.com/api", "metis.example.com", "", "ftp://x"]) {
+    for (const origin of ["https://assistant.example.com/", "https://assistant.example.com/api", "assistant.example.com", "", "ftp://x"]) {
       const r = validateInstances({ instances: [{ instance_id: ID, name: "x", origin }] });
       expect(r.ok, origin).toBe(false);
       expect(r.errors.join("\n")).toMatch(/origin/);

@@ -17,10 +17,10 @@ import { SoftwarePasskey } from "./passkey-fake.js";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
-const FIRST = "https://metis.example";
-const SECOND = "https://metis.tailnet.ts.net";
-const FIRST_HOST = "metis.example";
-const SECOND_HOST = "metis.tailnet.ts.net";
+const FIRST = "https://assistant.example";
+const SECOND = "https://assistant.tailnet.ts.net";
+const FIRST_HOST = "assistant.example";
+const SECOND_HOST = "assistant.tailnet.ts.net";
 const policy = { idleDays: 30, maxDays: 365 };
 
 describe.skipIf(!hasDb)("passkeys per origin — the rpID follows the request (X-104)", () => {
@@ -98,7 +98,7 @@ describe.skipIf(!hasDb)("passkeys per origin — the rpID follows the request (X
     expect(here.status).toBe(401);
     const body = (await here.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("unauthenticated");
-    expect(body.error.message).toMatch(/added for metis\.tailnet\.ts\.net, the browser presented https:\/\/metis\.example/);
+    expect(body.error.message).toMatch(/added for assistant\.tailnet\.ts\.net, the browser presented https:\/\/assistant\.example/);
     expect(here.headers.get("set-cookie")).toBeNull();
 
     const audit = await pool.query(`SELECT ok, meta FROM runs WHERE kind = 'auth' AND tool = 'login' ORDER BY id DESC LIMIT 2`);
@@ -113,7 +113,7 @@ describe.skipIf(!hasDb)("passkeys per origin — the rpID follows the request (X
     expect((await signIn(pk, FIRST)).status).toBe(200);
     const refused = await signIn(pk, SECOND, SECOND_HOST);
     expect(refused.status).toBe(401);
-    expect(((await refused.json()) as any).error.message).toMatch(/added for metis\.example, the browser presented https:\/\/metis\.tailnet\.ts\.net/);
+    expect(((await refused.json()) as any).error.message).toMatch(/added for assistant\.example, the browser presented https:\/\/assistant\.tailnet\.ts\.net/);
   });
 
   it("an existing passkey with a null rp_id still signs in at the first origin — and only there", async () => {
@@ -125,7 +125,7 @@ describe.skipIf(!hasDb)("passkeys per origin — the rpID follows the request (X
     expect((await signIn(legacy, FIRST)).status).toBe(200);
     const refused = await signIn(legacy, SECOND, SECOND_HOST);
     expect(refused.status).toBe(401);
-    expect(((await refused.json()) as any).error.message).toMatch(/added for metis\.example/); // null reads as the first host, never as "any host"
+    expect(((await refused.json()) as any).error.message).toMatch(/added for assistant\.example/); // null reads as the first host, never as "any host"
   });
 
   it("an origin outside the list is refused at both starts, naming both sides, and the ceremonies' challenges are never issued", async () => {
@@ -133,13 +133,13 @@ describe.skipIf(!hasDb)("passkeys per origin — the rpID follows the request (X
     const enroll = await post("/auth/enroll/start", { code }, "https://evil.example");
     expect(enroll.status).toBe(401);
     expect(((await enroll.json()) as any).error.message).toBe(
-      "origin mismatch: this console expects https://metis.example or https://metis.tailnet.ts.net, the browser presented https://evil.example — set METISTRY_ORIGIN to the origin you actually load",
+      "origin mismatch: this console expects https://assistant.example or https://assistant.tailnet.ts.net, the browser presented https://evil.example — set METISTRY_ORIGIN to the origin you actually load",
     );
     expect(await store.peekEnrollmentCode(pool, code)).toBe(true); // the code is not burned by a refused start
 
     const login = await post("/auth/login/start", {}, "https://evil.example");
     expect(login.status).toBe(401);
-    expect(((await login.json()) as any).error.message).toMatch(/expects https:\/\/metis\.example or https:\/\/metis\.tailnet\.ts\.net, the browser presented https:\/\/evil\.example/);
+    expect(((await login.json()) as any).error.message).toMatch(/expects https:\/\/assistant\.example or https:\/\/assistant\.tailnet\.ts\.net, the browser presented https:\/\/evil\.example/);
 
     // the finish refuses an outside origin too, as before X-104
     const pk = new SoftwarePasskey("evil.example");

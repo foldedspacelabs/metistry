@@ -133,7 +133,7 @@ describe("console session: the door", () => {
     const f = fakeFetch(() => json({}));
     i.send({ id: 1, method: "GET", path: "/api/whoami" });
     await expect(
-      runConsoleSession({ env: { METISTRY_CONSOLE_URL: "https://metis.example", METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", input: i.iterable, write: o.write, fetchFn: f.fetchFn }),
+      runConsoleSession({ env: { METISTRY_CONSOLE_URL: "https://assistant.example", METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", input: i.iterable, write: o.write, fetchFn: f.fetchFn }),
     ).rejects.toThrow(/is not loopback.*`console session` refuses/);
     expect(f.seen).toEqual([]);
     expect(o.raw).toEqual([]);
@@ -250,7 +250,7 @@ describe("console session: lines written at spawn", () => {
     const { pipe, rl } = stdinWith([{ id: 1, method: "GET", path: "/api/whoami" }, { id: 2, method: "POST", path: "/api/work", body: {} }]);
     const o = output();
     const f = fakeFetch(() => json({}));
-    const refused = runConsoleSession({ env: { METISTRY_CONSOLE_URL: "https://metis.example" }, platform: "darwin", exec: slowKeychain, input: rl, write: o.write, fetchFn: f.fetchFn });
+    const refused = runConsoleSession({ env: { METISTRY_CONSOLE_URL: "https://assistant.example" }, platform: "darwin", exec: slowKeychain, input: rl, write: o.write, fetchFn: f.fetchFn });
     await expect(refused).rejects.toThrow(/is not loopback.*`console session` refuses/);
     await expect(refused).rejects.not.toThrow(TOKEN);
     pipe.write(`${JSON.stringify({ id: 3, method: "GET", path: "/api/whoami" })}\n`); // a line after the refusal: still nothing

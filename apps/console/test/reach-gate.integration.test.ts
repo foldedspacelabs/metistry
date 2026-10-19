@@ -38,6 +38,10 @@ const RESTORE_PATH = `Areas/${MARK}-restore.md`;
 const RESTORE_NOW_TEXT = "the reach gate probe, as it stands\n";
 const RESTORE_OLD_TEXT = "the reach gate probe, before\n";
 const RESTORE_SHA = "1a".repeat(20); // a full commit id, never a real one
+// Roll back's head: a full commit id of this file's own, so its request's
+// `rollback:…@<head>` source is nobody else's (vault-rollback.integration raises
+// the same target against ITS head; raiseMirror deduplicates on the source).
+const ROLLBACK_HEAD = createHash("sha1").update(`${MARK}-rollback-head`).digest("hex");
 const RESTORE_DATE = "2026-09-27T08:00:00-04:00";
 
 /** One of this host's real, non-loopback IPv4 addresses — the peer a request over it genuinely has. */
@@ -111,7 +115,7 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
       vaultRevert: async (ask) => ({
         dry_run: true,
         target: ask.target,
-        head: "a".repeat(40),
+        head: ROLLBACK_HEAD,
         base: null,
         reverts: [{ sha: "b".repeat(40), subject: "reach gate probe", author: "assistant", date: "2026-09-27T08:00:00-04:00" }],
         revert_count: 1,
@@ -163,7 +167,7 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
 
   afterAll(async () => {
     await pool.query(`DELETE FROM agents WHERE id = ANY($1) OR id = 'devin'`, [minted]);
-    await pool.query(`DELETE FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' = $1`, [`rollback:to=2026-09-26@${"a".repeat(40)}`]);
+    await pool.query(`DELETE FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' = $1`, [`rollback:to=2026-09-26@${ROLLBACK_HEAD}`]);
     await pool.query(`DELETE FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' = $1`, [`restore:${RESTORE_PATH}@${RESTORE_SHA}`]);
     await pool.query(`DELETE FROM owner_tokens WHERE label = $1`, [MARK]).catch(() => undefined);
     await pool.query(`DELETE FROM auth_sessions WHERE passkey_id = ANY($1)`, [passkeyIds]).catch(() => undefined);

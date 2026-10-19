@@ -106,14 +106,28 @@ describe("doctor probes concurrently", () => {
     const P = await checkout();
     const DELAY = 120;
     const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
-    // every network probe and every subprocess is slow by the same amount —
-    // in series this checkout's probes were a dozen of these back to back
-    const fetchFn = (async (url: string) => {
+    // Every network probe and every subprocess is slow by the same amount —
+    // in series this checkout's probes were a dozen of these back to back.
+    // Each one counts itself in while it waits; the high-water mark of that
+    // count is how many probes doctor had in flight at once, which is the
+    // property itself. (Until X-25 this asserted the wall clock instead —
+    // `elapsed < 3 × DELAY` — which measured the machine as much as doctor:
+    // beside vitest's other worker processes the probes' timers landed late
+    // and the same code failed, so the timing numbers are now reported, not
+    // asserted.)
+    let inFlight = 0;
+    let peak = 0;
+    const probing = async () => {
+      peak = Math.max(peak, ++inFlight);
       await sleep(DELAY);
+      inFlight--;
+    };
+    const fetchFn = (async (url: string) => {
+      await probing();
       return new Response(JSON.stringify({ status: "ok", probe: String(url) }), { status: 200, headers: { "content-type": "application/json" } });
     }) as unknown as typeof fetch;
     const exec = async (_cmd: string, _args: string[]) => {
-      await sleep(DELAY);
+      await probing();
       return { code: 1, stdout: "", stderr: "" };
     };
 
@@ -123,12 +137,13 @@ describe("doctor probes concurrently", () => {
 
     // Every one of these rows waited `DELAY` on its own probe. Add their
     // latencies up and you get what doctor USED to cost, because it ran them
-    // one after another; the wall clock is now a small multiple of one probe.
+    // one after another; run concurrently, at least three of them were
+    // waiting at the same moment, so the table cost one wait and not each.
     const slow = report.rows.filter((r) => r.latency_ms >= DELAY);
     const inSeries = slow.reduce((n, r) => n + r.latency_ms, 0);
     expect(slow.length).toBeGreaterThanOrEqual(3);
-    expect(inSeries).toBeGreaterThan(elapsed * 1.5);
-    expect(elapsed).toBeLessThan(DELAY * 3);
+    expect(inFlight).toBe(0); // every probe finished before doctor returned
+    expect(peak, `probes in flight at once (in series ${inSeries}ms, elapsed ${elapsed}ms)`).toBeGreaterThanOrEqual(3);
   });
 });
 

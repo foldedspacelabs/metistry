@@ -14,6 +14,7 @@
 //     raised with `include_config` is never reverted by this bearer.
 // And the door's misuse tests (U2): 401 with no credential, 403 for an agent
 // bearer and for the capture owner token, the local owner token reaches it.
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,7 +33,12 @@ import { applyRollback, parseRevertAnswer, parseRollbackAsk, rollbackOf, rollbac
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url));
 const policy = { idleDays: 30, maxDays: 365 };
 
-const HEAD = "a".repeat(40);
+// The head the fake reconciler reports — a full commit id of THIS file's own.
+// A rollback request's `source.external_ref` is `rollback:<target>@<head>`, and
+// raiseMirror deduplicates on it: with the same head as another file's fake
+// (reach-gate's used to be the same "a"×40), the two files shared ONE pending
+// row, and each one's cleanup deleted the other's mid-test (X-25).
+const HEAD = createHash("sha1").update(`itest-rollback-head-${mintToken(8)}`).digest("hex");
 const AGENT_1 = "b".repeat(40);
 const AGENT_2 = "c".repeat(40);
 const MORNING = "d".repeat(40);
@@ -163,12 +169,13 @@ describe.skipIf(!hasDb)("roll back (integration)", () => {
   const LOCAL = () => ({ authorization: `Bearer ${localOwnerToken}` });
 
   const rows = async () =>
-    (await pool.query(`SELECT id, kind, source_agent, trust, decision, payload, source FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' LIKE 'rollback:%' ORDER BY id`)).rows;
+    (await pool.query(`SELECT id, kind, source_agent, trust, decision, payload, source FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' LIKE $1 ORDER BY id`, [`rollback:%@${HEAD}%`])).rows;
   const rollback = (body: unknown, headers: Record<string, string> = LOCAL()) =>
     fetch(`${base}/api/vault/rollback`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   const answer = (id: number | string, decision: string, headers: Record<string, string> = { cookie }) =>
     fetch(`${base}/api/proposals/${id}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ decision }) });
-  const clean = () => pool.query(`DELETE FROM proposals WHERE (source->>'kind' = 'metistry' AND source->>'external_ref' LIKE 'rollback:%') OR source_agent = $1`, [agentId]);
+  // this file's rows only: the requests raised against ITS head, and the agent's own
+  const clean = () => pool.query(`DELETE FROM proposals WHERE (source->>'kind' = 'metistry' AND source->>'external_ref' LIKE $2) OR source_agent = $1`, [agentId, `rollback:%@${HEAD}%`]);
 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);

@@ -26,6 +26,12 @@
 //                version --json`, `metistry update` and `--rollback` (M2)
 //   Account      the console sign-in and the instance repository — the old
 //                *Connections* (screen-15 §1)
+//   Remote Access remote-access-model.swift (X-107, plan §2.23): the record,
+//                the origin and doctor's `remote` rows from `metistry remote
+//                status --json` (M20); Test is `remote test`; Turn Off is
+//                `remote off --yes` after a confirm naming what the provider's
+//                revoke undoes; Change… is the guided flow
+//                (remote-access-flow.swift) over `remote set <provider>`
 //   Devices      devices-model.swift (X-77, plan §2.22): the passkeys from
 //                `GET /api/devices`, Remove and Sign Out Everywhere through
 //                `POST /api/devices/:id/revoke` (scope device | sessions),
@@ -87,6 +93,7 @@ public final class SettingsModel {
         case compute
         case updates
         case account
+        case remoteAccess
         case devices
         case connections
         case secrets
@@ -106,6 +113,7 @@ public final class SettingsModel {
             case .compute: return "Compute"
             case .updates: return "Updates"
             case .account: return "Account"
+            case .remoteAccess: return RemoteAccessWords.title
             case .devices: return "Devices"
             case .connections: return "Connections"
             case .secrets: return "Secrets"
@@ -124,6 +132,7 @@ public final class SettingsModel {
             case .compute: return "cpu"
             case .updates: return "arrow.down.circle"
             case .account: return "person.crop.circle"
+            case .remoteAccess: return "antenna.radiowaves.left.and.right"
             case .devices: return "iphone"
             case .connections: return "link"
             case .secrets: return "key"
@@ -161,7 +170,7 @@ public final class SettingsModel {
         public var sections: [Section] {
             switch self {
             case .general: return [.instance, .services, .compute, .updates]
-            case .access: return [.account, .devices, .connections, .secrets, .variables]
+            case .access: return [.account, .remoteAccess, .devices, .connections, .secrets, .variables]
             case .capture: return [.liveCapture, .sessions]
             case .tail: return [.keyboard, .advanced]
             }
@@ -181,6 +190,9 @@ public final class SettingsModel {
     /// read-only summary the Connections pane has always shown, and both come
     /// from the same `compute show --json`.
     public let computePane: ComputeModel
+    /// The Remote Access pane (X-107, plan §2.23): `metistry remote` over the
+    /// management runner — status, Test, Turn Off, and Change… (the guided flow).
+    public let remoteAccessPane: RemoteAccessModel
     /// The Devices pane (X-77): the passkeys over the API, Remove and Sign Out
     /// Everywhere through the one door, and the Add a Phone sheet (M19).
     public let devicesPane: DevicesModel
@@ -259,6 +271,8 @@ public final class SettingsModel {
         self.instanceDir = instanceDir
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
         self.computePane = computePane ?? ComputeModel(status: status, cli: cli, session: session, management: management)
+        let remoteAccessPane = RemoteAccessModel(management: { nil })
+        self.remoteAccessPane = remoteAccessPane
         self.devicesPane = DevicesModel(session: session)
         self.connectionsPane = ConnectionsModel(session: session)
         self.liveCapturePane = LiveCaptureModel(session: session)
@@ -274,6 +288,19 @@ public final class SettingsModel {
         }
         // The sheet's Copy Link is this pane's pasteboard, which the platform hands in.
         devicesPane.copyText = { [weak self] text in self?.copyText(text) }
+        // Remote Access runs `metistry remote` through §2.2's runner — the
+        // session's, which follows every instance switch — and its Change…
+        // flow's Add a Phone… is Devices' sheet (one way in, drawn once).
+        remoteAccessPane.management = { [weak self] in self?.management }
+        remoteAccessPane.onAddPhone = { [weak self] in self?.devicesPane.beginAddPhone() }
+        // Devices marks a passkey whose host is no longer a configured origin
+        // (plan §2.23, "How the origin flows"): the hosts come from the same
+        // `remote status --json` read, never from a second parse of anything.
+        devicesPane.readConfiguredHosts = { [weak remoteAccessPane] in
+            guard let remoteAccessPane else { return nil }
+            if remoteAccessPane.status == nil { await remoteAccessPane.refresh() }
+            return remoteAccessPane.configuredHosts
+        }
     }
 
     /// §2.2's runner: the session's, which follows every instance switch.
@@ -307,6 +334,7 @@ public final class SettingsModel {
         linkOrigin = nil
         outcome = nil
         computePane.adopt(cli: cli)
+        remoteAccessPane.reset()
         devicesPane.reset()
         connectionsPane.adopt()
         secretsPane.reset()

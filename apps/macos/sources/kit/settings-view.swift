@@ -177,6 +177,7 @@ struct SettingsPaneContent: View {
                     .task(id: model.instances.active) { await model.settings.computePane.refresh() }
             case .updates: UpdatesPane(model: model)
             case .account: AccountPane(model: model, actions: actions)
+            case .remoteAccess: RemoteAccessPane(model: model)
             case .devices: DevicesPane(model: model)
             case .connections: ConnectionsPane(model: model)
             case .secrets: SecretsPaneView(model: model)
@@ -247,6 +248,19 @@ extension View {
             .sheet(isPresented: Binding(get: { settings.devicesPane.addPhone != nil }, set: { if !$0 { settings.devicesPane.closeAddPhone() } })) {
                 if let addPhone = settings.devicesPane.addPhone {
                     AddPhoneSheet(model: addPhone) { settings.devicesPane.closeAddPhone() }
+                }
+            }
+            // Turn Off (X-107, C136): the confirm names what the provider's revoke undoes and which phones stop signing in.
+            .sheet(isPresented: Binding(get: { settings.remoteAccessPane.confirmation != nil }, set: { if !$0 { Task { await settings.remoteAccessPane.choose(.cancel) } } })) {
+                if let confirmation = settings.remoteAccessPane.confirmation {
+                    CostConfirmView(confirmation) { choice in Task { await settings.remoteAccessPane.choose(choice) } }
+                        .frame(width: 480)
+                }
+            }
+            // Change… (§2.23): the guided flow; dismissing it cancels a running verb.
+            .sheet(isPresented: Binding(get: { settings.remoteAccessPane.flow != nil }, set: { if !$0 { settings.remoteAccessPane.closeChange() } })) {
+                if let flow = settings.remoteAccessPane.flow {
+                    RemoteAccessFlowSheet(model: flow) { settings.remoteAccessPane.closeChange() }
                 }
             }
     }

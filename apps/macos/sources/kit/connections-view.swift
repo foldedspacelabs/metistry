@@ -228,7 +228,14 @@ struct ConnectionDetailView: View {
             case .http(let url, let auth, let headers, let query, let timeout):
                 fact("URL", url, p)
                 fact("Authentication", Self.authWords(auth), p)
-                if !headers.isEmpty { fact("Headers", headers.joined(separator: ", "), p) }
+                if row.headerSecrets.isEmpty {
+                    if !headers.isEmpty { fact("Headers", headers.joined(separator: ", "), p) }
+                } else {
+                    // a header per secret says so, one line each (X-96): the header, and the secret names its value carries
+                    ForEach(row.headerSecrets) { header in
+                        fact("Header \(header.name)", Self.carries(header), p)
+                    }
+                }
                 if !query.isEmpty { fact("Query parameters", query.joined(separator: ", "), p) }
                 if let timeout { fact("Timeout", "\(timeout) s", p) }
             case .command(let command, let args, let cwd, let env, let runsOn):
@@ -262,6 +269,16 @@ struct ConnectionDetailView: View {
                     .textSelection(.enabled)
             }
         }
+    }
+
+    /// What a header's value names: its secrets as references, or that it names none.
+    static func carries(_ header: ConnectionHeader) -> String {
+        header.secrets.isEmpty ? "no secret" : header.secrets.map { "{{ secret.\($0) }}" }.joined(separator: ", ")
+    }
+
+    /// *Last checked* in the Check section: when and what it found, or that it never was.
+    static func checked(_ row: ConnectionRow) -> String {
+        row.lastChecked.map { "Last checked \($0.said())" } ?? "Never checked"
     }
 
     static func authWords(_ scheme: String?) -> String {
@@ -508,6 +525,9 @@ struct ConnectionDetailView: View {
                     .metistryText(.caption1, p, .textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Text(Self.checked(row))
+                .metistryText(.footnote, p, row.lastChecked == nil ? .textTertiary : .textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text("Test dials it once from this Mac, asks what it offers and calls no tool: `metistry connections test \(row.name)`. Its answer is the CLI's own words, at the top of this pane.")
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

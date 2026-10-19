@@ -33,13 +33,14 @@ import type { AssistantDefinitionSource } from "./actors.js";
 import type { SessionPolicy } from "./session-policy.js";
 import { parseCookies, readBody, readJson, sendError, sendJson, sendRefusal, sendUnrouted, sessionCookie } from "./http-util.js";
 import * as wa from "./webauthn.js";
-import { checkLocalOwner, type LocalOwnerConfig } from "./local-owner.js";
+import { checkLocalOwner, type Listener, type LocalOwnerConfig } from "./local-owner.js";
+import { hostAllowed, remoteHostsOf } from "./proxy-listener.js";
 import { serveStatic } from "./static.js";
 import { capabilitiesOf, type PublicIdentity } from "./identity.js";
 import { loadInstances } from "./instances.js";
 import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-route.js";
 import { listVariables, VARIABLES_NOT_AVAILABLE, type VariablesView } from "./variables-route.js";
-import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, connectionsListing, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
+import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, connectionGrants, connectionsListing, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
 import { VAULT_STATUS_NOT_AVAILABLE, VaultStatusUnavailable, type VaultStatusReader } from "./vault-status.js";
 import { applyRollback, carriesRollback, parseRollbackAsk, raiseRollback, rollbackOf, type VaultReverter } from "./vault-rollback.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
@@ -81,6 +82,18 @@ import { RECORDING_ROUTE, TRANSCRIPT_PRINCIPAL, recordCaptureSession, recordingR
 import { meetingAnchorOf, promoteMeetingJots, type AnchorReceipt } from "./meeting-anchors.js";
 
 const require_ = createRequire(import.meta.url);
+
+/**
+ * What `makeServer` returns: the MAIN listener (`METISTRY_CONSOLE_HOST:
+ * METISTRY_CONSOLE_PORT`, where the local owner door lives), plus a factory
+ * for the PROXY listener (proxy-listener.ts) — a fresh `http.Server` over the
+ * same routes, on which every request is remote by construction. A factory
+ * rather than one server because `net.Server.listen` binds one endpoint, and
+ * the proxy listener has two: the Unix socket and the loopback TCP port.
+ */
+export interface ConsoleServer extends Server {
+  proxyListener(): Server;
+}
 
 export interface ConsoleConfig {
   origin: string; // canonical HTTPS origin (§4.2)
@@ -617,8 +630,30 @@ export async function namedQueryDoor(res: ServerResponse, queries: QueryStore, n
   }
 }
 
-export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
+/**
+ * The `421 misdirected` message (R3: a refusal names what would permit it).
+ * It echoes only what the caller sent — truncated, so a header is never a
+ * way to write a kilobyte into a response — and names the variable, never
+ * the hosts it holds: those are public names, but the one asking has no
+ * business learning them from here.
+ */
+function misdirectedMessage(host: string | string[] | undefined, configured: boolean): string {
+  const named = typeof host === "string" && host.trim() !== "" ? `named ${JSON.stringify(host.trim().slice(0, 100))}` : "named no host";
+  const why = configured
+    ? "the proxy listener answers only for the remote host METISTRY_ORIGIN names — point the provider at this console with that name"
+    : "METISTRY_ORIGIN names no host beyond this Mac, so the proxy listener answers nothing yet — choose how your phone reaches this Mac in Settings ▸ Remote Access (`metistry remote set`)";
+  return `the request ${named}; ${why} (docs/ops/auth.md, "The proxy listener")`;
+}
+
+export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): ConsoleServer {
   const rp = wa.rpFromOrigin(cfg.origins ?? cfg.origin);
+  /**
+   * The hosts the proxy listener answers for: every non-loopback host in
+   * METISTRY_ORIGIN (plan §2.23 — the remote origin first, the loopback one
+   * `init` wrote second). Empty on a loopback-only install, so the proxy
+   * listener refuses every request there is no provider to carry yet.
+   */
+  const remoteHosts = remoteHostsOf(cfg.origins ?? cfg.origin);
   // ONE capture sink for every door: POST /capture, the `/note` fast path,
   // the bridge's `capture` tool (docs/ops/inbox.md).
   const inbox = cfg.inbox ?? dirSink(cfg.inboxDir);
@@ -678,7 +713,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     actions: { execute: (action, actionCtx) => runAction(actionServices(), action, actionCtx) },
   });
 
-  async function authenticate(req: IncomingMessage): Promise<Auth> {
+  async function authenticate(req: IncomingMessage, listener: Listener): Promise<Auth> {
     const cookie = parseCookies(req)["metistry_session"];
     if (cookie) {
       const s = await store.checkSession(db, cookie, cfg.policy);
@@ -688,10 +723,17 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // process's environment, so it costs no query, and its refusal from a
     // non-local address must be recorded even though the caller is told
     // nothing (the response below is the same 401 an unknown token gets).
-    const local = checkLocalOwner(req, cfg.localOwner);
+    // On the proxy listener it is refused from EVERY peer (plan §2.23,
+    // X-103): a provider's agent dials from 127.0.0.1, and the only thing
+    // a loopback peer there proves is that a tunnel carried the request.
+    const local = checkLocalOwner(req, cfg.localOwner, listener);
     if (local.verdict === "ok") return { kind: "local_owner" };
     if (local.verdict === "remote") {
-      await audit("auth", "owner_token_remote", false, { remote: local.peer, reason: "the local owner token is loopback-only" });
+      await audit("auth", "owner_token_remote", false, {
+        remote: local.peer,
+        listener,
+        reason: listener === "proxy" ? "the local owner token never crosses a tunnel: the proxy listener refuses it from every peer" : "the local owner token is loopback-only",
+      });
     }
     const m = /^Bearer\s+(\S+)$/.exec(req.headers.authorization ?? "");
     if (m?.[1] && (await store.checkOwnerToken(db, m[1]))) return { kind: "owner_token" };
@@ -700,15 +742,19 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     return null;
   }
 
-  return createServer((req, res) => {
-    route(req, res).catch((err) => {
+  // Which listener a request arrived on is decided HERE, from the server
+  // that accepted the connection — never from a header, an address or
+  // anything else the caller writes (proxy-listener.ts).
+  const handlerFor = (listener: Listener) => (req: IncomingMessage, res: ServerResponse) => {
+    route(req, res, listener).catch((err) => {
       // uniform internal error; detail stays server-side (runs/log)
       console.error(err);
       if (!res.headersSent) sendError(res, "internal");
     });
-  });
+  };
+  return Object.assign(createServer(handlerFor("main")), { proxyListener: () => createServer(handlerFor("proxy")) });
 
-  async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async function route(req: IncomingMessage, res: ServerResponse, listener: Listener): Promise<void> {
     const url = new URL(req.url ?? "/", cfg.origin);
     const key = `${req.method} ${url.pathname}`;
     // Every answer says which contract it speaks (docs/ops/client-api.md
@@ -716,6 +762,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // as easily as off a 200, and refuses a console below its minimum with a
     // sentence rather than a decode failure.
     res.setHeader(API_VERSION_HEADER, String(API_VERSION));
+
+    // ----- the proxy listener answers for the configured remote host alone (plan §2.23, X-103) -----
+    // Before anything — the shell, the ceremonies, /health — because a
+    // request through a tunnel for a host this console is not configured
+    // for is a misconfigured proxy (or a scanner on the provider's
+    // address), and nothing here is for it. Not audited per request on
+    // purpose: an internet-facing listener's refused bursts are X-111's,
+    // one row per burst, and a row per probe would make the audit table
+    // the thing a scanner fills. The main listener never asks about Host.
+    if (listener === "proxy" && !hostAllowed(req.headers.host, remoteHosts)) {
+      return sendError(res, "misdirected", misdirectedMessage(req.headers.host, remoteHosts.length > 0));
+    }
 
     // ----- public: the PWA shell (login page must render unauthenticated) -----
     if (req.method === "GET" && cfg.webRoot && !url.pathname.startsWith("/api/") && url.pathname !== "/health") {
@@ -858,7 +916,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (url.pathname === "/mcp") return brain.handle(req, res);
 
     // ----- everything below authenticates -----
-    const auth = await authenticate(req);
+    const auth = await authenticate(req, listener);
     if (!auth) return sendError(res, "unauthenticated");
 
     if (key === "POST /capture") {
@@ -929,15 +987,19 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // Read off the same row, before any handler: a route the table files
     // under `local` (minting a bearer, today) refuses a passkey session —
     // even one from 127.0.0.1 — with `403 local_only` naming the Mac app.
-    // The local owner token got here only from a loopback peer
-    // (`checkLocalOwner`); from anywhere else it was already the uniform 401.
-    // Owner credentials only, deliberately: the capture token and agent
-    // bearers keep the uniform `forbidden` of the gates they meet, so this
-    // answer tells no one but the owner which routes are served. Audited,
-    // because a passkey session reaching for a credential mint is exactly
-    // what a stolen session would do.
-    if (row && isLocalRoute(row) && auth.kind !== "local_owner") {
-      await audit("auth", "local_only", false, { route: routeKey(row), via: auth.kind, reason: "a `local` route admits the local owner token alone" });
+    // The local owner token got here only from a loopback peer on the MAIN
+    // listener (`checkLocalOwner`); from anywhere else it was already the
+    // uniform 401. On the proxy listener no `local` route answers at all
+    // (plan §2.23, X-103) — said here by the listener, not left to the fact
+    // that `local_owner` cannot arise there, so the rule survives any later
+    // change to how that credential is checked. Owner credentials only,
+    // deliberately: the capture token and agent bearers keep the uniform
+    // `forbidden` of the gates they meet, so this answer tells no one but
+    // the owner which routes are served. Audited, because a passkey session
+    // reaching for a credential mint is exactly what a stolen session would
+    // do.
+    if (row && isLocalRoute(row) && (listener === "proxy" || auth.kind !== "local_owner")) {
+      await audit("auth", "local_only", false, { route: routeKey(row), via: auth.kind, listener, reason: listener === "proxy" ? "a `local` route never answers on the proxy listener" : "a `local` route admits the local owner token alone" });
       return sendError(res, "local_only", localOnlyMessage(row));
     }
 
@@ -1328,7 +1390,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // what Add Connection offers and the fields it renders (T6-13b); kinds, never a value.
     if (key === "GET /api/connections") {
       if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
-      const { connections, types } = await connectionsListing(cfg.connections);
+      const { connections, types } = await connectionsListing(cfg.connections, connectionGrants(await agents.listAgents(db)));
       return sendJson(res, 200, { connections, types, as_of: new Date().toISOString() });
     }
     const connectionOf = CONNECTION_ROUTE.exec(key);
@@ -1336,7 +1398,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
       const name = connectionOf[1]!; // a kebab name has nothing to percent-decode; anything else is not a connection
       if (!validConnectionName(name)) return sendError(res, "not_found", "no such connection");
-      const connection = await oneConnection(cfg.connections, name);
+      const connection = await oneConnection(cfg.connections, name, connectionGrants(await agents.listAgents(db)));
       if (!connection) return sendError(res, "not_found", "no such connection");
       return sendJson(res, 200, { connection, as_of: new Date().toISOString() });
     }
@@ -1500,7 +1562,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const lastEventId = req.headers["last-event-id"];
       return cfg.events.serve(req, res, {
         lastEventId: typeof lastEventId === "string" ? lastEventId : undefined,
-        stillAllowed: async () => isUser(await authenticate(req)),
+        stillAllowed: async () => isUser(await authenticate(req, listener)), // the same listener the stream was opened on: a token refused at open is refused at every heartbeat
       });
     }
 
@@ -1771,7 +1833,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       return sendJson(res, 200, { ok: true, feedback: rows[0] });
     }
 
-    if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db, rp.rpIDs[0]!) });
+    // A device per passkey, its sessions under it; each with its passkey's rpID
+    // resolved (§2.23), and the caller's own row saying `this_device` (§2.22).
+    // The local owner token has no device: every row false.
+    if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db, rp.rpIDs[0]!, auth.kind === "session" ? auth.sessionId : null) });
 
     // ----- external-agent registry (§4.2 management surface; owner session only) -----
     // The registry, plus what has been ASKED for (ruled 2026-09-19): the
@@ -1893,11 +1958,29 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       }
     }
 
+    // Remove a device (§2.22), named by one of its session ids. The default
+    // scope — `{}` or no body, what the Mac and the PWA's Remove send — revokes
+    // the passkey, so the device never signs in again, and every session under
+    // it, each losing its push subscription. `{scope: "sessions"}` is Sign Out
+    // Everywhere's door: the sessions end, the passkey stays. Both land in
+    // `runs` (`auth`, `revoke`) with the scope on the record.
     const revoke = /^POST \/api\/devices\/(\d+)\/revoke$/.exec(key);
     if (revoke) {
-      const ok = await store.revokeSession(db, Number(revoke[1]));
-      await audit("auth", "revoke", ok, { session: revoke[1] });
-      return ok ? sendJson(res, 200, { revoked: true }) : sendError(res, "not_found");
+      const raw = (await readBody(req)).toString("utf8").trim();
+      let body: unknown = {};
+      if (raw !== "") {
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          return sendError(res, "invalid_request", "the body is not JSON");
+        }
+      }
+      if (body === null || typeof body !== "object" || Array.isArray(body)) return sendError(res, "invalid_request", "the body is a JSON object: `{}` or `{scope: \"device\" | \"sessions\"}`");
+      const scope = (body as { scope?: unknown }).scope ?? "device";
+      if (!(store.REVOKE_SCOPES as readonly unknown[]).includes(scope)) return sendError(res, "invalid_request", `scope is "device" (the default) or "sessions", not ${JSON.stringify(scope)}`);
+      const done = await store.revokeDevice(db, Number(revoke[1]), scope as store.RevokeScope);
+      await audit("auth", "revoke", done !== null, { session: revoke[1], scope, ...(done ?? {}) });
+      return done ? sendJson(res, 200, { revoked: true, scope, sessions: done.sessions }) : sendError(res, "not_found");
     }
 
     if (key === "POST /auth/logout") {

@@ -398,6 +398,45 @@ private struct FixedWizardRunner: CommandRunner {
     #expect(Set(WizardOptions.repoAuth.map(\.value)) == Set(RepoAuth.allCases))
 }
 
+/// Every string the wizard prints that can speak of the assistant, built the
+/// way the screen builds it.
+private func wizardCopy(assistantName: String?) -> [String] {
+    var strings = FirstRunStep.allCases.map { $0.summary(assistantName: assistantName) }
+    for option in WizardOptions.shape(assistantName: assistantName) { strings += [option.title, option.pro, option.con] }
+    strings.append(ComputeStepModel.skipNote(assistantName: assistantName))
+    strings.append(ComputeStepModel.skippedLine(assistantName: assistantName))
+    return strings
+}
+
+@Test func withANameConfiguredNoWizardStringSaysTheAssistant() {
+    for name in ["Ada", "  Ada \n"] {
+        let strings = wizardCopy(assistantName: name)
+        for string in strings {
+            #expect(!string.localizedCaseInsensitiveContains("the assistant"), "still generic with a name: \(string)")
+        }
+        // The name is actually used, not just the generic phrase removed.
+        #expect(strings.contains { $0.contains("Ada's turns run") })
+        #expect(strings.contains { $0.contains("Ada runs on the host") })
+        #expect(strings.contains { $0.contains("the console and Ada in containers") && $0.contains("Ada's container") })
+        #expect(strings.contains { $0.hasPrefix("no engine — Ada will not be started") })
+        #expect(FirstRunStep.instance.summary(assistantName: name).contains("for Ada. That name lives in identity.yaml"))
+    }
+}
+
+@Test func beforeANameIsKnownTheGenericWordIsUsedAndNothingIsBlank() {
+    for name in [nil, "", "   "] as [String?] {
+        let strings = wizardCopy(assistantName: name)
+        #expect(strings == wizardCopy(assistantName: nil))
+        #expect(strings.contains { $0.contains("The assistant runs on the host") })
+        #expect(strings.contains { $0.contains("the assistant's turns run") || $0.contains("where the assistant's turns run") })
+        #expect(strings.contains { $0.hasPrefix("no engine — the assistant will not be started") })
+    }
+    // The parameterless forms the Compute pane and older callers use are the generic copy.
+    #expect(FirstRunStep.compute.summary == FirstRunStep.compute.summary(assistantName: nil))
+    #expect(WizardOptions.shape.map(\.pro) == WizardOptions.shape(assistantName: nil).map(\.pro))
+    #expect(ComputeStepModel.skipNote == ComputeStepModel.skipNote(assistantName: nil))
+}
+
 @Test func theReassuranceIsOnScreenAtAllTimes() {
     #expect(WizardModel.reassurance.contains("Settings"))
 }

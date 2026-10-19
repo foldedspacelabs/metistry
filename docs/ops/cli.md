@@ -1855,8 +1855,8 @@ metistry connections add google --type calendar --provider google-calendar \
     --url https://www.googleapis.com/calendar/v3/ --auth oauth \
     [--client-id-secret google_client_id]                  # Google Calendar (T4-14): Metistry's client, or your own
 metistry connections authorize google                     # sign in with Google
-metistry connections list [--json]                        # every connection: status, reach, tools, used by
-metistry connections show github [--json]                 # one, in full
+metistry connections list [--json]                        # every connection: status, reach, tools, used by, last checked
+metistry connections show github [--json]                 # one, in full (each header with its secret names)
 metistry connections policy github                        # the tool table, by group
 metistry connections policy github search_issues allow --group reads
 metistry connections policy github delete_issue never
@@ -1902,7 +1902,11 @@ is a **usage error (exit 2)** with one line naming the field, never the value:
   `--unset-config KEY` removes one, and removing a required one is refused when
   the file is judged).
 
-`connections list --json` prints the same `types` the route serves.
+`connections list --json` prints the same `types` the route serves. Its rows
+carry `last_checked` (the stamp `connections test` and `doctor` leave under
+`.metistry/state/`, or `null`) and `header_secrets` like the route's; its
+`used_by` lists syncs only, because agent grants live in the console's registry,
+which the CLI does not read (`GET /api/connections` lists the agents too).
 
 **Names, never values.** A secret is written as `{{ secret.<name> }}` and a
 variable as `{{ variable.<name> }}`; the file lists every name it uses under

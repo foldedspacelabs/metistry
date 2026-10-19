@@ -277,41 +277,57 @@ describe("budgets are writable — through POST /api/compute/budget and PUT /api
 
 // ---------------------------------------------------------------------------
 
-describe("devices are writable — POST /api/devices/:id/revoke, confirmed in the page", () => {
-  it("this device says so; Revoke asks in the page, naming the device and the cost, and only the act's own verb sends", async () => {
-    const m = mounted({ write: () => ({ body: { revoked: true } }) });
+describe("devices are writable — POST /api/devices/:id/revoke, confirmed in the page (§2.22: a device is a passkey; Remove revokes it)", () => {
+  // The recording holds two devices: an iPad (session 3) and an iPhone signed
+  // in twice (sessions 2 and 1); this device's session is 2, so the iPhone is
+  // *This Device*.
+  it("this device says so; Remove asks in the page, naming the device and the cost, and only the act's own verb sends — the whole device, not a session", async () => {
+    const m = mounted({ write: () => ({ body: { revoked: true, scope: "device", sessions: 1 } }) });
     await m.view.settings();
     expect(m.page()).toMatch(/iPhone <span class="chip">This Device<\/span>/);
-    await m.click({ act: "ask-revoke", id: "1" });
+    expect(m.page()).not.toMatch(/iPad <span class="chip">This Device/);
+    expect(m.page()).toMatch(/iPad<span class="sub">Added [^<]+ · Last seen [^<]+<\/span>/);
+    await m.click({ act: "ask-revoke", id: "3" });
     expect(m.b.writes()).toEqual([]);
-    expect(m.page()).toContain("Revoke iPhone? It is signed out now, and signing in again takes its passkey.");
-    expect(m.page()).toContain('data-act="revoke" data-needs-connection>Revoke</button><button type="button" class="secondary" data-act="cancel" id="settings-confirm-cancel">Cancel</button>');
+    expect(m.page()).toContain("Remove iPad? It is signed out now and cannot sign in again until it is added as a new device; its notifications stop.");
+    expect(m.page()).toContain('data-act="revoke" data-needs-connection>Remove</button><button type="button" class="secondary" data-act="cancel" id="settings-confirm-cancel">Cancel</button>');
     await m.click({ act: "cancel" });
     expect(m.page()).not.toContain('data-act="revoke"');
     await m.click({ act: "revoke" }); // nothing is being confirmed: nothing is sent
     expect(m.b.writes()).toEqual([]);
-    await m.click({ act: "ask-revoke", id: "1" });
+    await m.click({ act: "ask-revoke", id: "3" });
     await m.click({ act: "revoke" });
-    expect(m.b.writes().map((c) => [c.method, c.path])).toEqual([["POST", "/api/devices/1/revoke"]]);
-    expect(m.page()).toContain("iPhone is signed out.");
+    expect(m.b.writes().map((c) => [c.method, c.path, c.body])).toEqual([["POST", "/api/devices/3/revoke", { scope: "device" }]]);
+    expect(m.page()).toContain("iPad was removed.");
   });
 
-  it("revoking this device says what it costs here", async () => {
+  it("removing this device says what it costs here", async () => {
     const m = mounted();
     await m.view.settings();
     await m.click({ act: "ask-revoke", id: "2" });
-    expect(m.page()).toContain("This is the device you are using — you are signed out here now");
+    expect(m.page()).toContain("Remove iPhone? This is the device you are using — you are signed out here now, and it cannot sign in again until it is added as a new device.");
   });
 
-  it("Sign Out Everywhere lists every live device, then revokes each — this one last", async () => {
-    const m = mounted({ write: () => ({ body: { revoked: true } }) });
+  it("Sign Out Everywhere lists every signed-in device, then signs each out — sessions only, this one last; no passkey is touched", async () => {
+    const m = mounted({ write: () => ({ body: { revoked: true, scope: "sessions", sessions: 1 } }) });
     await m.view.settings();
     await m.click({ act: "ask-everywhere" });
-    expect(m.page()).toContain("Sign out all 2 devices — iPhone (this one), iPhone? Each needs its passkey to sign in again.");
+    expect(m.page()).toContain("Sign out all 2 devices — iPad, iPhone (this one)? Each needs its passkey to sign in again.");
     expect(m.b.writes()).toEqual([]);
     await m.click({ act: "everywhere" });
-    expect(m.b.writes().map((c) => c.path)).toEqual(["/api/devices/1/revoke", "/api/devices/2/revoke"]);
+    expect(m.b.writes().map((c) => [c.path, c.body])).toEqual([
+      ["/api/devices/3/revoke", { scope: "sessions" }],
+      ["/api/devices/2/revoke", { scope: "sessions" }],
+    ]);
     expect(m.page()).toContain("Signed out of all 2 devices.");
+  });
+
+  it("a device signed out everywhere is still a device: listed as signed out, with Remove — and Sign Out Everywhere is not offered for one", async () => {
+    const devices = (fixture("get-api-devices").devices as any[]).map((d) => (d.label === "iPad" ? { ...d, sessions: d.sessions.map((s: any) => ({ ...s, revoked: true })) } : d));
+    const html = devicesRowsHtml(devices, { via: "passkey_session", session_id: 2 });
+    expect(html).toMatch(/iPad<span class="sub">Added [^<]+ · Signed out<\/span>/);
+    expect(html).toContain('aria-label="Remove iPad"');
+    expect(html).not.toContain("Sign Out Everywhere");
   });
 
   it("no browser dialog in Settings: the device revoke's confirm() is gone from app.js, and settings.js has none", () => {

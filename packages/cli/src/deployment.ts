@@ -176,6 +176,19 @@ export function dbPort(env: NodeJS.ProcessEnv): number {
 }
 
 /**
+ * The console's PROXY listener port (plan §2.23, X-103): where a remote-access
+ * provider forwards to, and the one port of the console's two that must
+ * never be the main one. `METISTRY_CONSOLE_PROXY_PORT` when set — a
+ * namespaced instance has `applyPorts` set it to a slot of its block, because
+ * "the console port + 1" there is Postgres — else the console port + 1, the
+ * console's own default (apps/console/src/main.ts).
+ */
+export function consoleProxyPort(env: NodeJS.ProcessEnv): number {
+  const n = Number.parseInt(env.METISTRY_CONSOLE_PROXY_PORT ?? "", 10);
+  return Number.isNaN(n) ? consolePort(env) + 1 : n;
+}
+
+/**
  * The passthrough's ONE exception, and what makes the credential split real.
  *
  * `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` is the bearer the vault bridge
@@ -251,6 +264,7 @@ export function consoleEnv(ctx: ShapeContext): Record<string, string> {
     METISTRY_DB_PORT: String(dbPort(ctx.env)),
     METISTRY_CONSOLE_HOST: "127.0.0.1",
     METISTRY_CONSOLE_PORT: String(consolePort(ctx.env)),
+    METISTRY_CONSOLE_PROXY_PORT: String(consoleProxyPort(ctx.env)),
     METISTRY_INBOX_DIR: ctx.env.METISTRY_INBOX_DIR && !ctx.env.METISTRY_INBOX_DIR.startsWith("/data") ? ctx.env.METISTRY_INBOX_DIR : inbox,
     TZ: ctx.env.METISTRY_TZ || "UTC",
   };

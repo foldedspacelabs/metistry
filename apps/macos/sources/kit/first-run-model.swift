@@ -56,11 +56,18 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
 
     /// One sentence, sentence case, saying what the step does — design-system
     /// P10 (Title Case names things; sentence case says things).
-    public var summary: String {
+    public var summary: String { summary(assistantName: nil) }
+
+    /// The same sentence, naming the assistant once the wizard knows its name.
+    public func summary(assistantName: String?) -> String {
+        let a = WizardCopy(name: assistantName)
         switch self {
         case .runtime:
             return "Find the metistry CLI: the copy bundled inside this app, a product checkout you point it at, or one already on your PATH."
         case .instance:
+            if let name = a.name {
+                return "Create the private instance repo — vault, identity, config — for \(name). That name lives in identity.yaml and nowhere else."
+            }
             return "Create the private instance repo — vault, identity, config — and name the assistant. That name lives in identity.yaml and nowhere else."
         case .versioning:
             return "Point the instance repo at a private GitHub repository, with a token the reconciler can push with unattended."
@@ -71,7 +78,7 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
         case .door:
             return "Your Mac is signed in automatically. Enrol a passkey only for browsers and your phone."
         case .compute:
-            return "Choose where the assistant's turns run: a cloud provider on your own key, a local server, or nothing yet."
+            return "Choose where \(a.possessive) turns run: a cloud provider on your own key, a local server, or nothing yet."
         }
     }
 

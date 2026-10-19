@@ -107,7 +107,7 @@ import Testing
     #expect(console.calls.allSatisfy { $0.servedBy != nil }, "every read is a recorded route: \(console.calls)")
 
     let github = try #require(pane.rows.first)
-    #expect(pane.rows.map(\.name) == ["github"])
+    #expect(pane.rows.map(\.name) == ["github", "intranet"])
     #expect(github.kind == .mcp)
     #expect(github.status == .ok)
     #expect(github.typeLabel == "MCP · By command")
@@ -161,6 +161,69 @@ import Testing
     let none = ConnectionsModel(session: nil)
     await none.refresh()
     #expect(none.phase == .unavailable("no console session for this instance"))
+}
+
+// MARK: - Who uses it, when it was checked, which header carries which secret (X-96)
+
+@MainActor
+@Test func theRecordedListSaysWhoUsesItWhenItWasCheckedAndWhichHeaderCarriesWhichSecret() async throws {
+    let (settings, _, _) = try recordedSettings()
+    let pane = settings.connectionsPane
+    await pane.refresh()
+    let github = try #require(pane.rows.first { $0.name == "github" })
+    let intranet = try #require(pane.rows.first { $0.name == "intranet" })
+
+    // an agent lent a connection is a user beside the syncs — the list says it, in words
+    #expect(intranet.usedBy == [ConnectionUser(kind: "agent", name: "opencode")])
+    #expect(ConnectionListRow.usedBy(intranet) == "Used by agent opencode")
+    #expect(github.usedBy == [ConnectionUser(kind: "sync", name: "github-state")])
+
+    // a check stamps its time and doctor's word; a connection nobody checked reads never
+    let stamp = try #require(intranet.lastChecked)
+    #expect(stamp.status == .degraded)
+    #expect(stamp.at == WireTime.date("2026-09-30T06:50:00.000Z"))
+    #expect(github.lastChecked == nil)
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    let said = stamp.said(locale: Locale(identifier: "en_US"), calendar: calendar)
+    #expect(said.hasPrefix("Sep 30") && said.contains("6:50") && said.hasSuffix(" — degraded"), "\(said)")
+    #expect(ConnectionDetailView.checked(github) == "Never checked")
+    #expect(ConnectionDetailView.checked(intranet).hasPrefix("Last checked "))
+
+    // each header with the secrets its value names: a header with no secret says so
+    #expect(intranet.headerSecrets == [ConnectionHeader(name: "X-Api-Key", secrets: ["github_mcp_key"]), ConnectionHeader(name: "X-Team", secrets: [])])
+    #expect(ConnectionDetailView.carries(intranet.headerSecrets[0]) == "{{ secret.github_mcp_key }}")
+    #expect(ConnectionDetailView.carries(intranet.headerSecrets[1]) == "no secret")
+    #expect(github.headerSecrets.isEmpty)
+    #expect(ConnectionDetailView.carries(ConnectionHeader(name: "X-Org-Token", secrets: ["a", "b"])) == "{{ secret.a }}, {{ secret.b }}")
+}
+
+@MainActor
+@Test func aHeaderPerSecretShowsASecretEachAndTheDetailDrawsTheCheck() async throws {
+    let row = #"{"name":"relay","type":"mcp","provider":"custom","description":null,"status":"ok","issues":[],"reach":{"class":"http","url":"https://mcp.example.com/mcp","auth":"none","headers":["X-Api-Key","X-Org-Token"],"header_secrets":[{"header":"X-Api-Key","secrets":["relay_key"]},{"header":"X-Org-Token","secrets":["relay_org"]}],"query":[],"timeout_s":null},"secrets":["relay_key","relay_org"],"variables":[],"tools":[],"offer_to_agents":true,"used_by":[{"kind":"sync","name":"mirror"},{"kind":"crew","name":"scribe"}],"last_checked":{"at":"2026-10-01T08:00:00.000Z","status":"ok"}}"#
+    let (settings, _, _) = try connectionsSettings(connection: row, secrets: #"{"secrets":[],"as_of":"2026-09-28T13:05:00.000Z"}"#)
+    let pane = settings.connectionsPane
+    await pane.refresh()
+    await pane.open("relay")
+    let shown = try #require(pane.shown)
+    #expect(shown.headerSecrets.map(\.secrets) == [["relay_key"], ["relay_org"]], "two headers, two secret names")
+    #expect(shown.usedBy.map(\.said) == ["sync mirror", "crew scribe"])
+    #expect(shown.lastChecked?.status == .ok)
+
+    let tree = try await AccessibilityProbe.snapshot(
+        ConnectionDetailView(row: shown, pane: pane, settings: settings).padding(MetistrySpace.s5).frame(width: SettingsLayout.pane)
+    )
+    defer { tree.close() }
+    let said = tree.nodes.map(\.name)
+    // one line per header (the value beside it is `carries`, held above)
+    #expect(said.contains { $0.contains("Header X-Api-Key") }, "\(said)")
+    #expect(said.contains { $0.contains("Header X-Org-Token") }, "\(said)")
+    #expect(!said.contains { $0 == "Headers" }, "the one-line list gives way to a line each: \(said)")
+    #expect(said.contains { $0.hasPrefix("Last checked ") && $0.hasSuffix("ok") }, "the Check section says when: \(said)")
+
+    // a console that predates the fields draws what it always did — the header names, and never checked
+    let old = try #require(ConnectionRow.parse(try JSONValue.parse(Data(httpConnection(url: "https://api.linear.app/graphql").utf8))))
+    #expect(old.lastChecked == nil && old.headerSecrets.isEmpty)
 }
 
 // MARK: - Every change is a §2.2 verb, confirmed
@@ -345,6 +408,63 @@ private func connectionsSettings(connection: String, secrets: String) throws -> 
         try contract("GET /api/secrets", "/api/secrets", secrets),
     ])
     return settings(over: console)
+}
+
+// MARK: - The Mac's loopback set is core's (X-95)
+
+/// Every host core calls loopback the Mac calls loopback, and no other. Held to
+/// core the way the other "held to core" tests are: the test READS
+/// `isLoopbackHost` out of `packages/core/src/egress.ts`, so a change there
+/// fails here until the Mac follows, and then drives a table of spellings
+/// (checked against core's own function when this was written) through the
+/// Mac's.
+@Test func everyHostCoreCallsLoopbackTheMacCallsLoopbackAndNoOther() throws {
+    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let egress = try String(contentsOf: root.appendingPathComponent("packages/core/src/egress.ts"), encoding: .utf8)
+    let head = "export function isLoopbackHost(host: string): boolean {"
+    let start = try #require(egress.range(of: head), "core's isLoopbackHost moved — find it and update this test")
+    let rest = egress[start.upperBound...]
+    let body = String(rest[..<(try #require(rest.range(of: "\n}\n")).lowerBound)])
+
+    // The function's shape, pinned: the strip and the case fold, the three names, the 127/8 pattern.
+    // If core's body changes, none of these lines match and the Mac's must be changed with it.
+    #expect(body.contains(#"host.replace(/^\[|\]$/g, "").toLowerCase()"#), Comment(rawValue: body))
+    #expect(body.contains(#"/^127(\.\d{1,3}){3}$/.test(h)"#), Comment(rawValue: body))
+    let names = body.components(separatedBy: "\"").enumerated().filter { $0.offset % 2 == 1 }.map(\.element).filter { $0 != "" }
+    #expect(Set(names) == ["localhost", "::1", "0:0:0:0:0:0:0:1"], "core's named loopback hosts: \(names)")
+    for name in names {
+        #expect(EgressDestination.isLoopbackHost(name), "core names \(name)")
+        #expect(EgressDestination.isLoopbackHost("[\(name)]") && EgressDestination.isLoopbackHost(name.uppercased()), "core strips brackets and folds case: \(name)")
+    }
+
+    // Core says yes
+    for host in [
+        "localhost", "LOCALHOST", "Localhost", "[::1]", "::1", "[::1", "::1]", "0:0:0:0:0:0:0:1", "[0:0:0:0:0:0:0:1]",
+        "127.0.0.1", "127.1.2.3", "127.255.255.255", "127.999.999.999", "127.0.0.01", "127.000.000.001", "[127.0.0.1]",
+    ] {
+        #expect(EgressDestination.isLoopbackHost(host), "core calls \(host) loopback")
+    }
+    // Core says no — including the spellings the Mac used to accept (`*.localhost`) and the ones a regex port gets wrong
+    for host in [
+        "foo.localhost", "a.b.localhost", "localhost.", "localhost.example.com", "0.0.0.0", "127.0.0", "127.0.0.1.1",
+        "127.0.0.1\n", "127.0.0.", "127..0.1", "128.0.0.1", "10.0.0.1", "1127.0.0.1", "127.0.0.1234", "::2", "0::1",
+        "::ffff:127.0.0.1", "[::ffff:7f00:1]", "example.com", "127.0.0.1.example.com", "", "[", "]", "[]", "[[::1]]",
+        "127.0.0.\u{0661}", "127.a.0.1", "::", "0:0:0:0:0:0:0:0", "0000:0000:0000:0000:0000:0000:0000:0001",
+    ] {
+        #expect(!EgressDestination.isLoopbackHost(host), "core does not call \(host) loopback")
+    }
+
+    // Both places the Mac decides "cleartext" use it: a URL, and an IMAP mailbox.
+    func cleartext(_ url: String) throws -> Bool { try #require(EgressDestination(url: url)).cleartext }
+    #expect(try !cleartext("http://localhost:7812/check") && !cleartext("http://[::1]:7812/") && !cleartext("http://127.4.5.6/"))
+    #expect(try cleartext("http://foo.localhost/") && cleartext("http://0.0.0.0:8080/") && cleartext("http://example.com/"))
+    #expect(try !cleartext("https://example.com/"))
+    func mailbox(_ host: String, _ security: String = "plain") -> Bool? {
+        ConnectionReach.imap(host: host, port: 143, security: security).imapDestination?.cleartext
+    }
+    #expect(mailbox("127.0.0.2") == false && mailbox("localhost") == false && mailbox("::1") == false && mailbox("LOCALHOST") == false)
+    #expect(mailbox("foo.localhost") == true && mailbox("127.0.0.1.example.com") == true && mailbox("mail.example.com") == true)
+    #expect(mailbox("mail.example.com", "tls") == false)
 }
 
 /// Settings over every recorded fixture.

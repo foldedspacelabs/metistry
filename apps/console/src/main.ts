@@ -74,6 +74,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { defaultGatewayFrom, parseTrustedProxies } from "./local-owner.js";
+import { listenProxySocket, proxySocketPath, remoteHostsOf } from "./proxy-listener.js";
 import { canonicalOrigin } from "./webauthn.js";
 import { loadPublicIdentity } from "./identity.js";
 import { hubFromEnv, startEventFeed } from "./events.js";
@@ -700,6 +701,44 @@ console.log(
 const host = optionalEnv("METISTRY_CONSOLE_HOST", "127.0.0.1"); // loopback default (invariant 8)
 const port = intEnv("METISTRY_CONSOLE_PORT", 8080);
 server.listen(port, host, () => console.log(`console listening on ${host}:${port} (${queries.names().length} queries)`));
+
+// The PROXY listener (plan §2.23, X-103; proxy-listener.ts): where a
+// remote-access provider — tailscaled, cloudflared, zrok, ngrok, a TLS
+// terminator — forwards to. Every request on it is remote by construction:
+// the local owner token is never honoured, no `local` route answers, and the
+// Host must be a remote host METISTRY_ORIGIN names. Two endpoints, same
+// routes: a loopback TCP port (METISTRY_CONSOLE_PROXY_PORT, default the
+// console port + 1 — the compose shape publishes it on 127.0.0.1, the
+// namespaced launchd shape takes a slot of the instance's block) and a 0600
+// Unix socket in the instance's state directory, for agents that can dial
+// one. Under compose there is no instance directory in the container, so
+// there is no socket; the published port is the whole surface there.
+//
+// A port that cannot be bound is said and survived: the main listener owes
+// nothing to this one, and a provider pointed at a dead proxy port simply
+// fails to connect — the fail-closed direction. There is no fallback to the
+// main port anywhere, by design.
+const remoteHosts = remoteHostsOf(origins);
+console.log(
+  remoteHosts.length
+    ? `proxy listener answers Host ${remoteHosts.join(", ")} — remote by construction: the local owner token is never honoured there (docs/ops/auth.md)`
+    : "proxy listener: METISTRY_ORIGIN names no host beyond this Mac, so every request on it is refused 421 until a remote-access provider is chosen (plan §2.23)",
+);
+const proxyPort = intEnv("METISTRY_CONSOLE_PROXY_PORT", port + 1);
+const proxyTcp = server.proxyListener();
+proxyTcp.on("error", (err: NodeJS.ErrnoException) =>
+  console.error(`proxy listener: cannot bind ${host}:${proxyPort} (${err.code ?? err.message}) — remote access is unavailable until METISTRY_CONSOLE_PROXY_PORT names a free port; the main listener is unaffected`),
+);
+proxyTcp.listen(proxyPort, host, () => console.log(`proxy listener on ${host}:${proxyPort}`));
+if (instanceDir) {
+  const sock = proxySocketPath(instanceDir);
+  listenProxySocket(server.proxyListener(), sock).then(
+    () => console.log(`proxy listener on ${sock} (0600)`),
+    (err: Error) => console.error(`proxy listener: cannot bind ${sock} (${err.message}) — providers that dial a socket are unavailable; the proxy port is unaffected`),
+  );
+} else {
+  console.log("proxy socket: none — METISTRY_INSTANCE_DIR is unset (the compose shape publishes the proxy port instead)");
+}
 
 // The standup move (T3-4, profile-tidy.ts): `standup_days`/`standup_time`
 // read ONCE from Me/profile.md into the Standup routine's scheduled.yaml

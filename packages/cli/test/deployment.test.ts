@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { emptyCompute, parseCompute } from "@foldedspacelabs/metistry-core";
-import { ASSISTANT_ENV_KEYS, assistantEnv, assistantEnvKeys, CONSOLE_ENV_DENY, consoleEnv, deploymentPaths, loadDeployment, type ShapeContext } from "../src/deployment.js";
+import { ASSISTANT_ENV_KEYS, assistantEnv, assistantEnvKeys, CONSOLE_ENV_DENY, consoleEnv, consoleProxyPort, deploymentPaths, loadDeployment, type ShapeContext } from "../src/deployment.js";
 
 async function dirs(): Promise<{ product: string; instance: string }> {
   const root = await mkdtemp(join(tmpdir(), "metistry-deploy-"));
@@ -106,6 +106,19 @@ describe("the console's launchd environment", () => {
   it("an inbox the operator set to a real path is kept", () => {
     expect(consoleEnv(ctx({ ...env, METISTRY_INBOX_DIR: "/Users/someone/inbox" })).METISTRY_INBOX_DIR).toBe("/Users/someone/inbox");
     expect(consoleEnv(ctx({ ...env, METISTRY_INSTANCE_DIR: undefined })).METISTRY_INBOX_DIR).toBe("/i/Inbox"); // the container volume path is never kept
+  });
+
+  // The proxy listener (plan §2.23, X-103): the console's second port, said
+  // out loud in the job's environment so a provider adapter and doctor read
+  // the same number the console binds — never left to the console's default.
+  it("renders the console's PROXY listener port: the console port + 1 by default, the explicit variable when set, never the main port", () => {
+    expect(consoleEnv(ctx(env)).METISTRY_CONSOLE_PROXY_PORT).toBe("8081");
+    expect(consoleEnv(ctx({ ...env, METISTRY_CONSOLE_PORT: "8460" })).METISTRY_CONSOLE_PROXY_PORT).toBe("8461");
+    expect(consoleEnv(ctx({ ...env, METISTRY_CONSOLE_PORT: "8460", METISTRY_CONSOLE_PROXY_PORT: "8466" })).METISTRY_CONSOLE_PROXY_PORT).toBe("8466"); // a namespaced block's slot, applied before this
+    expect(consoleProxyPort({})).toBe(8081);
+    expect(consoleProxyPort({ METISTRY_CONSOLE_PROXY_PORT: "nonsense" })).toBe(8081);
+    const e = consoleEnv(ctx(env));
+    expect(e.METISTRY_CONSOLE_PROXY_PORT).not.toBe(e.METISTRY_CONSOLE_PORT);
   });
 });
 

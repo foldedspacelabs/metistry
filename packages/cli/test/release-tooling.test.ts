@@ -298,7 +298,7 @@ describe(".github/workflows/release.yml", () => {
     // Developer ID gate lives in the composite action every darwin job uses.
     const keychain = repoFile(".github/actions/apple-keychain/action.yml");
     expect(keychain).toContain("::notice::APPLE_CERTIFICATE_P12/APPLE_CERTIFICATE_PASSWORD are not set");
-    for (const job of ["runtime", "runtime-deps", "macos-app"]) {
+    for (const job of ["runtime", "runtime-deps", "remote-packs", "macos-app"]) {
       const steps = (wf.jobs[job] as { steps: { uses?: string }[] }).steps;
       expect(steps.some((st) => st.uses === "./.github/actions/apple-keychain"), `${job} imports the Developer ID via the composite action`).toBe(true);
     }
@@ -306,15 +306,20 @@ describe(".github/workflows/release.yml", () => {
     expect(text).toContain("::notice::APPLE_API_KEY_P8 is not set");
     expect(wf.jobs["macos-app"]!.outputs).toMatchObject({ built: "${{ steps.gate.outputs.ok }}" });
     // publish waits for both but tolerates either being absent: its gate names
-    // only verify/runtime/runtime-deps.
-    expect(wf.jobs.publish!.needs).toEqual(["verify", "runtime", "runtime-deps", "npm", "images", "macos-app", "appcast"]);
+    // only verify/runtime/runtime-deps/remote-packs (the packs an install fetches).
+    expect(wf.jobs.publish!.needs).toEqual(["verify", "runtime", "runtime-deps", "remote-packs", "npm", "images", "macos-app", "appcast"]);
     expect(String(wf.jobs.publish!.if)).not.toContain("macos-app");
+    // the provider tool packs (X-112): their own darwin job, gated into publish, never a DMG input
+    expect([wf.jobs["remote-packs"]!.needs].flat()).toEqual(["verify"]);
+    expect(String(wf.jobs["remote-packs"]!["runs-on"])).toMatch(/^macos-/);
+    expect(String(wf.jobs.publish!.if)).toContain("needs['remote-packs'].result == 'success'");
+    expect([wf.jobs["macos-app"]!.needs].flat()).not.toContain("remote-packs");
   });
 
   it("checksums.txt covers the DMG and the appcast, not just the runtime packs", () => {
     const text = repoFile(".github/workflows/release.yml");
     // Every asset lands in the same `assets/` directory before `sha256sum *`.
-    for (const pattern of ["pattern: runtime-*", "pattern: macos-app", "pattern: appcast"]) {
+    for (const pattern of ["pattern: runtime-*", "pattern: remote-packs-*", "pattern: macos-app", "pattern: appcast"]) {
       expect(text, `expected download ${pattern}`).toContain(pattern);
     }
     expect(text).toContain("sha256sum * | tee checksums.txt");

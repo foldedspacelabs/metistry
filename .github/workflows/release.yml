@@ -8,6 +8,14 @@
 #                                                   the bundled runtime: Node,
 #                                                   Postgres 17 + pgvector, git
 #                                                   (docs/ops/bundled-runtime.md)
+#   metistry-remote-<tool>-<version>-darwin-arm64.tar.gz
+#                                                   one PROVIDER TOOL PACK per
+#                                                   tool — tailscale, cloudflared,
+#                                                   zrok — fetched by `metistry
+#                                                   remote set <provider>` only
+#                                                   when the owner picks that
+#                                                   provider; never in the DMG
+#                                                   (plan §2.23, X-112)
 #   Metistry-<version>.dmg                          the Mac app: SwiftUI front end
 #                                                   for the CLI, with both packs
 #                                                   embedded, Developer ID signed,
@@ -208,6 +216,55 @@ jobs:
         with:
           name: runtime-deps-darwin-arm64
           path: dist-release/metistry-runtime-deps-*
+          if-no-files-found: error
+
+  # The provider tool packs (plan §2.23, X-112): tailscaled + tailscale built
+  # from the pinned upstream tag, the official cloudflared binary and the zrok
+  # CLI — one tree each under remote/<tool>/, each pinned by sha256 in
+  # runtime-versions.env, its licence beside it, EVERY Mach-O signed with the
+  # runtime pack's rule (pack-lib.sh) and checked for the release identity,
+  # then uploaded as ITS OWN ASSET so `metistry remote set <provider>` fetches
+  # one tool and not three. Nothing from here goes in the DMG (build-app.sh
+  # drops a runtime/remote it is handed) or in the runtime-deps pack. Gated
+  # into `publish` like runtime-deps: an immutable release missing a pack can
+  # never be repaired, and `remote set tailscale` would name the gap for good.
+  remote-packs:
+    name: remote-packs (darwin-arm64)
+    needs: verify
+    environment: release   # signs the provider tools (APPLE_CERTIFICATE_*)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+      - name: cache the Go module/toolchain cache and the staged tools, keyed on the pinned versions
+        uses: actions/cache@v6
+        with:
+          path: .runtime-build/cache
+          key: remote-packs-darwin-arm64-${{ hashFiles('ops/release/runtime-versions.env') }}
+      - uses: ./.github/actions/apple-keychain
+        with:
+          certificate-p12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: build remote/<tool>/ for tailscale, cloudflared and zrok (signed when a Developer ID is present; verified from MOVED copies)
+        run: ops/release/build-remote-packs.sh "$GITHUB_WORKSPACE/remote-packs"
+      - name: pack metistry-remote-<tool>-<version>-darwin-arm64.tar.gz (+ .sha256), one per tool
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          mkdir -p dist-release
+          for tool in tailscale cloudflared zrok; do
+            asset="metistry-remote-${tool}-${VERSION}-darwin-arm64.tar.gz"
+            # a single top-level `remote/<tool>/`: `metistry remote set` unpacks
+            # it beside <product-dir>/runtime/, verifies it, and swaps it in as
+            # <product-dir>/runtime/remote/<tool>/
+            tar -czf "dist-release/$asset" -C "$GITHUB_WORKSPACE/remote-packs" "remote/$tool"
+            ( cd dist-release && shasum -a 256 "$asset" > "$asset.sha256" && cat "$asset.sha256" )
+            head -12 "remote-packs/remote/$tool/manifest.json"
+          done
+          ls -lh dist-release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: remote-packs-darwin-arm64
+          path: dist-release/metistry-remote-*
           if-no-files-found: error
 
   # npm, via Trusted Publishing (OIDC) — no token anywhere, repo or run log.
@@ -492,8 +549,8 @@ jobs:
 
   # checksums.txt, the generated changelog, and the release itself.
   publish:
-    needs: [verify, runtime, runtime-deps, npm, images, macos-app, appcast]
-    if: always() && needs.verify.result == 'success' && needs.runtime.result == 'success' && needs['runtime-deps'].result == 'success'
+    needs: [verify, runtime, runtime-deps, remote-packs, npm, images, macos-app, appcast]
+    if: always() && needs.verify.result == 'success' && needs.runtime.result == 'success' && needs['runtime-deps'].result == 'success' && needs['remote-packs'].result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -505,6 +562,11 @@ jobs:
         with:
           path: assets
           pattern: runtime-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          path: assets
+          pattern: remote-packs-*
           merge-multiple: true
       # The DMG and the appcast, when this run produced them. Both jobs skip
       # cleanly without their secrets, so a missing artifact is a normal

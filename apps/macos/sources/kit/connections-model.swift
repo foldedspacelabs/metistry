@@ -137,8 +137,7 @@ public enum ConnectionReach: Equatable, Sendable {
     /// The exact `host:port` an IMAP connection's app password must be listed for (core's `socketDestination`).
     var imapDestination: EgressDestination? {
         guard case .imap(let host, let port, let security) = self else { return nil }
-        let loopback = host == "localhost" || host.hasPrefix("127.")
-        return EgressDestination(entry: "\(host):\(port)", cleartext: security == "plain" && !loopback)
+        return EgressDestination(entry: "\(host):\(port)", cleartext: security == "plain" && !EgressDestination.isLoopbackHost(host))
     }
 }
 
@@ -335,8 +334,28 @@ public struct EgressDestination: Equatable, Sendable {
         else { return nil }
         let port = parts.port ?? (scheme == "http" ? 80 : 443)
         entry = port == 443 ? host : "\(host):\(port)"
-        let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" || host.hasSuffix(".localhost")
-        cleartext = scheme == "http" && !loopback
+        cleartext = scheme == "http" && !Self.isLoopbackHost(host)
+    }
+
+    /// Core's `isLoopbackHost` (`packages/core/src/egress.ts`), spelled the same
+    /// way and held to it by `connections-view-tests.swift`, which reads core's
+    /// function: brackets stripped, lowercased, then `localhost`, `::1`, its
+    /// long form, or `127.` and three more dotted groups of one to three digits.
+    /// Nothing else is loopback — `foo.localhost` and `0.0.0.0` are not — so the
+    /// Mac never calls a plain-http destination safe that the door would call
+    /// cleartext. Written without a regex on purpose: JavaScript's `$` and
+    /// `\d` are not `NSRegularExpression`'s (a trailing newline, non-ASCII digits).
+    public static func isLoopbackHost(_ host: String) -> Bool {
+        var h = Substring(host)
+        if h.hasPrefix("[") { h = h.dropFirst() }
+        if h.hasSuffix("]") { h = h.dropLast() }
+        let lower = h.lowercased()
+        if lower == "localhost" || lower == "::1" || lower == "0:0:0:0:0:0:0:1" { return true }
+        let groups = lower.split(separator: ".", omittingEmptySubsequences: false)
+        guard groups.count == 4, groups[0] == "127" else { return false }
+        return groups.dropFirst().allSatisfy { g in
+            (1...3).contains(g.utf8.count) && g.utf8.allSatisfy { (0x30...0x39).contains($0) }
+        }
     }
 }
 

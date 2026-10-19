@@ -18,7 +18,7 @@ describe("manifest walk over the checkout", () => {
     const invalid = found.filter((f) => !f.result.ok).map((f) => `${f.dir}: ${f.result.ok ? "" : f.result.errors.join("; ")}`);
     expect(invalid).toEqual([]);
     const dirs = found.map((f) => f.dir);
-    for (const expected of ["collectors/inbox-drain", "routines/morning-brief", "packages/mcp-apple-fm", "packages/mcp-eventkit", "packages/mcp-brain", "apps/console", "apps/reconciler", "apps/watchdog", "apps/assistant", "targets/github-issues"]) {
+    for (const expected of ["collectors/inbox-drain", "routines/morning-brief", "packages/mcp-apple-fm", "packages/mcp-eventkit", "packages/mcp-brain", "apps/console", "apps/reconciler", "apps/watchdog", "apps/assistant", "targets/local-crew"]) {
       expect(dirs).toContain(expected);
     }
     // the name is what the row is keyed by; it must be the manifest's, not the directory's
@@ -49,7 +49,7 @@ describe("manifest walk over the checkout", () => {
     });
     const rows = Object.fromEntries(report.rows.map((r) => [r.name, r]));
     // manifest-only kinds validate
-    for (const n of ["inbox-drain", "morning-brief", "github-issues", "watchdog"]) expect(rows[n]?.status, n).toBe("ok");
+    for (const n of ["inbox-drain", "morning-brief", "local-crew", "watchdog"]) expect(rows[n]?.status, n).toBe("ok");
     // bridges with an env-configured URL are absent until configured, and the
     // assistant is absent until this install has an engine credential (W1)
     for (const n of ["apple-fm", "eventkit", "reconciler", "assistant"]) expect(rows[n]?.status, n).toBe("absent");

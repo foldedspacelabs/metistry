@@ -83,7 +83,11 @@ describe("the console's launchd environment", () => {
     expect(e.METISTRY_CONSOLE_HOST).toBe("127.0.0.1"); // loopback bind (invariant 8)
     expect(e.METISTRY_EK_URL).toBe("http://127.0.0.1:7811"); // resolved for a host process
     expect(e.METISTRY_INBOX_DIR).toBe("/i/Inbox"); // the vault inbox, not the named volume (docs/ops/inbox.md)
-    expect(e.METISTRY_ORIGIN).toBe("https://studio.ts.net");
+    // METISTRY_ORIGIN is derived from the remote-access record, not read from
+    // .env (plan §2.23, X-105): with no provider chosen it is loopback only,
+    // however .env was hand-edited — remote.test.ts has the rest
+    expect(e.METISTRY_ORIGIN).toBe("http://127.0.0.1:8080");
+    expect(consoleEnv({ ...ctx(env), remote: { provider: "zrok", origin: "https://studio.ts.net", settings: {} } }).METISTRY_ORIGIN).toBe("https://studio.ts.net,http://127.0.0.1:8080");
     expect(e.METISTRY_GITHUB_WRITE_TOKEN).toBe("ghp_x");
     expect(e.TZ).toBe("America/New_York");
     // nothing from the operator's shell that is not ours

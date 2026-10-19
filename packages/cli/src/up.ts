@@ -32,6 +32,7 @@ import {
   GIT_ASKPASS_PATH_VAR,
   firstOnMachineBaseUrl,
   keepAwakeOf,
+  remoteOf,
   loadCompute,
   resolveLocalModelUrl,
   servedProviders,
@@ -42,7 +43,7 @@ import {
   type EgressInput,
   type GitCredentialLookup,
 } from "@foldedspacelabs/metistry-core";
-import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
+import { assistantEnv, consoleEnv, consoleOrigins, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
 import {
@@ -267,9 +268,18 @@ export async function prepareComposePolicy(r: StepRunner, instanceDir: string | 
   return { [COMPOSE_SECRETS_SOURCE_VAR]: dir };
 }
 
-export async function composeUp(r: StepRunner, productDir: string, source: LockSource, version?: string | undefined, envFile?: string | undefined, instanceDir?: string | undefined): Promise<void> {
+export async function composeUp(
+  r: StepRunner,
+  productDir: string,
+  source: LockSource,
+  version?: string | undefined,
+  envFile?: string | undefined,
+  instanceDir?: string | undefined,
+  /** values `up` DERIVES and compose must interpolate over `.env`'s — `METISTRY_ORIGIN` from the remote-access record (deployment.ts `consoleOrigins`) */
+  derived: Record<string, string> = {},
+): Promise<void> {
   const base = ["compose", ...composeEnvArgs(productDir, envFile)];
-  const secrets = { env: await prepareComposePolicy(r, instanceDir) };
+  const secrets = { env: { ...(await prepareComposePolicy(r, instanceDir)), ...derived } };
   if (source === "release") {
     // the released, versioned images — docker-compose.yml reads
     // METISTRY_<SERVICE>_IMAGE and falls back to the dev tags a checkout builds
@@ -1242,6 +1252,9 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     // supervisor.json's `env`), and there is no second channel to it.
     env: { ...env, [KEEP_AWAKE_ENV]: keepAwakeOf(deployment) },
     shape: deployment.shape,
+    // …and so is `remote:` for METISTRY_ORIGIN (plan §2.23): the provider's
+    // origin first, the loopback one second, or the loopback one alone
+    remote: remoteOf(deployment),
     // derived state hangs off the install root, never off a release: a version
     // flip must not orphan the assistant's state or the Postgres data dir
     stateDir: assistantStateDir({ ...instanceDir, productDir: opts.productDir }),
@@ -1264,6 +1277,21 @@ export async function up(opts: UpOptions): Promise<UpResult> {
           ? `keep-awake: ${keepAwake} — the supervisor holds PreventUserIdleSystemSleep while it runs`
           : `keep-awake: ${keepAwake}, but the compose shape has no supervisor to hold it — nothing is held (docs/ops/deployment-shapes.md)`,
     );
+  }
+  // the origins the console will answer for, derived from the record rather
+  // than read from `.env` (docs/ops/remote-access.md): a hand-written remote
+  // origin beside `remote: none` is the configuration X-103 found unsafe
+  {
+    const remote = remoteOf(deployment);
+    const origins = consoleOrigins(values);
+    r.note(
+      remote.provider === "none"
+        ? `remote access: none — METISTRY_ORIGIN is loopback only${origins.value ? ` (${origins.value})` : ""}; your phone can't reach this Mac until you choose a way (\`metistry remote set\`, docs/ops/remote-access.md)`
+        : `remote access: ${remote.provider}${remote.mode ? ` (${remote.mode})` : ""} — METISTRY_ORIGIN: ${origins.value ?? "(none)"}`,
+    );
+    if (origins.dropped.length > 0) {
+      r.note(`METISTRY_ORIGIN in .env also names ${origins.dropped.join(", ")}, which the remote-access record does not — not carried: a remote origin is configured by \`metistry remote set <provider>\`, never by editing .env (docs/ops/remote-access.md)`);
+    }
   }
   r.note(`node: ${le.node} (${chosenNode.why}) — every launchd job execs this`);
   // the notice itself is main.ts's job (it prints to stderr, once per run);
@@ -1330,7 +1358,10 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       r.note("--no-compose: containers left as they are");
     } else if (usesCompose(deployment)) {
       r.section("compose");
-      await composeUp(r, runDir, source, pinnedVersion, envFile, values.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || undefined);
+      // the rendered METISTRY_ORIGIN reaches the compose file's interpolation
+      // through the process environment, which compose reads before --env-file
+      const origins = consoleOrigins(values);
+      await composeUp(r, runDir, source, pinnedVersion, envFile, values.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || undefined, origins.value !== undefined ? { METISTRY_ORIGIN: origins.value } : {});
     } else {
       r.note("shape launchd: no containers, so docker is never called");
     }

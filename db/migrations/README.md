@@ -66,3 +66,5 @@ number.
 | 0035 | `event_notify.sql` | `metistry_notify()` and `AFTER INSERT OR UPDATE` triggers on `runs`, `proposals`, `work`, `inbox`, `artifact_comments`, `outbound_messages`, `agents` — `pg_notify` with `{table, op, id}` only (§2.20) | no data | T2-18 |
 | 0036 | `vault_tasks_someday.sql` | `vault_tasks.someday boolean NOT NULL DEFAULT false` — the `someday` token (K6) | derived | T2-5 |
 | 0037 | `runs_turn_message_id_idx.sql` | `runs_turn_message_id_idx` — partial expression index on `runs ((meta ->> 'message_id')) WHERE kind = 'turn'`, for `GET /api/messages`'s `turn_id` join | no data | X-18 |
+| 0038 | `passkey_revocation.sql` | `passkeys.revoked_at timestamptz` — a removed device's passkey never signs in again (§2.22) | durable, like `auth_sessions.revoked_at` | X-76 |
+| 0039 | `passkey_rp_id.sql` | `passkeys.rp_id text` — the host a passkey was created for; null reads as the first origin's host (§2.23) | durable | X-104 |

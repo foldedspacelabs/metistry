@@ -1813,6 +1813,7 @@ metistry connections policy github                        # the tool table, by g
 metistry connections policy github search_issues allow --group reads
 metistry connections policy github delete_issue never
 metistry connections policy github --offer on             # offer it to agents through Metistry
+metistry connections policy github --fold off             # hand agents its answers whole, however large (on by default: a large answer is folded and paged — docs/ops/connections.md)
 metistry connections set github --env 'LOG_LEVEL=warn' [--unset-env K] [--header K=V] [--unset-header K] [--url …] [-- <command…>]
 metistry connections set work --config region=us              # one field of a known service; the rest keep what the file holds
 metistry connections set calendar --client-id-secret my_client_id [--client-secret-secret my_client_secret]   # bring your own OAuth client

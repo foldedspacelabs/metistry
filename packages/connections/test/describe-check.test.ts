@@ -222,6 +222,7 @@ describe("describeConnections — names, never values", () => {
           { name: "search_issues", group: "reads", mode: "on" },
         ],
         offer_to_agents: false,
+        fold: true,
         used_by: [{ kind: "sync", name: "github-state" }],
         last_checked: null,
       },

@@ -573,7 +573,7 @@ const USAGE = `metistry — Metistry command line
                            [-- <command> [args…]] [--dry-run]
   metistry connections authorize <name> [--no-browser] [--timeout <seconds>]
   metistry connections policy <name> [<tool> allow|ask|never [--group reads|changes|starts_agent]]
-                              [--offer on|off] [--dry-run]
+                              [--offer on|off] [--fold on|off] [--dry-run]
   metistry connections remove <name> [--dry-run]
   metistry connections test <name> [--json]
       Servers Metistry reaches for you (.metistry/connections/<name>.yaml,
@@ -586,7 +586,9 @@ const USAGE = `metistry — Metistry command line
       agent Ask First, offer to agents off (--no-discover writes it without
       dialling). "policy" prints the tool table, or sets one tool to Allow,
       Ask First or Never — a tool that is not listed is refused before
-      anything is dialled. "test" dials it and compares what it offers with
+      anything is dialled; --fold off hands agents this connection's answers
+      whole, however large (on by default: connections_call folds a large
+      answer and keeps it for the caller to page). "test" dials it and compares what it offers with
       the file. "remove" deletes it; what referred to it turns absent. A
       command is given only the environment the file names — never this
       process's — and a granted secret there is given to that command only.
@@ -2061,7 +2063,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           return 0;
         }
         if (verb === "policy") {
-          const r = await connectionsPolicy(args[1], { tool: args[2], mode: args[3], group: str(flags, "group"), offer: str(flags, "offer") }, connOpts);
+          const r = await connectionsPolicy(args[1], { tool: args[2], mode: args[3], group: str(flags, "group"), offer: str(flags, "offer"), fold: str(flags, "fold") }, connOpts);
           out(json ? JSON.stringify(r, null, 2) : [renderPolicy(r.row), ...(r.delivery ? [r.delivery.detail] : [])].join("\n"));
           return 0;
         }

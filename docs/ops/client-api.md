@@ -3457,7 +3457,9 @@ GET /api/recordings/:id        served — a recording's retention state: never i
 ```
 
 Every write here is a CLI verb with the owner caller class (M7, M13, M14 below):
-hosts, commands, credentials and the offer switch are the boundary, and a
+hosts, commands, credentials, the offer switch and the fold switch (`fold`:
+whether `connections_call` folds this connection's large answers, X-132;
+`metistry connections policy <name> --fold on|off`) are the boundary, and a
 secret's value never crosses the API in either direction.
 
 #### `GET /api/connections` — the Connections list (`user` principal)
@@ -3479,6 +3481,7 @@ GET /api/connections
                      "tools":[{"name":"create_issue","group":"changes","mode":"ask"},
                               {"name":"search_issues","group":"reads","mode":"on"}],
                      "offer_to_agents":false,
+                     "fold":true,
                      "used_by":[{"kind":"sync","name":"github-state"}],
                      "last_checked":{"at":"2026-09-30T06:50:00.000Z","status":"ok"}}],
      "types":[{"name":"icloud-calendar","title":"iCloud Calendar over CalDAV with an app-specific password",

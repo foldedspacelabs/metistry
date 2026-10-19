@@ -644,7 +644,7 @@ GET  /api/briefing?repo=metistry&remote=git%40github.com%3Aorg%2FMetistry.git
 The Context Mode review's CM-1 (`docs/research/2026-10-04-context-mode-review.md`
 §5–§6), as the owner ruled it on 2026-10-04: **handles plus the owner's own
 text**, assembled by the console with no model (invariant 4) from named
-queries alone (invariant 3), under the caller's grant. X-129's plugins call
+queries alone (invariant 3), under the caller's grant. The plugins (X-129) call
 it **once, at session start**, with the cwd's basename and `git remote`, and
 inject `text` as context; the console does not cache it and the hook never
 calls again mid-session, so the cached prompt prefix is not churned.
@@ -664,7 +664,7 @@ calls again mid-session, so the cached prompt prefix is not churned.
   the grants (`PUT /api/agents/:id/grants`), so it goes where a revoke goes
   and is never inherited from a project or widened by an approval; an
   opted-out agent gets the empty briefing below, and its `runs` row says
-  `opted_out`. How the owner sets it from `connect` is X-129's.
+  `opted_out`. The owner sets it with `metistry connect <tool> --briefing off` (`docs/ops/cli.md`), which writes the whole envelope so no other grant is dropped.
 - **What appears, as what.** The project page the repository resolves to
   (`project_for_repo`, X-130 — only a page the owner wrote claims a remote):
   path, title, `sha256`, and its own description **as text**. The open tasks

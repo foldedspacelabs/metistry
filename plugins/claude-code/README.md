@@ -93,6 +93,22 @@ captured_at: "2026-09-06T…Z"
 ---
 ```
 
+### Session-start briefing
+
+`hooks/hooks.json` also registers a `SessionStart` hook (`startup` and `clear`)
+that runs `scripts/session-start.mjs`: it asks the instance's
+`GET /api/briefing?repo=…&remote=…` once, with the agent bearer
+(`METISTRY_AGENT_TOKEN_CLAUDE_CODE`, else `METISTRY_OWNER_TOKEN`), and injects
+the answer as session context — the project page, open tasks and recent
+sessions for the checkout, as handles plus your own text, under the agent's
+read grant. **On by default; opt out per agent** with
+`metistry connect claude-code --briefing off` (stored on the console with the
+agent's grants, so an opted-out agent is simply served nothing).
+`METISTRY_BRIEFING=off` silences it for one profile. It runs once per session,
+**exits 0 on every path**, and injects nothing when the instance is
+unreachable, refuses, or has nothing to say. `docs/ops/claude-code-plugin.md`
+§5 has the details.
+
 ### Session-end hook
 
 `hooks/hooks.json` registers a `SessionEnd` hook that runs

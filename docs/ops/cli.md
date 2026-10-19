@@ -830,6 +830,7 @@ metistry connect devin                      # prints the fields to paste (no API
 metistry connect claude-code                # registers /mcp with Claude Code (reads) + prints the plugin's env lines (capture)
 metistry connect cursor --rotate            # a replacement bearer; the old one dies at once
 metistry connect cursor --areas Areas/Engineering --project second-instance
+metistry connect claude-code --briefing off # opt this agent out of the session-start briefing (on, the default, is --briefing on)
 metistry connect devin --remote             # enrols PENDING: its token works once you let it in
 metistry connect --list [--json]
 metistry connect --remove cursor            # the way back: revoke, delete the Keychain item, restore ~/.cursor/mcp.json
@@ -876,7 +877,55 @@ no per-tool branches for a config, so adding a harness is one entry, and the
 registry's conformance test (`connect.test.ts`, "the harness registry") holds
 every entry to the same rules: no file `connect` writes, and no argv it runs,
 contains a bearer's value; a second write changes nothing; `--list` reads the
-entry back; `--remove` takes away that entry and nothing else.
+entry back; `--remove` takes away that entry and nothing else. Each entry also
+declares how the session-start briefing reaches its agent (`briefing`, below),
+and one that delivers it must name a plugin that ships `scripts/briefing.mjs`.
+
+### The session-start briefing: on by default, `--briefing off` to opt out (X-129)
+
+A new session in a coding tool starts out knowing the project it was opened
+in: the project page for the checkout, its open tasks, the owner's recent
+sessions there and the evening folds that name it, as handles plus the owner's
+own text, assembled by the console under the agent's grant
+(`GET /api/briefing`, `docs/ops/client-api.md`). **It is on for every agent
+with a read grant** (the owner's ruling of 2026-10-04: getting the right
+knowledge to the right place is the core feature), and the opt-out is the
+owner's, per agent:
+
+```sh
+metistry connect claude-code --briefing off   # this agent is served the empty briefing
+metistry connect claude-code --briefing on    # take the opt-out back
+```
+
+`--briefing` takes `on` or `off` (anything else is exit 2, nothing sent) and is
+refused with `--remove`. The opt-out is one field, `briefing: false`, in the
+agent's **grants** on the console, so it goes where a revoke goes: revoking
+and connecting again brings the agent back at the default, on. It is enforced
+at the console — an opted-out agent is answered the empty briefing and the
+`runs` row says `opted_out` — not by the plugin, so a stale or edited plugin
+cannot read what the owner withheld. Two behaviours worth knowing:
+
+- **A grants write carries the whole envelope.** `PUT …/grants` replaces it, so
+  `connect` sends the tier, areas, `queries`, `connections` and `briefing` the
+  row already holds with whatever you changed. `--areas` after `--briefing off`
+  therefore leaves the opt-out in place (and no longer drops `queries` or
+  `connections` — it used to).
+- **No read grant, no briefing.** A new row is default-deny (`tier: none`), so
+  an agent is served nothing until `--areas` widens it; `connect` says so.
+
+What carries the briefing into the session is the harness's `briefing` entry in
+`HARNESSES`, and `connect` prints it:
+
+| tool | delivery | plugin |
+| --- | --- | --- |
+| `claude-code` | the plugin's `SessionStart` hook, once, on `startup` and `clear` | `plugins/claude-code` |
+| `opencode` | `experimental.chat.system.transform`: asked once per session, the same text added to every turn | `plugins/opencode` |
+| `cursor` | not delivered — Cursor's session-start hook is not verified | — |
+| `devin` | not delivered — Devin is a cloud agent with no plugin `connect` can reach | — |
+
+For a tool that does not deliver it the setting is still stored, so an opt-out
+holds the day delivery exists. `connect --list` has a `briefing` column: `on`,
+`off`, or `n/a` (no live row, or nothing in that tool delivers it).
 
 ### `--remove`: the way back, and coming back (HS-7)
 
@@ -917,7 +966,7 @@ are yours to delete — the output says so — and `devin` has neither file nor
 Keychain item.
 Steps 2 and 3 are independent: one failing is reported as a `PROBLEM` line and
 exits 1, the other still runs, and re-running finishes the job. `--remove`
-refuses `--rotate`, `--remote`, `--areas` and `--project` (exit 2), and
+refuses `--rotate`, `--remote`, `--areas`, `--project` and `--briefing` (exit 2), and
 `--json` prints the result.
 
 **A revoked tool can be connected again.** `metistry connect <tool>` on a

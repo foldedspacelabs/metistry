@@ -45,6 +45,7 @@
 // ask for. With METISTRY_CAPTURE_DIR set, an unreachable console means the note
 // is written there instead of dropped (SHOULD-10).
 
+import { createBriefer } from "./scripts/briefing.mjs";
 import { config, captureSession, readMessages, readSession, redact, summarizeSession, unreadableSession } from "./scripts/lib.mjs";
 
 /**
@@ -164,7 +165,7 @@ export function createCapturer({ client, directory = null, env = process.env, fe
   };
 }
 
-/** The plugin OpenCode loads. One hook, one event, everything else untouched. */
+/** The plugin OpenCode loads: the finished-session event, and the system-prompt transform that carries the briefing. Everything else untouched. */
 export const MetistryPlugin = async (ctx) => {
   const client = ctx?.client;
   const capturer = createCapturer({
@@ -180,6 +181,20 @@ export const MetistryPlugin = async (ctx) => {
     },
   });
 
+  // The session-start briefing (X-129): default ON, unlike capture — the
+  // console owns the per-agent opt-out. Asked once per session, added to the
+  // system prompt on every turn so the prefix is stable.
+  const briefer = createBriefer({
+    directory: ctx?.worktree ?? ctx?.directory ?? null,
+    log: async (message) => {
+      try {
+        await client?.app?.log?.({ body: { service: "metistry", level: "warn", message } });
+      } catch {
+        /* a log line is never worth failing a session over */
+      }
+    },
+  });
+
   // No `beforeExit` hook here on purpose: it was tried and it does not fire —
   // OpenCode ends a one-shot run with an outright `process.exit`. `flush()`
   // stays on the capturer as the seam a caller WITH a real shutdown signal
@@ -188,9 +203,18 @@ export const MetistryPlugin = async (ctx) => {
   return {
     event: async ({ event }) => {
       try {
+        if (event?.type === "session.deleted") briefer.forget(event?.properties?.sessionID);
         await capturer.onEvent(event);
       } catch {
         /* a capture door never throws at the tool it lives in */
+      }
+    },
+    "experimental.chat.system.transform": async (input, output) => {
+      try {
+        const text = await briefer.systemFor(input?.sessionID);
+        if (text && Array.isArray(output?.system) && !output.system.includes(text)) output.system.push(text);
+      } catch {
+        /* a briefing never fails the turn it is for */
       }
     },
   };

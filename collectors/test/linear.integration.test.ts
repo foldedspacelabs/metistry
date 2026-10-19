@@ -132,6 +132,34 @@ describe.skipIf(!hasDb)("linear sync (real db)", () => {
     ]);
   });
 
+  it("**the sync's outcome is identical whatever order Postgres returns the rows in**", async () => {
+    // On a near-empty table the planner walks `work_external_ref_uidx`, which hands rows back in key order
+    // by luck; on a grown table it reads the heap. So the sync runs on a connection with index scans off —
+    // rows then come back in physical order — and CLUSTER (which rewrites the heap in `work_status_idx`
+    // order: status, then updated_at newest first) puts ENG-102 and ENG-103 in each order in turn.
+    const client = await pool.connect();
+    try {
+      await client.query("SET enable_indexscan = off; SET enable_indexonlyscan = off; SET enable_bitmapscan = off");
+      const outcomes: unknown[] = [];
+      for (const order of [["linear:ENG-102", "linear:ENG-103"], ["linear:ENG-103", "linear:ENG-102"]]) {
+        await clean();
+        await pass(["assigned-1a.json", "assigned-1b.json"]);
+        for (const [i, ref] of order.entries()) await pool.query(`UPDATE work SET updated_at = '2026-01-01T00:00:00Z'::timestamptz - make_interval(days => $2) WHERE external_ref = $1`, [ref, i]);
+        await pool.query("CLUSTER work USING work_status_idx");
+        const physical = (await client.query(`SELECT external_ref FROM work WHERE external_ref IN ('linear:ENG-102', 'linear:ENG-103')`)).rows.map((r) => r.external_ref);
+        expect(physical).toEqual(order); // the read below really does meet them in this order
+        const linear = fakeLinear({ assigned: [fixture("assigned-2.json")], byId: fixture("issues-by-id-2.json") });
+        const n = await linearSync(client, { openSync: opener(instance, linear.fetch) });
+        const receipts = await pool.query(`SELECT source->>'external_ref' AS ref, payload->'cleared'->>'what' AS what FROM proposals WHERE source->>'kind' = $1 AND decision = 'resolved_at_source' ORDER BY id`, [SOURCE_KIND]);
+        outcomes.push({ n, ids: linear.sent[1]!.variables.ids, work: (await work()).map((r) => [r.external_ref, r.status, r.closed_reason]), receipts: receipts.rows });
+      }
+      expect(outcomes[0]).toMatchObject({ n: 4, ids: ["9b1d7a52-0c4e-4f7a-9e1b-3a5c7d9e1f02", "9b1d7a52-0c4e-4f7a-9e1b-3a5c7d9e1f03"] });
+      expect(outcomes[1]).toEqual(outcomes[0]); // the ids sent, the rows closed, and the order the receipts were written in
+    } finally {
+      client.release();
+    }
+  });
+
   it("an issue that comes back is raised again; one the owner answered is not raised again while it stays", async () => {
     await pass(["assigned-1a.json", "assigned-1b.json"]);
     await pass(["assigned-2.json"], "issues-by-id-2.json");

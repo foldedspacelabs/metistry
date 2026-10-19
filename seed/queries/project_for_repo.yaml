@@ -1,0 +1,84 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# A repository → the project page the owner wrote for it (research
+# docs/research/2026-10-04-context-mode-review.md §6 CM-3; ruled 2026-10-04:
+# a named query, no new route). A coding agent knows where it is by its git
+# remote; the owner's projects are PAGES, `Projects/<Name>.md`. The map
+# between them is the page's own `repos:` frontmatter — one remote or a
+# list — which the owner writes in Obsidian and git carries (invariant 1).
+# The reconciler indexes it into `project_repos` (db/migrations/
+# 0042_project_repos_and_sessions.sql, apps/reconciler/src/indexer.ts
+# `projectRepoPairs`), and only from a page the user owns: the fold creates
+# pages under `Projects/` under its own `source:`, and a page an agent wrote
+# never makes a repository resolve to it.
+#
+# **Never guessed.** At most one row, and none unless exactly ONE page claims
+# the remote: two pages that both list `github.com/org/repo` resolve to
+# neither, the refusal `people_by_email` makes between two People pages. No
+# fallback on a basename, a title or a path — an unmapped repository is no
+# project, because a wrong project page in a briefing is worse than none.
+#
+# **The remote is reduced here to the shape the walk stored.** Core's
+# `normalizeRepoRemote` (the Context Mode Engine's shape): `host/path`, the
+# scheme and any `user@` credential dropped, an SSH `user@host:path` folded
+# to `host/path`, a trailing `.git` and trailing slashes removed, the HOST
+# lowercased and the path kept as written. The SQL below is that function
+# again, so `git@github.com:Org/Repo.git`, `https://github.com/Org/Repo/`
+# and `ssh://git@github.com/Org/Repo` all find the one page; the two are
+# held together by `apps/console/test/seed-queries.test.ts`, which stores
+# fixtures through the TypeScript and looks each raw spelling up through
+# this query. A value that is not plainly a remote (whitespace inside it, no
+# host, no path) reduces to NULL and matches nothing.
+#
+# `expose: generic`, deliberately: the row is one HANDLE — a path, a title,
+# a one-line description — for a remote the caller already holds, the same
+# surface `board`, `open_work` and `areas_overview` already publish by name,
+# and the owner grants `queries: true` per agent. The page's BYTES are not
+# here and never will be: they are read through the knowledge doors under
+# the caller's tier.
+name: project_for_repo
+description: >-
+  The one project page (Projects/<Name>.md the owner wrote) whose `repos:`
+  frontmatter names a git remote — path, title, description, and the remote
+  in its canonical shape — or no row when none does or when more than one
+  does. The remote is matched in any clone spelling (ssh, https, with or
+  without .git; host case-insensitive, path as written).
+params:
+  remote: { type: text, default: "" } # blank matches nothing
+sql: |
+  WITH raw AS (
+    SELECT btrim(:remote::text) AS r
+  ),
+  stripped AS (
+    SELECT CASE
+             WHEN r = '' OR length(r) > 512 OR r ~ '[\s\x01-\x1f\x7f]' THEN NULL
+             WHEN r ~* '^[a-z0-9_-]+@[^:/]+:.+$' THEN regexp_replace(r, '^[a-z0-9_-]+@([^:/]+):/*(.+)$', '\1/\2')
+             ELSE regexp_replace(r, '^[a-z][a-z0-9+.-]*://([^@/]+@)?', '', 'i')
+           END AS u
+    FROM raw
+  ),
+  trimmed AS (
+    SELECT regexp_replace(regexp_replace(u, '\.git/?$', '', 'i'), '/+$', '') AS u FROM stripped
+  ),
+  norm AS (
+    SELECT CASE
+             WHEN u IS NULL OR strpos(u, '/') <= 1 THEN NULL
+             WHEN substr(u, strpos(u, '/') + 1) = '' OR substr(u, strpos(u, '/') + 1) LIKE '/%' THEN NULL
+             ELSE lower(split_part(u, '/', 1)) || '/' || regexp_replace(substr(u, strpos(u, '/') + 1), '/{2,}', '/', 'g')
+           END AS remote
+    FROM trimmed
+  )
+  SELECT
+    p.remote,
+    p.path,
+    COALESCE(k.title, regexp_replace(p.path, '^.*/|\.md$', '', 'g')) AS title,
+    k.description
+  FROM project_repos p
+  JOIN norm n ON n.remote = p.remote
+  LEFT JOIN knowledge_files k ON k.path = p.path
+  WHERE NOT EXISTS (
+      SELECT 1 FROM project_repos o
+       WHERE o.remote = p.remote AND o.path <> p.path
+    )
+  LIMIT 1
+cache_ttl: 0 # a page the owner just gave a remote must resolve on the next call

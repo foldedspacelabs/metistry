@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { parse } from "yaml";
 import { QueryStore, type SqlExecutor } from "@foldedspacelabs/metistry-queries";
-import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, finishRun, isRequestKind, requestWordOf, requestWordSql, startRun } from "@foldedspacelabs/metistry-core";
+import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, finishRun, isRequestKind, normalizeRepoRemote, requestWordOf, requestWordSql, startRun } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { privateTables } from "./private-tables.js";
 
@@ -513,6 +513,121 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     } finally {
       await pool.query(`DELETE FROM people_emails WHERE path = ANY($1::text[])`, [[jim, twinA, twinB]]);
       await pool.query(`DELETE FROM knowledge_files WHERE path = ANY($1::text[])`, [[jim, twinA, twinB]]);
+    }
+  });
+
+  // CM-3: a repository → the project page the owner wrote for it. The SQL
+  // in project_for_repo.yaml reduces the caller's remote the way core's
+  // normalizeRepoRemote reduced the stored one; this is the parity test —
+  // every raw spelling below is stored through the TypeScript and looked up
+  // through the SQL, so the two cannot drift apart unnoticed.
+  it("project_for_repo: every clone spelling finds the one page; two claimants, an unknown remote and a non-remote resolve to nothing (never guessed)", async () => {
+    const tag = `pfr${Date.now()}`;
+    const page = `Projects/${tag} Metistry.md`;
+    const twinA = `Projects/${tag} Twin A.md`;
+    const twinB = `Projects/${tag} Twin B.md`;
+    const spellings = [
+      `git@github.com:${tag}/metistry.git`,
+      `git@github.com:${tag}/metistry`,
+      `https://github.com/${tag}/metistry.git`,
+      `https://github.com/${tag}/metistry/`,
+      `  https://GitHub.com/${tag}/metistry  `,
+      `https://user:token@github.com/${tag}/metistry.git`,
+      `ssh://git@github.com/${tag}/metistry.git`,
+      `github.com/${tag}/metistry`,
+    ];
+    const canonical = normalizeRepoRemote(spellings[0])!;
+    expect(canonical).toBe(`github.com/${tag}/metistry`);
+    for (const raw of spellings) expect(normalizeRepoRemote(raw), raw).toBe(canonical); // the TS side agrees with itself first
+    const port = normalizeRepoRemote(`ssh://git@gitlab.example:2222/${tag}/Sub/Repo.git/`)!; // a port and a cased path survive
+    const shared = normalizeRepoRemote(`https://github.com/${tag}/shared`)!;
+    await pool.query(
+      `INSERT INTO knowledge_files (path, mtime, content_hash, title, description) VALUES ($1, now(), 'h1', $4, 'the product'), ($2, now(), 'h2', NULL, NULL), ($3, now(), 'h3', NULL, NULL)`,
+      [page, twinA, twinB, `${tag} Metistry`],
+    );
+    await pool.query(`INSERT INTO project_repos (remote, path) VALUES ($1, $2), ($3, $2), ($4, $5), ($4, $6)`, [canonical, page, port, shared, twinA, twinB]);
+    try {
+      for (const raw of spellings) {
+        const rows = (await store.run("project_for_repo", { remote: raw })).rows;
+        expect(rows, raw).toEqual([{ remote: canonical, path: page, title: `${tag} Metistry`, description: "the product" }]);
+      }
+      // the SQL's own normalisation, on inputs with a port and a cased path
+      expect((await store.run("project_for_repo", { remote: `ssh://git@GitLab.Example:2222/${tag}/Sub/Repo.git` })).rows.map((r) => r.remote)).toEqual([port]);
+      expect((await store.run("project_for_repo", { remote: `ssh://git@gitlab.example:2222/${tag}/sub/repo` })).rows).toHaveLength(0); // the path's case is kept: a different repository
+      // two pages claim one remote: neither is the project
+      expect((await store.run("project_for_repo", { remote: `git@github.com:${tag}/shared.git` })).rows).toHaveLength(0);
+      // an unmapped repository is no project — no fallback on a basename or a prefix
+      expect((await store.run("project_for_repo", { remote: `https://github.com/${tag}/metistry-instance` })).rows).toHaveLength(0);
+      expect((await store.run("project_for_repo", { remote: `github.com/${tag}` })).rows).toHaveLength(0);
+      expect((await store.run("project_for_repo", { remote: "metistry" })).rows).toHaveLength(0);
+      // not plainly a remote: matches nothing rather than something
+      for (const bad of ["", "   ", "%", `https://github.com/${tag}/me tistry`, "github.com", "/x/y", "x'; DROP TABLE project_repos; --"]) {
+        expect((await store.run("project_for_repo", { remote: bad })).rows, JSON.stringify(bad)).toHaveLength(0);
+      }
+      expect((await store.run("project_for_repo")).rows).toHaveLength(0); // the default, blank
+    } finally {
+      await pool.query(`DELETE FROM project_repos WHERE path = ANY($1::text[])`, [[page, twinA, twinB]]);
+      await pool.query(`DELETE FROM knowledge_files WHERE path = ANY($1::text[])`, [[page, twinA, twinB]]);
+    }
+  });
+
+  // CM-4: last time in this repository, as handles. The ruling of 2026-10-04
+  // gates a session on the fold: until folded, only the same project may see
+  // it (which a named query cannot tell — so it serves none); once folded,
+  // anyone with the grant may. An agent credential's capture is never the
+  // owner's session, and the agent's reply has no column to be served from.
+  it("recent_sessions: folded sessions in the repo, newest first, handles only — never an unfolded one, an agent's capture, another repo's, or one outside the window", async () => {
+    const tag = `rs${Date.now()}`;
+    const repo = `${tag}-Repo`;
+    const paths = ["folded-a", "folded-b", "unfolded", "agent", "other-repo", "old", "rejected"].map((k) => `Inbox/claude-code-session-${tag}-${k}.md`);
+    const [foldedA, foldedB, unfolded, agentRow, otherRepo, old, rejected] = paths as [string, string, string, string, string, string, string];
+    // the fold's anchor: the newest fold that enqueued a turn, two hours ago
+    const anchorRun = await pool.query(
+      `INSERT INTO runs (component, kind, ok, ts, meta) VALUES ('knowledge-fold', 'routine_run', true, now() - interval '2 hours', '{"folded":"true"}') RETURNING id`,
+    );
+    const session = (path: string, repoName: string, started: string, turns: number, prompt: string) =>
+      pool.query(
+        `INSERT INTO vault_sessions (path, content_hash, session_id, tool, repo, cwd, branch, started, ended, turns, files, first_prompt)
+         VALUES ($1, 'h', 'sid', 'claude-code', $2, '/w/' || $2, 'main', $3::timestamptz, $3::timestamptz + interval '20 minutes', $4, '["src/a.ts","src/b.ts"]', $5)`,
+        [path, repoName, started, turns, prompt],
+      );
+    const inboxRow = (path: string, ts: string, agent: string | null, status = "classified") =>
+      pool.query(`INSERT INTO inbox (source, path, note, ts, source_agent, status) VALUES ('http', $1, 'note', $2::timestamptz, $3, $4)`, [path, ts, agent, status]);
+    const dayAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+    try {
+      await session(foldedA, repo, dayAgo(1), 3, "Fix the loader test");
+      await inboxRow(foldedA, dayAgo(1), null);
+      await session(foldedB, repo.toLowerCase(), dayAgo(3), 1, "Rename the module"); // the capture spelt the checkout lowercase
+      await inboxRow(foldedB, dayAgo(3), null);
+      await session(unfolded, repo, dayAgo(0), 2, "STILL-WAITING-FOR-THE-FOLD");
+      await inboxRow(unfolded, new Date(Date.now() + 86_400_000).toISOString(), null); // after every fold anchor there could be
+      await session(agentRow, repo, dayAgo(2), 2, "PLANTED-BY-AN-AGENT");
+      await inboxRow(agentRow, dayAgo(2), "research-agent");
+      await session(otherRepo, `${tag}-Other`, dayAgo(1), 2, "ANOTHER-REPO");
+      await inboxRow(otherRepo, dayAgo(1), null);
+      await session(old, repo, dayAgo(40), 2, "TOO-OLD");
+      await inboxRow(old, dayAgo(40), null);
+      await session(rejected, repo, dayAgo(1), 2, "THE-OWNER-SAID-NO");
+      await inboxRow(rejected, dayAgo(1), null, "rejected");
+
+      const rows = (await store.run("recent_sessions", { repo: repo.toUpperCase() })).rows; // case-insensitive, like the Mac's filesystem
+      expect(rows.map((r) => r.path)).toEqual([foldedA, foldedB]);
+      expect(rows[0]).toMatchObject({ tool: "claude-code", repo, branch: "main", turns: 3, files: ["src/a.ts", "src/b.ts"], first_prompt: "Fix the loader test" });
+      expect(Object.keys(rows[0]!).sort()).toEqual(["branch", "date", "files", "first_prompt", "path", "repo", "tool", "turns"]); // handles only — no reply, no cwd, no session id
+      const dump = JSON.stringify(rows);
+      for (const never of ["STILL-WAITING", "PLANTED", "ANOTHER-REPO", "TOO-OLD", "SAID-NO"]) expect(dump).not.toContain(never);
+
+      // the window widens to the old one; the gates do not move
+      expect((await store.run("recent_sessions", { repo, days: 60 })).rows.map((r) => r.path)).toEqual([foldedA, foldedB, old]);
+      expect((await store.run("recent_sessions", { repo, days: 100_000 })).rows.map((r) => r.path)).toEqual([foldedA, foldedB, old]); // bounded to a year, still not the unfolded one
+      expect((await store.run("recent_sessions", { repo, limit: 1 })).rows.map((r) => r.path)).toEqual([foldedA]);
+      // blank, a near miss, a hostile value: nothing
+      for (const bad of ["", "  ", `${tag}`, `${tag}-Rep`, "%", `${repo}' OR 1=1 --`]) expect((await store.run("recent_sessions", { repo: bad })).rows, bad).toHaveLength(0);
+      expect((await store.run("recent_sessions")).rows).toHaveLength(0);
+    } finally {
+      await pool.query(`DELETE FROM vault_sessions WHERE path = ANY($1::text[])`, [paths]);
+      await pool.query(`DELETE FROM inbox WHERE path = ANY($1::text[])`, [paths]);
+      await pool.query(`DELETE FROM runs WHERE id = $1`, [anchorRun.rows[0]!.id]);
     }
   });
 

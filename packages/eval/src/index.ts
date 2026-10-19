@@ -167,6 +167,7 @@ export {
   type GeneratedItem,
   type GeneratorConfig,
   type GeneratorRole,
+  type RecordingRef,
   type WriterRequest,
 } from "./generate.js";
 

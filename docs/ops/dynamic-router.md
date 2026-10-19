@@ -567,6 +567,18 @@ never the product's": generated items, labelled by two models that are not the
 bar and spot-checked by the owner, keep C11's intent — the bar still writes no
 label — and the shipped example stays empty.
 
+*The gate's pass rule with two sets* — **coordinator's proposal, to be confirmed
+by the owner (X-121)**, since it amends the owner's "owner's fixtures only"
+rule: the run passes when at least one set qualifies (≥ 50 per class, the
+traps, |r| < 0.2, five D08-class items) and every qualifying set passes; a set
+too small to qualify is a non-result, not a veto. So a generated set alone can
+pass the gate when the owner's set is absent, and the owner's few hand-written
+items beside it are reported but do not decide. *Residual risk:* nothing stops
+regenerating under `--force` with other seeds or models until a set passes. The
+stats report therefore names the writer and relabeller model ids, the seed, and
+the path and sha256 of the recording `--record` wrote (or `--replay` read), so
+the set kept is traceable to one run — and says so when a run has no recording.
+
 ### 7.3 Serve (T9-4)
 
 Merged only after T9-3's report clears the bar and the owner accepts it. It lifts

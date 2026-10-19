@@ -6,6 +6,7 @@
 // every item below is SYNTHETIC ("synthetic simple item 3 …") — never an eval
 // fixture. The eval's own fixtures are the owner's or the generator's at the
 // owner's hand, and the shipped example stays empty (C11).
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -225,6 +226,7 @@ describe("the run against the fake models", () => {
     expect(s.unanswered).toBe(3);
     expect(s.confusion.simple.demanding + s.confusion.demanding.simple).toBeGreaterThan(0);
     const report = renderGenerateReport(r, { at: new Date(0), fixturesPath: "f.jsonl", pilePath: "p.jsonl" });
+    expect(report).toContain("No recording: this run cannot be reproduced.");
     expect(report).toContain("PENDING (8 in the pile)");
     expect(report).toContain("| dropped — pile full | 0 |");
     expect(report).toMatch(/\*\*OK — /);
@@ -302,7 +304,9 @@ describe("metistry-eval generate-complexity, end to end on the recording", () =>
     const pileLoaded = loadComplexityFixtures(readFileSync(pile, "utf8"), pile);
     expect(pileLoaded.fixtures).toEqual([]);
     expect(pileLoaded.issues.length).toBe(17);
-    expect(readFileSync(join(dir, "stats.md"), "utf8")).toContain("replayed from a recording");
+    const stats = readFileSync(join(dir, "stats.md"), "utf8");
+    expect(stats).toContain("replayed from a recording");
+    expect(stats).toContain(`Recording: \`${RECORDING}\` sha256 \`${createHash("sha256").update(readFileSync(RECORDING)).digest("hex")}\``);
     expect(out.text()).toContain("to adjudicate → ");
     expect(out.text()).toContain("writer  simple    asked 56, wrote 56");
     expect(existsSync(join(dir, ".metistry", "eval", "complexity.jsonl"))).toBe(false); // the owner's file is never written
@@ -328,7 +332,11 @@ describe("metistry-eval generate-complexity, end to end on the recording", () =>
       out.restore();
     }
     expect(readFileSync(gen, "utf8")).not.toContain("synthetic kept by the owner");
-    expect(JSON.parse(readFileSync(join(dir, "s.json"), "utf8")).stats.ok).toBe(true);
+    const json = JSON.parse(readFileSync(join(dir, "s.json"), "utf8")) as { stats: { ok: boolean; writer: string; relabeller: string }; recording: { path: string; sha256: string } };
+    expect(json.stats.ok).toBe(true);
+    expect(json.stats).toMatchObject({ writer: FAKE_WRITER, relabeller: FAKE_RELABELLER });
+    expect(json.recording).toMatchObject({ path: RECORDING });
+    expect(json.recording.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("refuses a Claude model, a one-family pair and a missing base URL from the command line, exit 3, before anything is written", async () => {

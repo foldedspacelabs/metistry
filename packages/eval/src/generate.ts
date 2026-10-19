@@ -625,12 +625,29 @@ export function serialiseFixtures(rows: readonly (ComplexityFixture | Adjudicati
 
 const pct = (v: number | null): string => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
 
-export function renderGenerateReport(r: GenerateResult, opts: { at?: Date; replay?: boolean; fixturesPath: string; pilePath: string }): string {
+/**
+ * The recording that makes a run reproducible — `--record` wrote it or
+ * `--replay` read it — named by path and sha256 in the report, beside the two
+ * model ids and the seed. A run with neither is said to be unreproducible:
+ * `--force` lets the owner regenerate under other seeds and models until a
+ * set passes, and the report is where that would show.
+ */
+export interface RecordingRef {
+  path: string;
+  sha256: string;
+}
+
+export function renderGenerateReport(r: GenerateResult, opts: { at?: Date; replay?: boolean; fixturesPath: string; pilePath: string; recording?: RecordingRef | null }): string {
   const s = r.stats;
   const out: string[] = [];
   out.push("# Generated complexity fixtures — the stats report");
   out.push("");
   out.push(`${(opts.at ?? new Date()).toISOString()} · writer \`${s.writer}\` · blind relabeller \`${s.relabeller}\` · seed ${s.seed}${opts.replay ? " · **replayed from a recording**" : ""}`);
+  out.push(
+    opts.recording
+      ? `Recording: \`${opts.recording.path}\` sha256 \`${opts.recording.sha256}\` — this run is reproducible from it with \`--replay\`; a set regenerated under another seed or model is a different run and carries a different hash.`
+      : "No recording: this run cannot be reproduced. Pass `--record <file>` so the set you keep can be traced to the responses that produced it.",
+  );
   out.push("");
   out.push(`Neither model saw the class descriptions or the planner's wording: every prompt was checked against the frozen rubric phrases before it was sent (docs/ops/dynamic-router.md §7.2, C11). Every kept row carries \`source: "generated"\`; \`metistry-eval complexity\` holds it to the bar apart from anything you wrote.`);
   out.push("");

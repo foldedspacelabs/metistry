@@ -15,6 +15,7 @@
 // stage-0 script is ten lines rather than a fork of this file: the engine is
 // the assistant's, the scoring is here, and neither imports the other.
 
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -38,7 +39,7 @@ import {
   type ComplexityFixture,
   type EvalRules,
 } from "./complexity.js";
-import { GENERATE_DEFAULTS, GeneratorModelError, RubricLeakError, generateComplexityFixtures, generatorFromEnv, renderGenerateReport, serialiseFixtures } from "./generate.js";
+import { GENERATE_DEFAULTS, GeneratorModelError, RubricLeakError, generateComplexityFixtures, generatorFromEnv, renderGenerateReport, serialiseFixtures, type RecordingRef } from "./generate.js";
 import { axisCounts, loadFixturesFromText, type Axis, type Fixture, AXES } from "./fixtures.js";
 import { buildIntentReport, liveScorer, loadIntentFixtures, renderIntentReport, runIntentEval, type IntentFixture } from "./intents.js";
 import { judgeFromEnv, JudgeFamilyError, JudgeNotConfiguredError } from "./judge.js";
@@ -649,11 +650,16 @@ async function cmdGenerateComplexity(args: ParsedArgs): Promise<number> {
     serialiseFixtures(result.pile, `ADJUDICATE — ${result.pile.length} row(s) for you to label from the class names alone: replace "?" and append each to ${GENERATED_FIXTURES}. A row left "?" is refused by the eval.`),
   );
 
+  // The recording's hash goes on the report: with --force the owner can
+  // regenerate under other seeds and models until a set passes, and the hash
+  // is what makes the set they keep traceable to one run.
+  const recordingPath = replayPath ?? recordPath;
+  const recording: RecordingRef | null = recordingPath ? { path: recordingPath, sha256: createHash("sha256").update(readFileSync(resolve(recordingPath))).digest("hex") } : null;
   const at = new Date();
   const body =
     args.flags.json === true
-      ? `${JSON.stringify({ at: at.toISOString(), replay: replay !== undefined, fixtures: fixturesPath, adjudicate: pilePath, stats: result.stats }, null, 2)}\n`
-      : `\n${renderGenerateReport(result, { at, replay: replay !== undefined, fixturesPath, pilePath })}\n`;
+      ? `${JSON.stringify({ at: at.toISOString(), replay: replay !== undefined, fixtures: fixturesPath, adjudicate: pilePath, recording, stats: result.stats }, null, 2)}\n`
+      : `\n${renderGenerateReport(result, { at, replay: replay !== undefined, fixturesPath, pilePath, recording })}\n`;
   const out = str(args.flags, "out");
   if (out) {
     mkdirSync(dirname(resolve(out)), { recursive: true });

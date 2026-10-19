@@ -339,9 +339,12 @@ const USAGE = `metistry — Metistry command line
                      (0600, every other server preserved) as a "remote" server,
                      with the bearer named "Bearer {env:…_OPENCODE}" and the
                      value in the login Keychain — never in the file.
-        claude-code  mints the token docs/ops/claude-code-plugin.md has you
-                     mint by hand and prints the plugin's env lines; it does
-                     NOT install the plugin.
+        claude-code  both halves: registers the console's /mcp with Claude Code
+                     (claude mcp add --scope user, header "Bearer
+                     \${METISTRY_AGENT_TOKEN_CLAUDE_CODE}", never the value)
+                     and prints the env lines the plugin reads. Without
+                     claude on the PATH it prints the add line instead. It
+                     does NOT install the plugin.
         devin        has no config file to write — prints the name, URL and
                      Authorization value to paste at Customize -> MCPs.
       Grants start default-deny ({tier: "none", areas: []}); --areas widens the

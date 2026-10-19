@@ -20,8 +20,9 @@
 //     servers are registered in a web form, so its bearer is printed for
 //     pasting, once, on the run that minted it.
 //   * Install anything. `connect claude-code` mints the token the plugin
-//     docs have you mint by hand; the plugin itself is still
-//     `/plugin install` (docs/ops/claude-code-plugin.md).
+//     docs have you mint by hand, and registers the console's `/mcp` with
+//     Claude Code itself (`claude mcp add --scope user`, X-133); the plugin
+//     is still `/plugin install` (docs/ops/claude-code-plugin.md).
 //
 // And the way back (HS-7, ruled 2026-10-04): `connect --remove <tool>` undoes
 // what `connect` wrote — the row is revoked, the Keychain item deleted, and
@@ -49,6 +50,12 @@ export type ConfigShape =
   | "file"
   /** environment variables a session inherits (the Claude Code plugin) */
   | "env"
+  /**
+   * the tool's own `mcp` command writes its config (Claude Code: `claude mcp
+   * add --scope user`) AND its plugin reads the environment. The file is the
+   * tool's, written constantly by the tool, so this verb never rewrites it.
+   */
+  | "cli"
   /** a web form only the owner can fill in (Devin's Customize → MCPs) */
   | "paste";
 
@@ -62,7 +69,7 @@ export interface ToolSpec {
 }
 
 export const TOOL_SPECS: Record<ConnectTool, ToolSpec> = {
-  "claude-code": { id: "claude-code", displayName: "Claude Code", config: "env", doc: "docs/ops/claude-code-plugin.md" },
+  "claude-code": { id: "claude-code", displayName: "Claude Code", config: "cli", doc: "docs/ops/claude-code-plugin.md" },
   cursor: { id: "cursor", displayName: "Cursor", config: "file", doc: "docs/ops/cursor.md" },
   devin: { id: "devin", displayName: "Devin", config: "paste", doc: "docs/ops/devin.md" },
   opencode: { id: "opencode", displayName: "OpenCode", config: "file", doc: "docs/ops/opencode.md" },
@@ -158,7 +165,11 @@ export interface ConnectResult {
   keychain_service?: string;
   config_file?: string;
   config_key?: string;
-  config_state?: "written" | "unchanged";
+  config_state?: "written" | "unchanged" | "manual";
+  /** `config_state: "manual"`: the command to run by hand (the tool's `mcp` command was not on this machine, or refused) */
+  config_manual?: string;
+  /** why `config_state` is `manual`, when it is not simply that the tool's command was not found */
+  config_note?: string;
   /** the fields pasted into a web form, present only for a `paste` tool — `bearer` only on the run that minted it */
   paste?: { name: string; transport: string; url: string; header: string; bearer?: string };
 }
@@ -359,15 +370,18 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
     }
   }
 
-  if (spec.config === "file") {
-    // Two tools, two files, one rule: merge one entry, leave everything else
-    // exactly as it was, and never write the bearer.
-    const home = opts.home ?? env.HOME ?? "";
-    const key = serverKey(suffix);
-    const file = spec.id === "opencode" ? opencodeConfigFile(home, env) : cursorConfigFile(home);
-    result.config_file = file;
-    result.config_key = key;
-    result.config_state = spec.id === "opencode" ? await writeOpencodeConfig(file, key, mcpUrl, varName) : await writeCursorConfig(file, key, mcpUrl, varName);
+  // The tool's end of the connection, through its registry entry. Whatever it
+  // writes, the bearer is not in it: the entry names `varName`, and the
+  // registry's conformance test fails the build if a value ever lands in a file.
+  const cfg = HARNESSES[spec.id].config;
+  if (cfg) {
+    const ctx = harnessCtx(opts, env, suffix, mcpUrl, varName);
+    result.config_file = cfg.file(ctx);
+    result.config_key = ctx.key;
+    const w = await cfg.write(ctx);
+    result.config_state = w.state;
+    if (w.manual !== undefined) result.config_manual = w.manual;
+    if (w.note !== undefined) result.config_note = w.note;
   }
   return result;
 }
@@ -564,6 +578,205 @@ export async function readOpencodeServer(file: string, key: string): Promise<{ u
   return entry && typeof entry.url === "string" ? { url: entry.url } : undefined;
 }
 
+// ---- Claude Code's config (X-133, HS-1) ----------------------------------------
+//
+// The plugin is the WRITE half of Claude Code (capture); the console's `/mcp`
+// is the READ half, and this registers it: a user-scope `http` server whose
+// Authorization header is `Bearer ${VAR}`. Claude Code expands `${VAR}` in a
+// user-scope MCP header when it starts — checked on 2.1.259 with a probe
+// server that logged the header it received (the live probe in
+// `connect.claude-code.live.test.ts` repeats it wherever `claude` is
+// installed) — so, as with Cursor and OpenCode, the bearer never reaches disk.
+//
+// What differs is who owns the file. `~/.claude.json` is written by every
+// running Claude Code session (project history, statistics, the account), so
+// this verb does not rewrite it: it asks the tool, with `claude mcp add
+// --scope user`, and READS the file only to know what is there. Hence no
+// backup beside it either — a copy of a volatile file is a stale copy, and
+// putting one back would undo the owner's day. If `claude` is not on this
+// machine's PATH (the Mac app drives this verb with a minimal one), the
+// answer is the same line printed for the owner to run: `config_state:
+// "manual"`.
+
+/** Where Claude Code keeps user-scope MCP servers: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`. */
+export function claudeConfigFile(home: string, env: NodeJS.ProcessEnv = process.env): string {
+  const dir = (env.CLAUDE_CONFIG_DIR ?? "").trim();
+  return dir ? join(dir, ".claude.json") : join(home, ".claude.json");
+}
+
+/** The one entry this verb owns, as Claude Code stores it. The header names a variable; the value is never here. */
+export function claudeServerEntry(mcpUrl: string, varName: string): { type: "http"; url: string; headers: Record<string, string> } {
+  return { type: "http", url: mcpUrl, headers: { Authorization: `Bearer \${${varName}}` } };
+}
+
+/** The `claude mcp add` line, quoted so a shell does not expand the variable — what the owner runs when this verb could not. */
+export function claudeAddLine(key: string, mcpUrl: string, varName: string): string {
+  return `claude mcp add --scope user --transport http ${key} ${mcpUrl} --header 'Authorization: Bearer \${${varName}}'`;
+}
+
+async function readClaudeEntry(file: string, key: string): Promise<Record<string, unknown> | undefined> {
+  if (!existsSync(file)) return undefined;
+  let doc: unknown;
+  try {
+    doc = JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return undefined; // Claude Code's file is Claude Code's: if it is unreadable here, the tool's own command will say so
+  }
+  const entry = (doc as { mcpServers?: Record<string, unknown> } | null)?.mcpServers?.[key];
+  return entry !== null && typeof entry === "object" && !Array.isArray(entry) ? (entry as Record<string, unknown>) : undefined;
+}
+
+/** The entry this verb wrote, if it is there — how `--list` knows Claude Code is configured. Only the URL leaves this function. */
+export async function readClaudeServer(file: string, key: string): Promise<{ url: string } | undefined> {
+  const entry = await readClaudeEntry(file, key);
+  return entry && typeof entry.url === "string" ? { url: entry.url } : undefined;
+}
+
+/** Run `claude <args>`: on PATH first, then where its installer puts it. `undefined` = not on this machine. */
+async function runClaude(ctx: HarnessCtx, args: string[]): Promise<{ code: number; stdout: string; stderr: string } | undefined> {
+  const env = { ...ctx.env, HOME: ctx.home };
+  for (const cmd of ["claude", join(ctx.home, ".local", "bin", "claude")]) {
+    const r = await ctx.exec(cmd, args, { env, timeoutMs: 30_000 });
+    if (r.code !== 127) return r; // 127 is ENOENT (exec.ts); anything else means it ran
+  }
+  return undefined;
+}
+
+const claudeFirstLine = (r: { stderr: string; stdout: string }): string => (r.stderr.trim() || r.stdout.trim()).split("\n")[0] ?? "";
+
+async function writeClaudeConfig(ctx: HarnessCtx): Promise<ConfigWrite> {
+  const file = claudeConfigFile(ctx.home, ctx.env);
+  const want = claudeServerEntry(ctx.mcpUrl, ctx.varName);
+  const have = await readClaudeEntry(file, ctx.key);
+  if (have && isDeepStrictEqual(have, want)) return { state: "unchanged" };
+
+  const add = claudeAddLine(ctx.key, ctx.mcpUrl, ctx.varName);
+  const manual = have ? `claude mcp remove --scope user ${ctx.key}\n${add}` : add;
+  // An entry under this key that is not the one this verb writes (an older hand-made
+  // one, with a literal bearer) is replaced — as Cursor's and OpenCode's are — and
+  // never read back or printed.
+  if (have) {
+    const rm1 = await runClaude(ctx, ["mcp", "remove", "--scope", "user", ctx.key]);
+    if (rm1 === undefined) return { state: "manual", manual };
+    if (rm1.code !== 0) return { state: "manual", manual, note: `claude mcp remove refused: ${claudeFirstLine(rm1)}` };
+  }
+  const r = await runClaude(ctx, ["mcp", "add", "--scope", "user", "--transport", "http", ctx.key, ctx.mcpUrl, "--header", `Authorization: Bearer \${${ctx.varName}}`]);
+  if (r === undefined) return { state: "manual", manual };
+  if (r.code !== 0) return { state: "manual", manual, note: `claude mcp add refused: ${claudeFirstLine(r)}` };
+  return { state: "written" };
+}
+
+async function removeClaudeConfig(ctx: HarnessCtx): Promise<ConfigRemoval> {
+  const file = claudeConfigFile(ctx.home, ctx.env);
+  if (!existsSync(file)) return "no-file";
+  const have = await readClaudeEntry(file, ctx.key);
+  if (!have) return "no-entry";
+  // Only the entry this verb wrote. One under the same key that names something
+  // else (a hand-made server with its own header) is the owner's.
+  if (!isDeepStrictEqual(have.headers, claudeServerEntry(ctx.mcpUrl, ctx.varName).headers)) {
+    throw new Error(
+      `${file} has a "${ctx.key}" server that is not the one connect wrote (its Authorization header does not name \${${ctx.varName}}), so it was left alone — \`claude mcp remove --scope user ${ctx.key}\` removes it if it is yours to remove`,
+    );
+  }
+  const line = `claude mcp remove --scope user ${ctx.key}`;
+  const r = await runClaude(ctx, ["mcp", "remove", "--scope", "user", ctx.key]);
+  if (r === undefined) throw new Error(`\`claude\` is not on this machine's PATH, so ${file} was not changed — run \`${line}\``);
+  if (r.code !== 0) throw new Error(`\`${line}\` refused (${claudeFirstLine(r)}) — ${file} was not changed`);
+  return "removed-by-tool";
+}
+
+// ---- the harness registry (Hindsight Q2, X-133) --------------------------------
+//
+// One entry per tool, and an entry is everything that is particular to it: how
+// its end of the connection is written, read back for `--list`, and taken away
+// again. `connect`, `connectList` and `connectRemove` are written against this
+// shape and have no `if (tool === …)` for a config file — so a new harness is
+// one entry here and one block in the render, and the registry's conformance
+// test (`connect.test.ts`, "the harness registry") then holds it to the three
+// rules every entry shares: its config names the bearer's variable and never
+// its value; a second write changes nothing; remove takes away only its own
+// entry. X-129's per-harness briefing delivery lands as a field on the entry.
+
+/** Everything an entry's hooks need that is not the tool's own business. */
+export interface HarnessCtx {
+  home: string;
+  env: NodeJS.ProcessEnv;
+  exec: Exec;
+  /** the server key in the tool's config (`metistry`, or `metistry-<suffix>` for a namespaced instance) */
+  key: string;
+  mcpUrl: string;
+  /** the variable the entry names for the bearer */
+  varName: string;
+}
+
+export interface ConfigWrite {
+  /** `manual`: the tool's own command was not available or refused; `manual` carries the line to run */
+  state: "written" | "unchanged" | "manual";
+  manual?: string;
+  note?: string;
+}
+
+export interface HarnessConfig {
+  /** the file the entry lives in */
+  file(ctx: Pick<HarnessCtx, "home" | "env">): string;
+  /** the object in that file that holds the entries, for `--list` */
+  container: "mcpServers" | "mcp";
+  /** the entry, minus the bearer — the conformance test asserts on this, not on a string */
+  entry(mcpUrl: string, varName: string): Record<string, unknown>;
+  write(ctx: HarnessCtx): Promise<ConfigWrite>;
+  /** the entry this verb wrote, if it is there (the URL only — never a header) */
+  read(ctx: Pick<HarnessCtx, "home" | "env" | "key">): Promise<{ url: string } | undefined>;
+  remove(ctx: HarnessCtx): Promise<ConfigRemoval>;
+}
+
+export interface Harness {
+  spec: ToolSpec;
+  /** absent for a tool with no config this verb can reach (Devin's is a web form) */
+  config?: HarnessConfig;
+}
+
+export const HARNESSES: Record<ConnectTool, Harness> = {
+  "claude-code": {
+    spec: TOOL_SPECS["claude-code"],
+    config: {
+      file: ({ home, env }) => claudeConfigFile(home, env),
+      container: "mcpServers",
+      entry: claudeServerEntry,
+      write: writeClaudeConfig,
+      read: ({ home, env, key }) => readClaudeServer(claudeConfigFile(home, env), key),
+      remove: removeClaudeConfig,
+    },
+  },
+  cursor: {
+    spec: TOOL_SPECS.cursor,
+    config: {
+      file: ({ home }) => cursorConfigFile(home),
+      container: "mcpServers",
+      entry: cursorServerEntry,
+      write: async (c) => ({ state: await writeCursorConfig(cursorConfigFile(c.home), c.key, c.mcpUrl, c.varName) }),
+      read: ({ home, key }) => readCursorServer(cursorConfigFile(home), key),
+      remove: (c) => removeConfigEntry(cursorConfigFile(c.home), c.key, "mcpServers"),
+    },
+  },
+  devin: { spec: TOOL_SPECS.devin },
+  opencode: {
+    spec: TOOL_SPECS.opencode,
+    config: {
+      file: ({ home, env }) => opencodeConfigFile(home, env),
+      container: "mcp",
+      entry: opencodeServerEntry,
+      write: async (c) => ({ state: await writeOpencodeConfig(opencodeConfigFile(c.home, c.env), c.key, c.mcpUrl, c.varName) }),
+      read: ({ home, env, key }) => readOpencodeServer(opencodeConfigFile(home, env), key),
+      remove: (c) => removeConfigEntry(opencodeConfigFile(c.home, c.env), c.key, "mcp", OPENCODE_SCHEMA),
+    },
+  },
+};
+
+/** The context a registry entry's hooks run in, from the options every verb takes. */
+function harnessCtx(opts: Pick<ConnectOptions, "home" | "exec">, env: NodeJS.ProcessEnv, suffix: string | undefined, mcpUrl: string, varName: string): HarnessCtx {
+  return { home: opts.home ?? env.HOME ?? "", env, exec: opts.exec ?? realExec, key: serverKey(suffix), mcpUrl, varName };
+}
+
 // ---- `connect --remove <tool>` -----------------------------------------------
 
 /** What happened to a tool's config file. */
@@ -576,7 +789,9 @@ export type ConfigRemoval =
   | "file-removed"
   | "no-entry"
   | "no-file"
-  /** a tool with no file (`claude-code`, `devin`) */
+  /** the tool's own command removed it from the tool's own file (`claude mcp remove`); nothing of the file was rewritten here */
+  | "removed-by-tool"
+  /** a tool with no file (`devin`) */
   | "n/a";
 
 /**
@@ -736,23 +951,21 @@ export async function connectRemove(opts: RemoveOptions): Promise<RemoveResult> 
 
   if (spec.config === "paste") return result; // Devin: nothing on this machine to take back
 
-  // 2. the tool's config file
-  const key = serverKey(suffix);
-  if (spec.config === "file") {
-    const home = opts.home ?? env.HOME ?? "";
-    const opencode = spec.id === "opencode";
-    const file = opencode ? opencodeConfigFile(home, env) : cursorConfigFile(home);
-    result.config_file = file;
-    result.config_key = key;
+  // 2. the tool's config
+  const varName = agentTokenVar(spec.id, suffix);
+  const cfg = HARNESSES[spec.id].config;
+  if (cfg) {
+    const ctx = harnessCtx(opts, env, suffix, `${target.url}/mcp`, varName);
+    result.config_file = cfg.file(ctx);
+    result.config_key = ctx.key;
     try {
-      result.config = await removeConfigEntry(file, key, opencode ? "mcp" : "mcpServers", opencode ? OPENCODE_SCHEMA : undefined);
+      result.config = await cfg.remove(ctx);
     } catch (err) {
       result.problems.push(err instanceof Error ? err.message : String(err));
     }
   }
 
   // 3. the bearer. A host with no Keychain never held one.
-  const varName = agentTokenVar(spec.id, suffix);
   const account = accountFor(varName, { user: keychainAccount(env), ...(opts.instanceId ? { instance: opts.instanceId } : {}) });
   result.token_var = varName;
   result.keychain_account = account;
@@ -777,6 +990,7 @@ const CONFIG_WORDS: Record<ConfigRemoval, string> = {
   "file-removed": "removed — `connect` had created it and nothing else was in it",
   "no-entry": "had no entry to remove",
   "no-file": "does not exist",
+  "removed-by-tool": "entry removed with `claude mcp remove` — Claude Code's own file, every other line untouched",
   "n/a": "",
 };
 
@@ -801,7 +1015,7 @@ export function renderRemove(r: RemoveResult): string {
   }
   if (r.tool === "claude-code") {
     lines.push("");
-    lines.push("Nothing on disk to restore: the plugin reads its environment. Delete the METISTRY_URL / METISTRY_OWNER_TOKEN / METISTRY_CAPTURE_ON_STOP lines from the profile (or `env` in ~/.claude/settings.json) where you put them, and `/plugin uninstall metistry@metistry` if you are done with the plugin.");
+    lines.push("Delete the METISTRY_URL / METISTRY_AGENT_TOKEN_CLAUDE_CODE / METISTRY_OWNER_TOKEN / METISTRY_CAPTURE_ON_STOP lines from the profile (or `env` in ~/.claude/settings.json) where you put them, and `/plugin uninstall metistry@metistry` if you are done with the plugin.");
   } else if (r.tool === "devin") {
     lines.push("");
     lines.push("Devin's server was registered by hand, so it is removed by hand: delete it at Customize → MCPs. Its token is already dead either way.");
@@ -870,15 +1084,25 @@ export function renderConnect(r: ConnectResult): string {
     lines.push("");
     lines.push(`then start OpenCode from that shell. \`opencode mcp list\` is the check that it worked. ${spec.doc} has the whole story, including how to widen the read grant and how to capture finished sessions (\`node plugins/opencode/install.mjs\`).`);
   } else if (r.tool === "claude-code") {
-    if (r.token === "keychain") lines.push(`token     stored in the login Keychain as ${r.keychain_service} under account ${r.keychain_account} — not printed`);
+    // both halves: the read half (the console's /mcp, registered with Claude Code) and the write half (the plugin's capture, which reads the environment)
+    if (r.config_state === "manual") {
+      lines.push(`config    ${r.config_file} NOT changed — ${r.config_note ?? "`claude` is not on this machine's PATH"}. Run this yourself, once (a shell must not expand the variable, hence the single quotes):`);
+      lines.push("");
+      for (const l of (r.config_manual ?? "").split("\n")) lines.push(`  ${l}`);
+      lines.push("");
+    } else {
+      lines.push(`config    ${r.config_file} → mcpServers.${r.config_key} (${r.config_state}, by \`claude mcp add --scope user\`; every other server left alone)`);
+    }
+    if (r.token === "keychain") lines.push(`token     stored in the login Keychain as ${r.keychain_service} under account ${r.keychain_account} — not printed, not written to ${r.config_file}`);
     lines.push("");
-    lines.push("The plugin reads its environment and nothing else. Put these in the profile Claude Code inherits (or `env` in ~/.claude/settings.json):");
+    lines.push(`Claude Code expands \${${r.token_var}} in that header when it starts, so the bearer never reaches disk. The plugin reads its environment too. Put these in the profile Claude Code inherits (or \`env\` in ~/.claude/settings.json):`);
     lines.push("");
     lines.push(`  export METISTRY_URL=${r.console_url}`);
-    lines.push(`  export METISTRY_OWNER_TOKEN="$(security find-generic-password -a ${r.keychain_account} -s ${r.keychain_service} -w)"`);
+    lines.push(`  export ${r.token_var}="$(security find-generic-password -a ${r.keychain_account} -s ${r.keychain_service} -w)"`);
+    lines.push(`  export METISTRY_OWNER_TOKEN="$${r.token_var}"   # the plugin's capture, same bearer`);
     lines.push("  export METISTRY_CAPTURE_ON_STOP=1   # optional: the SessionEnd summary hook, default off");
     lines.push("");
-    lines.push("This verb mints the token; it does not install the plugin — `/plugin marketplace add foldedspacelabs/metistry` then `/plugin install metistry@metistry` (docs/ops/claude-code-plugin.md).");
+    lines.push("then start Claude Code from that shell; `claude mcp list` is the check that /mcp answers. This verb does not install the plugin — `/plugin marketplace add foldedspacelabs/metistry` then `/plugin install metistry@metistry` (docs/ops/claude-code-plugin.md).");
   } else {
     lines.push("Devin has no config file to write — register the server once, by hand, at Customize → MCPs (personal scope needs no admin):");
     lines.push("");
@@ -944,17 +1168,15 @@ export async function connectList(opts: ConnectListOptions): Promise<{ console_u
     if (spec.config !== "paste") {
       token = platform !== "darwin" ? "unknown" : (await new Keychain(exec, account).hasSecret(varName)) ? "keychain" : "absent";
     }
+    const cfg = HARNESSES[tool].config;
     let config: string;
-    if (spec.config === "file" && tool === "opencode") {
-      const file = opencodeConfigFile(home, env);
-      const entry = await readOpencodeServer(file, key);
-      config = entry ? `${file} → mcp.${key}` : `${file}: no ${key} entry`;
-    } else if (spec.config === "file") {
-      const file = cursorConfigFile(home);
-      const entry = await readCursorServer(file, key);
-      config = entry ? `${file} → mcpServers.${key}` : `${file}: no ${key} entry`;
-    } else if (spec.config === "env") {
-      config = `environment (METISTRY_URL + METISTRY_OWNER_TOKEN)`;
+    if (cfg) {
+      const ctx = { home, env, key };
+      const file = cfg.file(ctx);
+      const entry = await cfg.read(ctx);
+      config = entry ? `${file} → ${cfg.container}.${key}` : `${file}: no ${key} entry`;
+      // Claude Code has the plugin's capture half as well; both are shown (X-133)
+      if (spec.config === "cli") config = `mcp: ${config}; capture: environment (METISTRY_URL + METISTRY_OWNER_TOKEN)`;
     } else {
       config = "pasted into the tool's own UI (no file)";
     }

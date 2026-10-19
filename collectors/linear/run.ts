@@ -33,7 +33,7 @@
 // refuses) fails the run with the reason — redacted, because everything the
 // door returns already is.
 
-import { RESOLVED_AT_SOURCE, lastMirror, raiseMirror, resolveAtSource } from "@foldedspacelabs/metistry-core";
+import { RESOLVED_AT_SOURCE, lastMirror, raiseMirror, resolveAtSource, type CheckResult } from "@foldedspacelabs/metistry-core";
 import {
   LINEAR_CLOSED_STATE_TYPES,
   LINEAR_MODULE,
@@ -46,7 +46,6 @@ import {
   type SyncOpener,
 } from "@foldedspacelabs/metistry-connections";
 import { syncConnectionCheck, type CheckExtras } from "../check-context.js";
-import type { CheckResult } from "@foldedspacelabs/metistry-core";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;

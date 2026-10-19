@@ -51,12 +51,11 @@
 // A connection that is there but cannot be read fails the run with the
 // reason — names and hosts, never a value.
 
-import { lastMirror, raiseMirror, resolveAtSource, type RequestSource } from "@foldedspacelabs/metistry-core";
+import { lastMirror, raiseMirror, resolveAtSource, type CheckResult, type RequestSource } from "@foldedspacelabs/metistry-core";
 import { IMAP_MAX_MESSAGES, IMAP_MODULE, IMAP_PROVENANCE, MAIL_SYNC, type ImapMessage, type ImapRead, type ImapSyncOpener } from "@foldedspacelabs/metistry-connections";
 import type { Db } from "../github-state/run.js";
 import { saveSyncState } from "../eventkit-calendar/run.js";
 import { syncConnectionCheck, type CheckExtras } from "../check-context.js";
-import type { CheckResult } from "@foldedspacelabs/metistry-core";
 
 /** This collector's name — the `source_agent` of every request it raises (and the imap types' `sync:`). */
 export const COMPONENT = MAIL_SYNC;

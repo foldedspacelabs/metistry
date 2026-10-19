@@ -41,7 +41,10 @@ import {
   raiseMirror,
   recordedSessionOf,
   resolveIntentTier,
+  resolveOnMachineCall,
+  runCheck,
   startRun,
+  type CheckResult,
   type IntentRules,
   type JotAnchor,
   type MeetingEvent,
@@ -49,7 +52,6 @@ import {
   type TemplateQueries,
 } from "@foldedspacelabs/metistry-core";
 import { completeJson, type ComputeAccess } from "../compute-client.js";
-import { resolveOnMachineCall, runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { intentMeta, intentPlacement, scoreIntent, type IntentOutcome } from "./intent-tier.js";
 
 export interface Db {
@@ -510,7 +512,6 @@ function jotClassification(c: Classification, anchor: JotAnchor): Record<string,
   };
 }
 
-/** One drain pass. Returns how many rows were classified. */
 /**
  * Behavioral probe (X-87): the drain needs no credential — the deterministic
  * rules always run — so the only thing to report is its optional on-device
@@ -531,6 +532,7 @@ export async function check(ctx: CollectorCtx = {}): Promise<CheckResult> {
   });
 }
 
+/** One drain pass. Returns how many rows were classified. */
 export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
   const { rows } = await db.query(
     `SELECT id, path, mime, note, source, source_agent FROM inbox WHERE status = 'new' ORDER BY ts LIMIT 50`,

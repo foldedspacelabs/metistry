@@ -95,6 +95,7 @@ describe.each(syncs)("$name check() — a sync that reads one connection", ({ na
     shape(r, name);
     expect(r.status).toBe("ok");
     expect(r.meta).toMatchObject({ connection: "home", dialled: false });
+    expect(r.probe).toMatch(/reachability not checked/);
   });
 
   it("asks the SHARED connection check for the connection it opened, and is ok when that is", async () => {
@@ -103,6 +104,7 @@ describe.each(syncs)("$name check() — a sync that reads one connection", ({ na
     expect(asked).toEqual(["home"]);
     expect(r.status).toBe("ok");
     expect(r.meta).toMatchObject({ connection: "home", dialled: true, connection_status: "ok" });
+    expect(r.probe).not.toMatch(/reachability not checked/);
   });
 
   it("a calendar/tracker the shared check does not dial (refused not_built) is ok on what the check could see — and says it was not dialled", async () => {
@@ -110,6 +112,7 @@ describe.each(syncs)("$name check() — a sync that reads one connection", ({ na
     expect(r.status).toBe("ok");
     expect(r.meta).toMatchObject({ connection: "home", dialled: false });
     expect(String(r.meta?.not_dialled)).toMatch(/not dialled as MCP/);
+    expect(r.probe).toMatch(/reachability not checked/); // an ok that dialled nothing must not read as if it answered
   });
 
   it("an absent connection for any other reason stays absent (the secret is not delivered, the sign-in not made)", async () => {

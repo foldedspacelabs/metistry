@@ -93,6 +93,16 @@ export async function connectionReachability(connection: string, extras: CheckEx
   };
 }
 
+/**
+ * An `ok` that dialled nothing must not read as if it answered: when the
+ * verdict says `meta.dialled === false`, the probe — the line a person reads
+ * under the row — says reachability was not checked (X-87 review).
+ */
+export function noteUndialled(r: CheckResult): CheckResult {
+  if (r.meta?.["dialled"] !== false) return r;
+  return { ...r, probe: `${r.probe}; reachability not checked (the connection was opened, not dialled)` };
+}
+
 export interface SyncCheckOptions {
   /** the collector's name — the row's name */
   name: string;
@@ -113,8 +123,8 @@ export interface SyncCheckOptions {
  * a connection file the sync cannot use (the same words the run would throw);
  * then the shared connection check's verdict, a failure of which is `degraded`.
  */
-export function syncConnectionCheck(o: SyncCheckOptions): Promise<CheckResult> {
-  return runCheck(o.name, o.probe, async () => {
+export async function syncConnectionCheck(o: SyncCheckOptions): Promise<CheckResult> {
+  return noteUndialled(await runCheck(o.name, o.probe, async () => {
     if (!o.open) return { status: "absent" as const, remediation: o.noInstance };
     const opened = await o.open();
     if (!opened.ok) {
@@ -123,5 +133,5 @@ export function syncConnectionCheck(o: SyncCheckOptions): Promise<CheckResult> {
         : { status: "failed" as const, remediation: opened.why };
     }
     return connectionReachability(opened.sync.connection, o.extras);
-  });
+  }));
 }

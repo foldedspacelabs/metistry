@@ -242,6 +242,36 @@ describe("enroll()", () => {
     expect(JSON.parse(String(db.sent[2]!.values?.[6]))).toEqual({ code_id: 42, expires_at: "2026-10-18T10:10:00.000Z" });
   });
 
+  it("mints for the RECORDED provider's origin, not .env's first entry (plan §2.23): the record is what the console runs with", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-enroll-inst-"));
+    await mkdir(join(dir, ".metistry"), { recursive: true });
+    await writeFile(join(dir, ".metistry", "identity.yaml"), `name: T\ninstance_id: ${INSTANCE_ID}\n`);
+    await writeFile(join(dir, ".metistry", "deployment.yaml"), `shape: launchd\nremote:\n  provider: zrok\n  origin: ${ORIGIN}\n  settings:\n    upstream: "http://127.0.0.1:8081"\n`);
+    const db = recordingDb();
+    const net = fakeOrigin();
+    // .env still holds the loopback origin init wrote — the record puts the provider's first
+    const r = await enroll({ env: { METISTRY_ORIGIN: "http://127.0.0.1:8080" }, instanceDir: dir, db, fetchFn: net.fetchFn });
+    expect(r.kind).toBe("minted");
+    if (r.kind !== "minted") return;
+    expect(r.minted.origin).toBe(ORIGIN);
+    expect(r.minted.url.startsWith(`${ORIGIN}/#enroll=`)).toBe(true);
+    expect(net.asked).toEqual([`${ORIGIN}/health`, `${ORIGIN}/api/identity`]);
+
+    // and the other way round: a remote origin hand-written into .env beside
+    // remote: none is NOT minted for — the console does not answer for it
+    await writeFile(join(dir, ".metistry", "deployment.yaml"), "shape: launchd\nservices: {}\n");
+    const none = await enroll({ env: { METISTRY_ORIGIN: `${ORIGIN},http://127.0.0.1:8080` }, instanceDir: dir, db: recordingDb(), fetchFn: fakeOrigin().fetchFn });
+    expect(none.kind).toBe("refused");
+    if (none.kind !== "refused") return;
+    expect(none.refusal.case).toBe("loopback");
+    expect(none.refusal.origin).toBe("http://127.0.0.1:8080");
+    // a provider's refusal names that provider
+    await writeFile(join(dir, ".metistry", "deployment.yaml"), `shape: launchd\nremote:\n  provider: zrok\n  origin: ${ORIGIN}\n`);
+    const down = await enroll({ env: {}, instanceDir: dir, db: recordingDb(), fetchFn: fakeOrigin({ health: "throw" }).fetchFn });
+    expect(down.kind).toBe("refused");
+    if (down.kind === "refused") expect(down.refusal.message).toContain("what zrok reports");
+  });
+
   it("--json is exactly that one document", async () => {
     const db = recordingDb();
     const r = await enroll({ env: { METISTRY_ORIGIN: ORIGIN }, db, fetchFn: fakeOrigin().fetchFn });

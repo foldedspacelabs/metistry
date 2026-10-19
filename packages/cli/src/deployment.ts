@@ -27,7 +27,9 @@ import {
   type Deployment,
   type DeploymentShape,
   type KeepAwakeConfig,
+  type RemoteRecord,
 } from "@foldedspacelabs/metistry-core";
+import { renderOrigins } from "./origins.js";
 
 async function readYaml(path: string): Promise<unknown | undefined> {
   let text: string;
@@ -160,6 +162,13 @@ export interface ShapeContext {
   shape: DeploymentShape;
   /** the assistant's own state directory; also its HOME (the SDK's transcripts) */
   stateDir: string;
+  /**
+   * The remote-access record (deployment.yaml `remote:`, plan §2.23). It is
+   * what `METISTRY_ORIGIN` is DERIVED from — `renderOrigins` — rather than a
+   * line in `.env` anyone can edit: the provider's origin first, the loopback
+   * origin second; absent or `none`, the loopback origin alone.
+   */
+  remote?: RemoteRecord | undefined;
 }
 
 export const CONSOLE_DEFAULT_PORT = 8080;
@@ -257,9 +266,14 @@ export function consoleEnv(ctx: ShapeContext): Record<string, string> {
   // the inbox is vault content (docs/ops/inbox.md): `<instance>/Inbox`, the
   // vault root being the instance directory itself
   const inbox = instanceFile(ctx.instanceDir ?? ctx.productDir, "inboxDir");
+  // the origins the console is configured for come from the RECORD, not from
+  // whatever `.env` says (origins.ts): with no provider chosen the list is
+  // the loopback origin alone, however `.env` was hand-edited
+  const origins = consoleOrigins(ctx);
   return {
     ...metistryVars(ctx),
     ...instanceVars(ctx),
+    ...(origins.value !== undefined ? { METISTRY_ORIGIN: origins.value } : {}),
     METISTRY_DB_HOST: "127.0.0.1",
     METISTRY_DB_PORT: String(dbPort(ctx.env)),
     METISTRY_CONSOLE_HOST: "127.0.0.1",
@@ -268,6 +282,11 @@ export function consoleEnv(ctx: ShapeContext): Record<string, string> {
     METISTRY_INBOX_DIR: ctx.env.METISTRY_INBOX_DIR && !ctx.env.METISTRY_INBOX_DIR.startsWith("/data") ? ctx.env.METISTRY_INBOX_DIR : inbox,
     TZ: ctx.env.METISTRY_TZ || "UTC",
   };
+}
+
+/** `METISTRY_ORIGIN` as the console will run with it — the record's answer (origins.ts), and which `.env` entries it leaves behind. */
+export function consoleOrigins(ctx: Pick<ShapeContext, "env" | "remote">) {
+  return renderOrigins(ctx.remote, ctx.env, consolePort(ctx.env));
 }
 
 /**

@@ -6,6 +6,8 @@ import {
   enabled,
   overlayDeployment,
   parseDeployment,
+  REMOTE_NONE,
+  remoteOf,
   resolveUrl,
   servicePlan,
   shapeOf,
@@ -52,6 +54,37 @@ describe("the D4 overlay", () => {
       shape: "launchd",
       services: { newthing: { enabled: false } },
     });
+  });
+});
+
+describe("the remote-access record (plan §2.23, X-105)", () => {
+  it("absent means none: nothing exposed, and remoteOf says so", () => {
+    const d = parseDeployment({ shape: "launchd" });
+    expect(d.remote).toBeUndefined();
+    expect(remoteOf(d)).toEqual(REMOTE_NONE);
+    expect(remoteOf(d).provider).toBe("none");
+  });
+
+  it("reads a provider's block: provider, mode, origin and non-secret settings", () => {
+    const d = parseDeployment({ shape: "launchd", remote: { provider: "tailscale", mode: "funnel", origin: "https://mac.tail1234.ts.net", settings: { upstream: "http://127.0.0.1:8081", node: "metistry-abc" } } });
+    expect(d.remote).toEqual({ provider: "tailscale", mode: "funnel", origin: "https://mac.tail1234.ts.net", settings: { upstream: "http://127.0.0.1:8081", node: "metistry-abc" } });
+    expect(parseDeployment({ remote: { provider: "none" } }).remote).toEqual({ provider: "none", settings: {} });
+  });
+
+  it("refuses a provider it has no name for, a none that claims an origin, and an origin that is not one", () => {
+    expect(() => parseDeployment({ remote: { provider: "carrier-pigeon" } })).toThrow(/remote\.provider/);
+    expect(() => parseDeployment({ remote: { provider: "none", origin: "https://x.example" } })).toThrow(/none exposes nothing/);
+    expect(() => parseDeployment({ remote: { provider: "zrok", origin: "x.share.zrok.io" } })).toThrow(/an origin is https/);
+    expect(() => parseDeployment({ remote: { provider: "zrok", origin: "https://x.share.zrok.io/path" } })).toThrow(/an origin is https/);
+    expect(() => parseDeployment({ remote: { provider: "zrok", token: "abc" } })).toThrow(/token/);
+  });
+
+  it("the instance's block wins whole over the seed's — a provider is one decision, never a merge of keys", () => {
+    const seed: Deployment = { shape: "compose", services: {}, remote: { provider: "ngrok", origin: "https://a.ngrok-free.dev", settings: { domain: "a" } } };
+    const instance: Deployment = { shape: "compose", services: {}, remote: { provider: "none", settings: {} } };
+    expect(overlayDeployment(seed, instance).remote).toEqual({ provider: "none", settings: {} });
+    expect(overlayDeployment(seed, { shape: "compose", services: {} }).remote).toEqual(seed.remote);
+    expect(overlayDeployment({ shape: "compose", services: {} }, { shape: "compose", services: {} }).remote).toBeUndefined();
   });
 });
 

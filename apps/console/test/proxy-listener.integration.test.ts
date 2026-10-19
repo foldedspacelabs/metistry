@@ -235,13 +235,15 @@ describe.skipIf(!hasDb)("the proxy listener: remote by construction", () => {
     }
 
     // the refusal is on the record, naming the listener and the peer the proxy dialled from
-    const rows = await authRows("owner_token_remote", since);
-    const proxyRows = rows.filter((m) => m.listener === "proxy");
+    const proxyRows = await authRows("owner_token_remote", since, true);
     expect(proxyRows.length).toBe(2);
     expect(proxyRows[0]).toMatchObject({ listener: "proxy", remote: "127.0.0.1", reason: expect.stringContaining("never crosses a tunnel") });
     expect(proxyRows[1]).toMatchObject({ listener: "proxy", remote: "", reason: expect.stringContaining("never crosses a tunnel") });
-    // an unknown token leaves no row: a mismatch is not a refusal of THE token
-    expect(rows.length).toBe(proxyRows.length + (external ? 1 : 0));
+    // an unknown token leaves no row: a mismatch is not a refusal of THE token. The one main-listener
+    // row is the remote-address probe above, identified by the peer it came from — a parallel file's
+    // main-listener rows (reach-gate, server.integration) are not this test's to count.
+    const mainRows = (await authRows("owner_token_remote", since)).filter((m) => m.listener !== "proxy" && m.remote === external);
+    expect(mainRows.length).toBe(external ? 1 : 0);
   });
 
   it("**a `local` route answers 403 there**: a passkey session is refused local_only and audited with the listener; the local owner token is the uniform 401; nothing is minted", async () => {

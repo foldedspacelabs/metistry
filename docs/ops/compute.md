@@ -884,6 +884,24 @@ metistry-eval complexity --instance <instance> --fit \
 - **Offline.** `--record <file>` writes every server response; `--replay
   <file>` answers from one with no network at all. `--threshold` and
   `--timeout-ms` evaluate at a value you name instead of `rules.yaml`'s.
+- **Generated fixtures, apart from yours.** If you would rather not write
+  150-plus items, `metistry-eval generate-complexity --instance <instance>`
+  writes `<instance>/.metistry/eval/complexity.generated.jsonl` with two
+  non-Claude models from two families (`docs/ops/dynamic-router.md` §7.2,
+  *Generating fixtures*): a writer that sees the class names and the
+  structural rules only — never the descriptions — and a second model that
+  relabels every item blind. Set `METISTRY_EVAL_GEN_BASE_URL` (OpenRouter's
+  is `https://openrouter.ai/api/v1`), `METISTRY_EVAL_GEN_API_KEY`,
+  `METISTRY_EVAL_GEN_MODEL` and `METISTRY_EVAL_GEN_RELABEL_MODEL` in the
+  environment; a Claude id or a one-family pair is refused. Disagreements
+  become `accept` or land in `adjudicate.jsonl` with every D08-class item —
+  those are yours to label (replace the `"?"`, append the line); the stats
+  report (`--out`) gives the counts, the agreement, the pile and r. Every
+  generated row carries `source: generated`, and `metistry-eval complexity
+  --instance` reads both files and holds your set and the generated one to
+  the bar **separately** — the report says which passed. `--record` /
+  `--replay` work as for the eval; an existing generated file is not
+  overwritten without `--force`.
 
 ## Budgets
 

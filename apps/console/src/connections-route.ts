@@ -13,8 +13,10 @@
 //
 // Nothing here dials. A GET that started a command or reached a server would
 // be a read with a side effect; whether a connection answers is `metistry
-// connections test` and `metistry doctor` on the Mac, and — once the lazy
-// pair lands (T4-8b) — the console's own calls, recorded in `runs`.
+// connections test` and `metistry doctor` on the Mac. What the last check
+// found (`last_checked`) is read from the stamp that check left in the
+// instance's state directory — a read, not a dial (`packages/connections`'
+// `stamps.ts`).
 //
 // It degrades absent like the Secrets list: with no instance directory the
 // console cannot see the files (the compose shape gives it no mount, by
@@ -30,7 +32,9 @@ import {
   type ConnectionDetail,
   type ConnectionRow,
   type ConnectionTypeSummary,
+  type ConnectionUser,
 } from "@foldedspacelabs/metistry-connections";
+import type { AgentRow } from "./agents.js";
 
 /** What the console reads connections through. Absent from `ConsoleConfig` = no instance directory here, and both routes are 503. */
 export interface ConnectionsView {
@@ -53,6 +57,23 @@ export function validConnectionName(name: string): boolean {
   return CONNECTION_FILE_RE.test(`${name}.yaml`) && name.length <= 64;
 }
 
+/**
+ * Who is granted which connection (`used_by`'s agents and crews, X-96): the
+ * live registry rows whose grants name it, by connection. Revoked and still
+ * pending rows authenticate nothing and are left out; the assistant (an
+ * `internal` row) reaches every connection and is not listed against each.
+ * Whether a grant reaches is the offer switch's, which the listing applies.
+ */
+export function connectionGrants(rows: readonly Pick<AgentRow, "id" | "kind" | "grants" | "revoked" | "pending">[]): Map<string, ConnectionUser[]> {
+  const out = new Map<string, ConnectionUser[]>();
+  for (const r of rows) {
+    if (r.revoked || r.pending || r.kind === "internal") continue;
+    const kind = r.kind === "crew" ? "crew" : "agent";
+    for (const name of new Set(r.grants.connections ?? [])) out.set(name, [...(out.get(name) ?? []), { kind, name: r.id }]);
+  }
+  return out;
+}
+
 function catalogOf(view: ConnectionsView) {
   return loadInstanceCatalog({ instanceDir: view.instanceDir, ...(view.seedDir ? { seedDir: view.seedDir } : {}) });
 }
@@ -65,13 +86,13 @@ function catalogOf(view: ConnectionsView) {
  * shape: field KINDS, never a value, and nothing of an OAuth field's client.
  * One catalog read serves both.
  */
-export async function connectionsListing(view: ConnectionsView): Promise<{ connections: ConnectionRow[]; types: ConnectionTypeSummary[] }> {
+export async function connectionsListing(view: ConnectionsView, granted?: ReadonlyMap<string, readonly ConnectionUser[]>): Promise<{ connections: ConnectionRow[]; types: ConnectionTypeSummary[] }> {
   const catalog = await catalogOf(view);
-  return { connections: await describeConnections(catalog, { presence: view.presence }), types: describeConnectionTypes(catalog.types) };
+  return { connections: await describeConnections(catalog, { presence: view.presence, granted }), types: describeConnectionTypes(catalog.types) };
 }
 
 /** One connection in full, or undefined when there is no such file. */
-export async function oneConnection(view: ConnectionsView, name: string): Promise<ConnectionDetail | undefined> {
+export async function oneConnection(view: ConnectionsView, name: string, granted?: ReadonlyMap<string, readonly ConnectionUser[]>): Promise<ConnectionDetail | undefined> {
   const rel = `${resolveInstanceLayout(view.instanceDir).layout.connectionsDir}/${name}.yaml`;
-  return describeConnectionDetail(name, await catalogOf(view), rel, { presence: view.presence });
+  return describeConnectionDetail(name, await catalogOf(view), rel, { presence: view.presence, granted });
 }

@@ -10,7 +10,7 @@
 // nothing it holds; nothing is dialled by a read; no instance directory is
 // a 503; an unknown or malformed name is the family's 404.
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +23,7 @@ import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
-import type { ConnectionsView } from "../src/connections-route.js";
+import { connectionGrants, type ConnectionsView } from "../src/connections-route.js";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url));
 const policy = { idleDays: 30, maxDays: 365 };
@@ -96,6 +96,20 @@ describe.skipIf(!hasDb)("GET /api/connections, GET /api/connections/:name", () =
         "",
       ].join("\n"),
       ".metistry/connections/linear.yaml": 'name: linear\ntype: mcp\nprovider: linear\nreach: { http: { url: "https://mcp.linear.app/mcp" } }\ntools:\n  list_issues: { group: reads, mode: on }\n',
+      ".metistry/connections/relay.yaml": [
+        "name: relay",
+        "type: mcp",
+        "provider: custom",
+        "offer_to_agents: true",
+        "reach:",
+        "  http:",
+        "    url: https://mcp.example.com/mcp",
+        "    headers:",
+        '      X-Api-Key: "{{ secret.relay_key }}"',
+        '      X-Org-Token: "{{ secret.relay_org }}"',
+        "secrets: [relay_key, relay_org]",
+        "",
+      ].join("\n"),
       ".metistry/connections/leaky.yaml": `name: leaky\ntype: mcp\nprovider: custom\nreach: { http: { url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer ${KEY}" } } }\n`,
       ".metistry/secrets.yaml": 'secrets:\n  github_read:\n    grants: { "connection:github": on }\n',
       ".metistry/scheduled.yaml": "syncs:\n  github-state:\n    connection: github\n",
@@ -177,6 +191,7 @@ describe.skipIf(!hasDb)("GET /api/connections, GET /api/connections/:name", () =
       ["github", "ok"],
       ["leaky", "failed"],
       ["linear", "ok"],
+      ["relay", "failed"], // its secrets are not granted in secrets.yaml: said ahead of time
     ]);
     expect(r.body.connections[0]).toEqual({
       name: "github",
@@ -194,11 +209,58 @@ describe.skipIf(!hasDb)("GET /api/connections, GET /api/connections/:name", () =
       ],
       offer_to_agents: false,
       used_by: [{ kind: "sync", name: "github-state" }],
+      last_checked: null,
     });
     // names, never values: no env value, no reference, and never the pasted key
     expect(r.text).not.toContain("warn");
     expect(r.text).not.toContain("{{ secret.github_read");
     expect(r.text).not.toContain(KEY);
+  });
+
+  it("X-96: an agent granted a connection appears in used_by (once it is offered); a header per secret lists a secret each; a check's stamp is read, not made", async () => {
+    // not granted yet: nobody
+    expect((await get(base, "/api/connections/relay", owner)).body.connection.used_by).toEqual([]);
+    expect(await agents.setGrants(pool, agentId, { tier: "full", areas: [], connections: ["relay", "github"] })).toBe(true);
+    const one = await get(base, "/api/connections/relay", owner);
+    expect(one.body.connection.used_by).toEqual([{ kind: "agent", name: agentId }]);
+    expect(one.body.connection.reach).toMatchObject({
+      class: "http",
+      headers: ["X-Api-Key", "X-Org-Token"],
+      header_secrets: [
+        { header: "X-Api-Key", secrets: ["relay_key"] },
+        { header: "X-Org-Token", secrets: ["relay_org"] },
+      ],
+    });
+    // the list says the same; and github, granted but not offered to agents, is reached by nobody new
+    const list = await get(base, "/api/connections", owner);
+    expect(list.body.connections.find((c: { name: string }) => c.name === "relay").used_by).toEqual([{ kind: "agent", name: agentId }]);
+    expect(list.body.connections.find((c: { name: string }) => c.name === "github").used_by).toEqual([{ kind: "sync", name: "github-state" }]);
+    // a check anywhere leaves a stamp; the console only reads it
+    expect(list.body.connections.find((c: { name: string }) => c.name === "relay").last_checked).toBeNull();
+    await mkdir(join(dir, ".metistry", "state"), { recursive: true });
+    await writeFile(join(dir, ".metistry", "state", "connection-checks.json"), JSON.stringify({ relay: { at: "2026-10-18T09:30:00.000Z", status: "failed" } }));
+    const stamped = await get(base, "/api/connections/relay", owner);
+    expect(stamped.body.connection.last_checked).toEqual({ at: "2026-10-18T09:30:00.000Z", status: "failed" });
+    // none of it is a way to learn the grant without the owner's door
+    expect((await get(base, "/api/connections/relay", { authorization: `Bearer ${agentToken}` })).status).toBe(403);
+    await agents.setGrants(pool, agentId, { tier: "full", areas: [] });
+    await rm(join(dir, ".metistry", "state"), { recursive: true });
+  });
+
+  it("connectionGrants: a revoked, pending or internal row is not a user", () => {
+    const row = (over: Record<string, unknown>) => ({ id: "a", kind: "external", revoked: false, pending: false, grants: { tier: "full" as const, areas: [], connections: ["relay"] }, ...over });
+    const grants = connectionGrants([
+      row({ id: "live" }),
+      row({ id: "crewmate", kind: "crew" }),
+      row({ id: "gone", revoked: true }),
+      row({ id: "waiting", pending: true }),
+      row({ id: "the-assistant", kind: "internal" }),
+      row({ id: "nothing", grants: { tier: "full", areas: [] } }),
+    ] as never);
+    expect(grants.get("relay")).toEqual([
+      { kind: "agent", name: "live" },
+      { kind: "crew", name: "crewmate" },
+    ]);
   });
 
   it("the list carries the installed connection types — an extension's, its fields by kind, no value anywhere (T6-13b)", async () => {

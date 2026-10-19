@@ -95,9 +95,16 @@ yet* — until its token secret has an item, and `failed` while a sign-in
 secret may not go where it must (the token secret to the token endpoint and
 the service, the owner's client id to the authorize and token endpoints).
 
-*Used by* is what reads it today: the syncs in `scheduled.yaml` that name it,
-and the sync its provider declares when that sync reads it (the rule *A sync
-reading its connection* below applies).
+*Used by* is everything that uses it: the syncs in `scheduled.yaml` that name
+it, and the sync its provider declares when that sync reads it (the rule *A sync
+reading its connection* below applies) — and the agents and crews granted it,
+once the owner has offered it to agents (`DescribeOptions.granted`, which a host
+fills from its registry: the console does; the CLI has none and lists syncs
+only). *Last checked* (`last_checked`: the time and doctor's word) is the newest
+check anyone ran: `checkConnection` stamps it in the instance's gitignored
+`.metistry/state/connection-checks.json` (time and verdict, never the message),
+and the listing reads it — derived and disposable. An HTTP row's
+`header_secrets` pairs each header with the secret **names** its value carries.
 
 Beside the rows, the listing serves **the installed connection types**
 (`describeConnectionTypes`; `GET /api/connections` → `types`, and each
@@ -126,7 +133,8 @@ holds it is the one whose calls it makes — `metistry connections add|test` and
 the instance's catalog and mounts it behind the lazy pair and the Approve path
 (T4-10, *The console's pool* below). A proxied call's `runs` row is
 written by mcp-brain itself (below), so a host does not also write one from
-the pool's `connection_call` event for it; `connection_check` is the CLI's.
+the pool's `connection_call` event for it; a check's stamp (`last_checked`) is
+`checkConnection`'s own.
 
 The host sets the clocks: the CLI reads `METISTRY_CONNECTION_CONNECT_TIMEOUT_MS`
 (default 30 s — a cold `npx -y …` downloads first) and

@@ -1,11 +1,25 @@
 // The listing every surface renders, `check()`'s four verdicts, and the
 // catalog read from a real (scratch) instance directory.
 
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ConnectionPool, checkConnection, connectionTypeTitle, describeConnectionDetail, describeConnectionTypes, describeConnections, loadInstanceCatalog, type ConnectionCatalog, type PoolEvent } from "../src/index.js";
+import {
+  CHECK_STAMPS_FILE,
+  ConnectionPool,
+  checkConnection,
+  connectionTypeTitle,
+  describeConnectionDetail,
+  describeConnectionTypes,
+  describeConnections,
+  forgetCheck,
+  loadInstanceCatalog,
+  readCheckStamps,
+  type ConnectionCatalog,
+  type ConnectionUser,
+  type PoolEvent,
+} from "../src/index.js";
 import { FAKE_STDIO, catalogOf, fakeHttpMcp, secretsWith } from "./helpers.js";
 
 const KEY = "gh" + "p_" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0";
@@ -84,6 +98,98 @@ describe("checkConnection — ok, degraded, absent, failed", () => {
 describe("describeConnections — names, never values", () => {
   const presence = (held: string[]) => ({ has: async (n: string) => held.includes(n) });
 
+  describe("who uses it, and when it was last checked (X-96)", () => {
+    const granted = new Map<string, ConnectionUser[]>([
+      [
+        "fake",
+        [
+          { kind: "crew", name: "scribe" },
+          { kind: "agent", name: "devin" },
+        ],
+      ],
+    ]);
+    const file = (offer: boolean) => ({ ...stdio("fake", { echo: { group: "reads", mode: "on" } }), offer_to_agents: offer });
+
+    it("an agent or crew granted a connection appears in used_by beside its syncs, once it is offered to agents", async () => {
+      const [row] = await describeConnections(catalogOf([file(true)]), { granted, scheduled: { syncs: { mirror: { connection: "fake" } } } });
+      expect(row!.used_by).toEqual([
+        { kind: "sync", name: "mirror" },
+        { kind: "agent", name: "devin" },
+        { kind: "crew", name: "scribe" },
+      ]);
+      // the detail serves the same list
+      const detail = await describeConnectionDetail("fake", catalogOf([file(true)]), ".metistry/connections/fake.yaml", { granted });
+      expect(detail!.used_by.map((u) => u.name)).toEqual(["devin", "scribe"]);
+    });
+
+    it("a grant on a connection the owner has not offered reaches nothing, so it is not 'use'; no registry given, no agents are listed", async () => {
+      const [off] = await describeConnections(catalogOf([file(false)]), { granted });
+      expect(off!.used_by).toEqual([]);
+      const [unknown] = await describeConnections(catalogOf([file(true)]));
+      expect(unknown!.used_by).toEqual([]);
+    });
+
+    it("a check stamps last_checked with its time and verdict — and only a check does", async () => {
+      const instance = await mkdtemp(join(tmpdir(), "metistry-checks-"));
+      const catalog = { ...catalogOf([stdio("fake", { echo: { group: "reads", mode: "on" }, gone: { group: "reads", mode: "on" } }, { FAKE_TOOLS: "echo" })]), baseDir: instance };
+      expect((await describeConnections(catalog))[0]!.last_checked).toBeNull();
+      const before = Date.now();
+      const r = await checkConnection(poolFor(catalog), catalog, "fake");
+      expect(r.status).toBe("degraded");
+      const [row] = await describeConnections(catalog);
+      expect(row!.last_checked).toEqual({ at: expect.any(String), status: "degraded" });
+      expect(Date.parse(row!.last_checked!.at)).toBeGreaterThanOrEqual(before - 1000);
+      // a verdict and a time: never the check's remediation text
+      expect(await readFile(join(instance, ".metistry", "state", CHECK_STAMPS_FILE), "utf8")).not.toMatch(/no longer offers/);
+      // the newest check wins, and one stamp never loses another
+      const other = { ...catalogOf([stdio("fake", {}), stdio("second", {})]), baseDir: instance };
+      await Promise.all([checkConnection(poolFor(other), other, "fake"), checkConnection(poolFor(other), other, "second")]);
+      const stamps = await readCheckStamps(instance);
+      expect([...stamps.keys()].sort()).toEqual(["fake", "second"]);
+      expect(stamps.get("fake")!.status).toBe("ok");
+      // a connection that is gone leaves no stamp behind for a same-named one to inherit
+      const onlyFake = { ...catalogOf([stdio("fake", {})]), baseDir: instance };
+      await checkConnection(poolFor(onlyFake), onlyFake, "fake");
+      expect([...(await readCheckStamps(instance)).keys()]).toEqual(["fake"]);
+      await forgetCheck(instance, "fake");
+      expect((await readCheckStamps(instance)).size).toBe(0);
+    });
+
+    it("a check of a name that is no connection stamps nothing; a garbled stamp file reads as never checked", async () => {
+      const instance = await mkdtemp(join(tmpdir(), "metistry-checks-"));
+      const catalog = { ...catalogOf([stdio("fake", {})]), baseDir: instance };
+      await checkConnection(poolFor(catalog), catalog, "nope");
+      expect((await readCheckStamps(instance)).size).toBe(0);
+      await mkdir(join(instance, ".metistry", "state"), { recursive: true });
+      await writeFile(join(instance, ".metistry", "state", CHECK_STAMPS_FILE), '{"fake":{"at":"not a time","status":"ok"},"x":7,"y":{"at":"2026-10-01T00:00:00Z","status":"fine"}}');
+      expect((await readCheckStamps(instance)).size).toBe(0);
+      await writeFile(join(instance, ".metistry", "state", CHECK_STAMPS_FILE), "{not json");
+      expect((await describeConnections(catalog))[0]!.last_checked).toBeNull();
+    });
+
+    it("two headers list two secret names — each header with the secrets its value names, never the value", async () => {
+      const http = {
+        name: "remote",
+        type: "mcp",
+        provider: "custom",
+        reach: { http: { url: "https://mcp.example.com/mcp", headers: { "X-Org": "acme", "X-Api-Key": "{{ secret.api_key }}", Authorization: "Bearer {{ secret.org_token }}" } } },
+        secrets: ["api_key", "org_token"],
+      };
+      const [row] = await describeConnections(catalogOf([http]));
+      expect(row!.reach).toMatchObject({
+        class: "http",
+        headers: ["Authorization", "X-Api-Key", "X-Org"],
+        header_secrets: [
+          { header: "Authorization", secrets: ["org_token"] },
+          { header: "X-Api-Key", secrets: ["api_key"] },
+          { header: "X-Org", secrets: [] },
+        ],
+      });
+      expect(JSON.stringify(row)).not.toContain("Bearer");
+      expect(JSON.stringify(row)).not.toContain("{{");
+    });
+  });
+
   it("a row says how it is reached with names only, its tools and modes, and who reads it", async () => {
     const catalog = catalogOf(
       [
@@ -117,6 +223,7 @@ describe("describeConnections — names, never values", () => {
         ],
         offer_to_agents: false,
         used_by: [{ kind: "sync", name: "github-state" }],
+        last_checked: null,
       },
     ]);
     expect(JSON.stringify(rows)).not.toContain("{{ secret");

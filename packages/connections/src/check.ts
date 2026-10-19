@@ -26,6 +26,7 @@ import type { ConnectionCatalog } from "./catalog.js";
 import { ConnectionRefused } from "./errors.js";
 import { ImapError, type ImapSession } from "./imap.js";
 import type { ConnectionPool, UpstreamTool } from "./pool.js";
+import { stampCheck } from "./stamps.js";
 
 /** What a check found, beside its verdict — the facts the Connections screen shows under *Last checked*. */
 export interface ConnectionCheckMeta {
@@ -114,7 +115,9 @@ async function checkImap(pool: ConnectionPool, name: string, used: Set<string>):
 
 /**
  * Check one connection. Never throws: every outcome is a verdict. Reported to
- * the pool's host as a `connection_check` event, like every dial.
+ * the pool's host as a `connection_check` event, like every dial, and
+ * stamped (`stampCheck`) in the instance's state directory when the catalog
+ * names one — what the listing serves as `last_checked` (X-96).
  */
 export async function checkConnection(pool: ConnectionPool, catalog: ConnectionCatalog, name: string): Promise<CheckResult> {
   const entry = catalog.entries.find((e) => e.name === name);
@@ -177,5 +180,6 @@ export async function checkConnection(pool: ConnectionPool, catalog: ConnectionC
     secrets: [...used].sort(),
     meta: { status: out.status, ...(out.meta ?? {}) },
   });
+  if (entry) await stampCheck(catalog.baseDir, name, out.status, new Date(), catalog.entries.map((e) => e.name));
   return out;
 }

@@ -40,7 +40,7 @@ import { capabilitiesOf, type PublicIdentity } from "./identity.js";
 import { loadInstances } from "./instances.js";
 import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-route.js";
 import { listVariables, VARIABLES_NOT_AVAILABLE, type VariablesView } from "./variables-route.js";
-import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, connectionsListing, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
+import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, connectionGrants, connectionsListing, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
 import { VAULT_STATUS_NOT_AVAILABLE, VaultStatusUnavailable, type VaultStatusReader } from "./vault-status.js";
 import { applyRollback, carriesRollback, parseRollbackAsk, raiseRollback, rollbackOf, type VaultReverter } from "./vault-rollback.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
@@ -1390,7 +1390,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     // what Add Connection offers and the fields it renders (T6-13b); kinds, never a value.
     if (key === "GET /api/connections") {
       if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
-      const { connections, types } = await connectionsListing(cfg.connections);
+      const { connections, types } = await connectionsListing(cfg.connections, connectionGrants(await agents.listAgents(db)));
       return sendJson(res, 200, { connections, types, as_of: new Date().toISOString() });
     }
     const connectionOf = CONNECTION_ROUTE.exec(key);
@@ -1398,7 +1398,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
       if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
       const name = connectionOf[1]!; // a kebab name has nothing to percent-decode; anything else is not a connection
       if (!validConnectionName(name)) return sendError(res, "not_found", "no such connection");
-      const connection = await oneConnection(cfg.connections, name);
+      const connection = await oneConnection(cfg.connections, name, connectionGrants(await agents.listAgents(db)));
       if (!connection) return sendError(res, "not_found", "no such connection");
       return sendJson(res, 200, { connection, as_of: new Date().toISOString() });
     }
@@ -1833,7 +1833,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
       return sendJson(res, 200, { ok: true, feedback: rows[0] });
     }
 
-    if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db, rp.rpIDs[0]!) });
+    // A device per passkey, its sessions under it; each with its passkey's rpID
+    // resolved (§2.23), and the caller's own row saying `this_device` (§2.22).
+    // The local owner token has no device: every row false.
+    if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db, rp.rpIDs[0]!, auth.kind === "session" ? auth.sessionId : null) });
 
     // ----- external-agent registry (§4.2 management surface; owner session only) -----
     // The registry, plus what has been ASKED for (ruled 2026-09-19): the
@@ -1955,11 +1958,29 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
       }
     }
 
+    // Remove a device (§2.22), named by one of its session ids. The default
+    // scope — `{}` or no body, what the Mac and the PWA's Remove send — revokes
+    // the passkey, so the device never signs in again, and every session under
+    // it, each losing its push subscription. `{scope: "sessions"}` is Sign Out
+    // Everywhere's door: the sessions end, the passkey stays. Both land in
+    // `runs` (`auth`, `revoke`) with the scope on the record.
     const revoke = /^POST \/api\/devices\/(\d+)\/revoke$/.exec(key);
     if (revoke) {
-      const ok = await store.revokeSession(db, Number(revoke[1]));
-      await audit("auth", "revoke", ok, { session: revoke[1] });
-      return ok ? sendJson(res, 200, { revoked: true }) : sendError(res, "not_found");
+      const raw = (await readBody(req)).toString("utf8").trim();
+      let body: unknown = {};
+      if (raw !== "") {
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          return sendError(res, "invalid_request", "the body is not JSON");
+        }
+      }
+      if (body === null || typeof body !== "object" || Array.isArray(body)) return sendError(res, "invalid_request", "the body is a JSON object: `{}` or `{scope: \"device\" | \"sessions\"}`");
+      const scope = (body as { scope?: unknown }).scope ?? "device";
+      if (!(store.REVOKE_SCOPES as readonly unknown[]).includes(scope)) return sendError(res, "invalid_request", `scope is "device" (the default) or "sessions", not ${JSON.stringify(scope)}`);
+      const done = await store.revokeDevice(db, Number(revoke[1]), scope as store.RevokeScope);
+      await audit("auth", "revoke", done !== null, { session: revoke[1], scope, ...(done ?? {}) });
+      return done ? sendJson(res, 200, { revoked: true, scope, sessions: done.sessions }) : sendError(res, "not_found");
     }
 
     if (key === "POST /auth/logout") {

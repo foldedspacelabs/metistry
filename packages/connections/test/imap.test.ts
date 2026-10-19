@@ -451,6 +451,16 @@ describe("the connection file and check()", () => {
     expect(bad!.issues).toContain("mail_password may not be sent to imap.gmail.com:993 — it is not on the secret's *Sent only to* list (`metistry secrets hosts mail_password imap.gmail.com imap.gmail.com:993`)");
   });
 
+  it("an IMAP server on 443 is described with :443 — the bare host an HTTPS entry names is not enough", async () => {
+    const f = file({ provider: "imap" }, { host: "mail.example.com", port: 443 });
+    const secrets = (hosts: string) => `secrets:\n  mail_password:\n    hosts: ["${hosts}"]\n    grants: { "connection:gmail": on }\n`;
+    const [bare] = await describeConnections(catalogOf([f], { types: TYPES, secrets: secrets("mail.example.com") }));
+    expect(bare!.status).toBe("failed");
+    expect(bare!.issues).toContain("mail_password may not be sent to mail.example.com:443 — it is not on the secret's *Sent only to* list (`metistry secrets hosts mail_password mail.example.com mail.example.com:443`)");
+    const [ported] = await describeConnections(catalogOf([f], { types: TYPES, secrets: secrets("mail.example.com:443") }));
+    expect(ported!.status).toBe("ok");
+  });
+
   it("check() signs in, lists folders, finds Drafts and examines INBOX — reading no message", async () => {
     const s = await server();
     const f = { name: "mail", type: "mail", provider: "imap", reach: { imap: { host: s.host, port: s.port, security: "plain", username: USER, secret: "mail_password" } }, secrets: ["mail_password"] };

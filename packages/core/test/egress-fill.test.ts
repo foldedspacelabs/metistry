@@ -479,7 +479,12 @@ secrets:
   it("passes for the exact host:port, over TLS, when granted — and names what it sends", () => {
     const plan = planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["gmail_app_password"], rules("connection:gmail"));
     expect(plan).toEqual({ destination: { entry: "imap.gmail.com:993", host: "imap.gmail.com", port: 993, cleartext: false }, refs: ["gmail_app_password"], names: ["gmail_app_password"] });
-    expect(socketDestination("IMAP.Example.com", 443, true).entry).toBe("imap.example.com");
+    // a socket destination always carries its port — an IMAP server on 443 is not the bare host an HTTPS entry names
+    expect(socketDestination("IMAP.Example.com", 443, true).entry).toBe("imap.example.com:443");
+    expect(socketDestination("imap.example.com", 993, true).entry).toBe("imap.example.com:993");
+    // an HTTPS destination on 443 still collapses to the bare host
+    expect(egressDestination("https://imap.example.com/")?.entry).toBe("imap.example.com");
+    expect(egressDestination("https://imap.example.com:443/")?.entry).toBe("imap.example.com");
   });
 
   it("refuses another host, another port, cleartext off loopback, no grant, Ask without approval", () => {
@@ -493,6 +498,25 @@ secrets:
     expect(code(() => planSocketEgress({ host: "imap.gmail.com/x", port: 993, tls: true }, ["gmail_app_password"], rules("connection:gmail")))).toBe("bad_url");
     // loopback without TLS is a destination like any other — listed with its port
     expect(code(() => planSocketEgress({ host: "127.0.0.1", port: 1143, tls: false }, ["bridge_password"], rules("connection:bridge")))).toBe("passed");
+  });
+
+  it("an IMAP server on 443 is listed as host:443 — the bare host an HTTPS entry names does not admit it", () => {
+    const secrets = parseSecretsFile(`
+secrets:
+  https_only:
+    hosts: ["mail.example.com"]
+    grants:
+      connection:mail: on
+  socket_ok:
+    hosts: ["mail.example.com:443"]
+    grants:
+      connection:mail: on
+`);
+    const r = { secrets, grantee: "connection:mail", purpose: "service" as const, redactor: new SecretRedactor() };
+    expect(code(() => planSocketEgress({ host: "mail.example.com", port: 443, tls: true }, ["https_only"], r))).toBe("host_not_listed");
+    expect(code(() => planSocketEgress({ host: "mail.example.com", port: 443, tls: true }, ["socket_ok"], r))).toBe("passed");
+    // the same secret's bare entry still admits an HTTPS call to that host
+    expect(code(() => planEgress({ url: "https://mail.example.com/", headers: { authorization: "{{ secret.https_only }}" } }, r))).toBe("passed");
   });
 
   it("the cleartext refusal says TLS, not https", () => {

@@ -854,7 +854,8 @@ connection type reached by `imap` must provide `mail` and declare `auth:
 **The host guard** (core's `planSocketEgress`, run before anything is dialled —
 the socket's counterpart of `guardedFetch`): the app password goes only to the
 exact `host:port` on the secret's *Sent only to* list (`imap.gmail.com:993`,
-not `imap.gmail.com`), only over TLS — verified certificate and host name, TLS
+not `imap.gmail.com`; a socket always carries its port, even 443 — the bare
+host means HTTPS, so an IMAP server on 443 is listed `host:443`), only over TLS — verified certificate and host name, TLS
 1.2 or later — and only when granted to `connection:<name>`; each refusal is
 the door's own code (`host_not_listed`, `cleartext`, `not_granted`,
 `needs_approval`, `missing_secret`). The value is written into the one LOGIN

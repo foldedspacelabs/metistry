@@ -61,9 +61,10 @@
           "name": "github-state"
         }
       ],
+      "last_checked": null,
       "file": ".metistry/connections/github.yaml",
       "provider_unit": null
     },
-    "as_of": "2026-09-30T06:54:06.433Z"
+    "as_of": "2026-10-19T01:22:42.396Z"
   }
 }

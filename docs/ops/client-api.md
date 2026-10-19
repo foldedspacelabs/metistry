@@ -3453,7 +3453,8 @@ GET /api/connections
                      "tools":[{"name":"create_issue","group":"changes","mode":"ask"},
                               {"name":"search_issues","group":"reads","mode":"on"}],
                      "offer_to_agents":false,
-                     "used_by":[{"kind":"sync","name":"github-state"}]}],
+                     "used_by":[{"kind":"sync","name":"github-state"}],
+                     "last_checked":{"at":"2026-09-30T06:50:00.000Z","status":"ok"}}],
      "types":[{"name":"icloud-calendar","title":"iCloud Calendar over CalDAV with an app-specific password",
                "description":"iCloud Calendar over CalDAV with an app-specific password — your events on Today, …",
                "origin":"product","provides":"calendar","transports":["http"],"auth":["basic"],
@@ -3470,16 +3471,39 @@ One row per file in the instance's `.metistry/connections/`, sorted by name
 `metistry connections list --json` prints). `type` is what it is (`mcp`,
 `calendar`, …) and `provider` the connection-type unit that reaches it, or
 `custom`. `reach` is how Metistry reaches it — `http` (`url`, `auth` scheme,
-header and query-parameter **names**, `timeout_s`), `command` (`command`,
+header and query-parameter **names**, `header_secrets`, `timeout_s`), `command` (`command`,
 `args`, `cwd`, environment-variable **names**, `runs_on`), `path`, or `imap`
 (`host`, `port`, `security` `tls` · `plain`, `auth: "basic"` — a mailbox,
 T4-15; never the username or the password). `tools`
 is the owner's per-tool policy: each tool's `group` (`reads` · `changes` ·
 `starts_agent`) and `mode` (`on` · `ask` · `off`, drawn *Allow · Ask First ·
-Never*). `used_by` is what reads it today — the syncs in `scheduled.yaml` that
-name it; agents reach a connection through the lazy pair on `/mcp`
-(`docs/ops/connections.md`), and until they are lent one an empty list is the
-true answer (*Nobody yet*).
+Never*).
+
+**`used_by`** is everything that uses it, each `{kind, name}`: `sync` (the syncs
+in `scheduled.yaml` that name it), then `agent` and `crew` — a registry row
+granted the connection (`grants.connections`) — by `name` = the row's id, sorted
+by kind and name. A grant counts only once the owner has **offered** the
+connection to agents (`offer_to_agents`): it is the one rule the proxy applies
+(`mayConnection`), so a grant on an unoffered connection reaches nothing and is
+not listed. A revoked or still-pending row is not a user, and the assistant
+(which reaches every connection) is not listed against each. An empty list is
+the true answer (*Nobody yet*). The console fills the agents from its registry;
+`metistry connections list|show --json` has no registry to ask, so it lists
+syncs only.
+
+**`header_secrets`** (on an `http` reach) is `[{header, secrets}]`, one entry
+per header in `headers` order: the **names** of the secrets that header's value
+carries (`["relay_key"]`, or `[]` for a header that names none). Never the value
+or the template around it — a header per secret lists one secret each.
+
+**`last_checked`** is `{at, status}` — the ISO time and doctor's word
+(`ok` · `degraded` · `failed` · `absent`) of the newest check anyone ran
+(`metistry connections test`, `metistry doctor`, the Mac's Test) — or `null`
+for never. A check leaves it as a stamp in the instance's gitignored
+`.metistry/state/connection-checks.json` (time and verdict only, never the
+check's message); the route **reads** that file and dials nothing. It is
+derived and disposable (invariant 1): lose it and every connection reads
+*never checked* until its next check.
 
 **`status`** is one of doctor's words, and `issues` says why, one sentence each:
 
@@ -3519,10 +3543,8 @@ secret only by name.
 
 **Nothing here dials.** A GET that started a command or reached a server would
 be a read with a side effect; whether a connection answers is `metistry
-connections test <name>` and `metistry doctor` on the Mac. The last check or
-call the console itself made (`runs` rows `connection_check` /
-`connection_call`, which `connection.health` announces) joins the row when the
-console makes calls (T4-8b). Every write — add, set, policy, remove — is
+connections test <name>` and `metistry doctor` on the Mac, and the time and
+verdict of the last one is the row's `last_checked`. Every write — add, set, policy, remove — is
 `metistry connections` on the Mac (M13, `docs/ops/cli.md`): a connection file
 says where Metistry reaches and with which credential, which is the boundary,
 so no route writes one (invariant 10).

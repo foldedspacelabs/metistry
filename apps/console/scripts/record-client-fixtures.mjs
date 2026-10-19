@@ -67,7 +67,7 @@ import { linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { ConflictMoved } from "../dist/knowledge-routes.js";
 import { GithubWriteClient } from "../dist/github-write.js";
-import { planDraft } from "@foldedspacelabs/metistry-connections";
+import { planDraft, stampCheck } from "@foldedspacelabs/metistry-connections";
 import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, recordingMonthStart, runsExportCursor, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
@@ -200,6 +200,30 @@ tools:
 offer_to_agents: false
 `,
 );
+// …and a second, offered to agents (X-96): an HTTP MCP server whose two headers
+// name two different things — a secret and a variable — so `header_secrets`
+// has a header per entry; it is granted to an agent below (`used_by`), and a
+// check of it is stamped (`last_checked`). Nothing dials it either.
+await writeFile(
+  join(layout.path("metistryDir"), "connections", "intranet.yaml"),
+  `name: intranet
+type: mcp
+provider: custom
+description: The team's docs server
+reach:
+  http:
+    url: https://api.github.com/mcp
+    headers:
+      X-Api-Key: "{{ secret.github_mcp_key }}"
+      X-Team: "{{ variable.team_name }}"
+secrets: [github_mcp_key]
+variables: [team_name]
+tools:
+  read_page: { group: reads, mode: on }
+offer_to_agents: true
+`,
+);
+await stampCheck(instanceDir, "intranet", "degraded", new Date("2026-09-30T06:50:00.000Z"));
 await writeFile(join(layout.path("metistryDir"), "scheduled.yaml"), `syncs:\n  github-state:\n    connection: github\n`);
 
 const fixtureKeychain = memoryKeychain();
@@ -847,6 +871,8 @@ ids.rotateAgent = await agent("opencode", "OpenCode");
 // change something: they narrow cursor's grant, and raise cursor's autonomy.)
 await agents.setGrants(pool, ids.agent, { tier: "areas", areas: ["Projects", "Areas/Ops"], queries: true });
 await agents.setProjects(pool, ids.agent, [P]);
+// …and one is lent the intranet connection (X-96: the Connections detail's *Used by*)
+await agents.setGrants(pool, ids.rotateAgent, { tier: "none", areas: [], connections: ["intranet"] });
 await agents.setAutonomy(pool, ids.rotateAgent, { level: "propose" }, { allowWidening: true });
 // `ts`/`decided_at` are RECORDING_NOW (X-31), not `now()`.
 await pool.query(

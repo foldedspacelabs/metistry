@@ -40,7 +40,7 @@ import { capabilitiesOf, type PublicIdentity } from "./identity.js";
 import { loadInstances } from "./instances.js";
 import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-route.js";
 import { listVariables, VARIABLES_NOT_AVAILABLE, type VariablesView } from "./variables-route.js";
-import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, connectionsListing, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
+import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, connectionGrants, connectionsListing, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
 import { VAULT_STATUS_NOT_AVAILABLE, VaultStatusUnavailable, type VaultStatusReader } from "./vault-status.js";
 import { applyRollback, carriesRollback, parseRollbackAsk, raiseRollback, rollbackOf, type VaultReverter } from "./vault-rollback.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
@@ -1390,7 +1390,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     // what Add Connection offers and the fields it renders (T6-13b); kinds, never a value.
     if (key === "GET /api/connections") {
       if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
-      const { connections, types } = await connectionsListing(cfg.connections);
+      const { connections, types } = await connectionsListing(cfg.connections, connectionGrants(await agents.listAgents(db)));
       return sendJson(res, 200, { connections, types, as_of: new Date().toISOString() });
     }
     const connectionOf = CONNECTION_ROUTE.exec(key);
@@ -1398,7 +1398,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
       if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
       const name = connectionOf[1]!; // a kebab name has nothing to percent-decode; anything else is not a connection
       if (!validConnectionName(name)) return sendError(res, "not_found", "no such connection");
-      const connection = await oneConnection(cfg.connections, name);
+      const connection = await oneConnection(cfg.connections, name, connectionGrants(await agents.listAgents(db)));
       if (!connection) return sendError(res, "not_found", "no such connection");
       return sendJson(res, 200, { connection, as_of: new Date().toISOString() });
     }

@@ -8,15 +8,22 @@ the operator's checklist.
 
 ## 1. Mint a capture token per machine/profile
 
-`metistry connect claude-code` does this for you (docs/ops/cli.md): it
-registers `claude-code` as an external agent, puts the bearer in the login
-Keychain, and prints the two `export` lines in §2 with the account filled
-in. It does **not** install the plugin — §3 still does.
-`metistry connect --remove claude-code` is the way back: it revokes the row and
-deletes the Keychain item (there is no file to restore — delete the `export`
-lines from your profile yourself); `metistry connect claude-code` again
-registers it afresh, a new token and default-deny grants. The rest of this
-section is the by-hand path, and the owner-token alternative.
+`metistry connect claude-code` does this for you (docs/ops/cli.md), in both
+directions: it registers `claude-code` as an external agent, puts the bearer in
+the login Keychain, registers the console's `/mcp` with Claude Code at user
+scope (`claude mcp add --scope user`, the header `Bearer
+${METISTRY_AGENT_TOKEN_CLAUDE_CODE}` — Claude Code expands the variable, so the
+value is never written to a file) so a session can *read* the vault as well as
+capture to it, and prints the `export` lines in §2 with the account filled in.
+`metistry connect --list` shows both halves. It does **not** install the
+plugin — §3 still does. If `claude` is not on the PATH it prints the `claude mcp
+add` line instead of running it.
+`metistry connect --remove claude-code` is the way back: it revokes the row,
+removes the `/mcp` entry (`claude mcp remove --scope user`) and deletes the
+Keychain item — delete the `export` lines from your profile yourself;
+`metistry connect claude-code` again registers it afresh, a new token and
+default-deny grants. The rest of this section is the by-hand path, and the
+owner-token alternative.
 
 On the Studio, one owner token per place the plugin runs — label them so
 revocation is surgical:
@@ -37,6 +44,9 @@ UPDATE owner_tokens SET revoked_at = now() WHERE label = 'claude-code mbp person
 ```bash
 export METISTRY_URL=https://<origin>
 export METISTRY_OWNER_TOKEN=<token>
+# the console's /mcp, if you registered it with `metistry connect claude-code`
+# (the printed lines also set this one, from the same Keychain item):
+export METISTRY_AGENT_TOKEN_CLAUDE_CODE=<token>
 # optional, default off:
 export METISTRY_CAPTURE_ON_STOP=1
 ```

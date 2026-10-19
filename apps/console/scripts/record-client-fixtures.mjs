@@ -620,6 +620,20 @@ const P = "metistry";
 const ids = {};
 const one = async (sql, params = []) => (await pool.query(sql, params)).rows[0];
 
+// X-102: this script gives rows fixed keys (`work` 41 and 42, the Linear issue
+// `linear:ENG-42`, the agents `cursor` / `old-laptop` / `opencode`, the stream's
+// comment ids …), so a second run on the same scratch database — `--check`
+// after a record — collided on the first of them. Every table the migrations
+// made is emptied, and its identities restarted, before anything is seeded: the
+// database is exactly what `ops/scripts/test-db.sh` leaves, whatever ran on it
+// before. (No migration seeds a row on a fresh database — 0011 only backfills.)
+// `testDb()` is the only way this script opens Postgres and it refuses anything
+// but a `metistry_test_*` scratch database, so this reaches nothing else.
+{
+  const { rows } = await pool.query(`SELECT quote_ident(tablename) AS t FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'`);
+  if (rows.length) await pool.query(`TRUNCATE ${rows.map((r) => r.t).join(", ")} RESTART IDENTITY CASCADE`);
+}
+
 // get-api-runs-export (X-31): `runs_export` orders oldest-first with no
 // floor, so on a dirty scratch database — this script run again on the rows
 // an earlier one left behind — its first page is whatever ancient leftover

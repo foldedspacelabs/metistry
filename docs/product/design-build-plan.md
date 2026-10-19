@@ -5032,8 +5032,8 @@ non-Claude models through OpenRouter, the key read from the environment at
 run time (the owner's; never stored, never in argv). A **writer** model sees
 only the three class names and §7.2's structural rules of
 `docs/ops/dynamic-router.md` — at least 50 items per class, the long-simple and
-short-demanding traps, at least five D08-class items — and never §2's
-descriptions or the planner's wording. A **relabeller**, a second non-Claude
+short-demanding traps, at least five D08-class items — and never the class
+descriptions (that file's §2) or the planner's wording. A **relabeller**, a second non-Claude
 model, labels every item blind, from the class names alone. An item both label
 alike is kept; a disagreement either becomes an `accept` or goes to an owner
 adjudication pile, never silently resolved; every D08-class item goes to the
@@ -5049,7 +5049,7 @@ shipped example stays empty, and no agent runs the generator against the live
 instance.
 *Files:* `packages/eval/src/generate.ts` (new), `packages/eval/src/main.ts`,
 `packages/eval/src/complexity.ts`, `docs/ops/dynamic-router.md` (§7.2).
-*Tests:* offline, on recorded model responses: **no request carries §2's
+*Tests:* offline, on recorded model responses: **no request carries the class
 descriptions or the planner's wording; an item the two models label
 differently is never kept under one label alone; every D08-class item lands in
 the pile**; the two fixture sets report separately.

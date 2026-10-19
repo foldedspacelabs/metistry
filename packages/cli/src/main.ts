@@ -327,7 +327,7 @@ const USAGE = `metistry — Metistry command line
       The token is never printed, never written to .env, never in .git/config.
 
   metistry connect <cursor|opencode|devin|claude-code> [--instance <dir>] [--rotate] [--remote]
-                   [--areas Areas/A,Projects/B] [--project <slug>] [--json]
+                   [--areas Areas/A,Projects/B] [--project <slug>] [--briefing on|off] [--json]
   metistry connect --remove <cursor|opencode|devin|claude-code> [--instance <dir>] [--json]
   metistry connect --list [--json]
       Give one external dev tool its own way into this instance: register it as
@@ -352,7 +352,13 @@ const USAGE = `metistry — Metistry command line
                      Authorization value to paste at Customize -> MCPs.
       Grants start default-deny ({tier: "none", areas: []}); --areas widens the
       read grant to those TitleCase vault prefixes, --project adds project
-      membership. No flag can grant knowledge_write: an external principal
+      membership. --briefing off opts this agent out of the session-start briefing
+      (on by default for any agent with a read grant: the project page, open
+      tasks and recent sessions for the checkout, handed to a new session by the
+      tool's plugin — claude-code's SessionStart hook, opencode's system-prompt
+      transform; cursor and devin do not deliver it yet); --briefing on takes the
+      opt-out back. It is kept with the agent's grants, so a revoke clears it and
+      --areas never undoes it. No flag can grant knowledge_write: an external principal
       cannot reach it at the bridge at all. --rotate mints a replacement bearer
       (the old one stops authenticating at once) — without it an
       already-registered tool is told its token is unchanged rather than shown a
@@ -1361,14 +1367,14 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       }
       const tool = parseTool(positional[0]);
       if (!tool) {
-        err(`usage: metistry connect <${CONNECT_TOOLS.join("|")}> [--rotate] [--remote] [--areas Areas/A,Projects/B] [--project <slug>] [--json]`);
+        err(`usage: metistry connect <${CONNECT_TOOLS.join("|")}> [--rotate] [--remote] [--areas Areas/A,Projects/B] [--project <slug>] [--briefing on|off] [--json]`);
         err(`       metistry connect --remove <${CONNECT_TOOLS.join("|")}> [--json]`);
         err("       metistry connect --list [--json]");
         return 2;
       }
       if (flags.remove === true) {
         // the way back is its own verb: a flag that mints, widens or enrols beside it would be a contradiction, so it is refused rather than half-obeyed
-        const clash = ["rotate", "remote", "areas", "project"].filter((f) => flags[f] !== undefined);
+        const clash = ["rotate", "remote", "areas", "project", "briefing"].filter((f) => flags[f] !== undefined);
         if (clash.length > 0) {
           err(`metistry connect ${tool}: --remove undoes what connect wrote and cannot be combined with --${clash.join(", --")}`);
           return 2;
@@ -1382,6 +1388,12 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           return 1;
         }
       }
+      const briefingFlag = str(flags, "briefing");
+      if (flags.briefing !== undefined && briefingFlag !== "on" && briefingFlag !== "off") {
+        err(`metistry connect ${tool}: --briefing takes on or off`);
+        return 2;
+      }
+      const briefing = briefingFlag === "on" || briefingFlag === "off" ? briefingFlag : undefined;
       try {
         const r = await connect({
           tool,
@@ -1389,6 +1401,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           remote: flags.remote === true,
           ...(csv(str(flags, "areas")) ? { areas: csv(str(flags, "areas")) } : {}),
           ...(csv(str(flags, "project")) ? { projects: csv(str(flags, "project")) } : {}),
+          ...(briefing ? { briefing } : {}),
           ...common,
         });
         out(flags.json === true ? JSON.stringify(r, null, 2) : renderConnect(r));

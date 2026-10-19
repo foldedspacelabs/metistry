@@ -39,13 +39,27 @@ resolves inside the checkout and `git pull` is the whole update.
 | --- | --- | --- |
 | `METISTRY_URL` | yes | the instance's origin; `POST {url}/capture` is the only call |
 | `METISTRY_AGENT_TOKEN_OPENCODE` | yes | OpenCode's own agent bearer (`metistry connect opencode`). `METISTRY_OWNER_TOKEN` is accepted as a fallback |
-| `METISTRY_CAPTURE_ON_STOP` | yes | `1` enables the plugin. Anything else and it does nothing at all |
+| `METISTRY_CAPTURE_ON_STOP` | no | `1` enables the **session capture**. Anything else and capture does nothing at all (the briefing, below, is independent of it) |
+| `METISTRY_BRIEFING` | no | `off` silences the session-start briefing for this profile. Otherwise it is on, and the console decides what the agent may be told |
 | `METISTRY_OPENCODE_IDLE_MS` | no | the quiet window that stands in for the session-end event OpenCode does not have; default `90000` |
 | `METISTRY_CAPTURE_DIR` | no | where a note goes when the console cannot be reached (SHOULD-10: one silent drop ends the trust). A leading `~/` is expanded. Point it at your instance's `Inbox/` — the instance directory IS the vault (docs/ops/instance-layout.md) — and the reconciler picks the file up on its next scan (docs/ops/inbox.md) |
 
 Nothing is read from a file. If the instance is namespaced
 (`METISTRY_AGENT_TOKEN_OPENCODE_<SUFFIX>`), export that value *into*
 `METISTRY_AGENT_TOKEN_OPENCODE` for the plugin.
+
+## The session-start briefing
+
+The plugin also answers `experimental.chat.system.transform`: it asks the
+instance's `GET /api/briefing?repo=…&remote=…` **once per session** (a memoised
+promise per session id, with the agent bearer) and adds the same text to every
+turn's system prompt, so the console is not asked again and the prompt prefix
+does not change. On by default; the owner's opt-out is per agent,
+`metistry connect opencode --briefing off`, kept on the console with the agent's
+grants — an opted-out agent is served the empty briefing and nothing is added.
+Any failure adds nothing and throws nothing at OpenCode.
+`docs/ops/opencode.md` says what was and was not verified against a running
+OpenCode.
 
 ## When it fires
 

@@ -85,6 +85,10 @@ export interface Grants {
   tier: "none" | "index" | "areas";
   areas: string[];
   queries?: boolean;
+  /** the connection tools the agent may call (console `Grants.connections`); carried through so a grants write never drops it */
+  connections?: string[];
+  /** the session-start briefing's opt-out (X-128/X-129): present only as `false`; the default is on and is spelled by absence */
+  briefing?: false;
 }
 
 /**
@@ -122,6 +126,12 @@ export interface ConnectOptions {
   rotate?: boolean | undefined;
   /** `--areas`: widen the read grant to `{tier: "areas", areas}` (TitleCase vault prefixes, e.g. `Areas/Fsl`; the console validates) */
   areas?: string[] | undefined;
+  /**
+   * `--briefing on|off` (X-129): the session-start briefing is ON for every agent with a read
+   * grant (ruled 2026-10-04); `off` is the owner's per-agent opt-out, `on` takes it back. It is
+   * a field of the agent's grants envelope, so it goes where a revoke goes. Absent leaves it as it is.
+   */
+  briefing?: "on" | "off" | undefined;
   /** `--project`: project membership (§4.21 — tasks and artifacts are scoped by it) */
   projects?: string[] | undefined;
   /**
@@ -154,6 +164,8 @@ export interface ConnectResult {
   reconnected: boolean;
   rotated: boolean;
   grants: Grants;
+  /** the session-start briefing for this agent: the owner's setting (`off` = opted out) and what carries it into a session (X-129) */
+  briefing: { state: "on" | "off"; via: BriefingDelivery["via"]; plugin?: string; why?: string };
   projects: string[];
   /** S2: the row was enrolled `--remote` and the owner has not let it in yet — the token authenticates nothing. */
   pending: boolean;
@@ -191,7 +203,23 @@ interface AgentRow {
 
 function normalizeGrants(raw: Partial<Grants> | undefined): Grants {
   const tier = raw?.tier === "index" || raw?.tier === "areas" ? raw.tier : "none";
-  return { tier, areas: Array.isArray(raw?.areas) ? raw!.areas : [], ...(raw?.queries === true ? { queries: true } : {}) };
+  return {
+    tier,
+    areas: Array.isArray(raw?.areas) ? raw!.areas : [],
+    ...(raw?.queries === true ? { queries: true } : {}),
+    ...(Array.isArray(raw?.connections) && raw!.connections.length > 0 ? { connections: raw!.connections } : {}),
+    ...(raw?.briefing === false ? { briefing: false as const } : {}),
+  };
+}
+
+/** The briefing as the owner set it, with what carries it for this tool. */
+function briefingOf(tool: ConnectTool, grants: Grants): ConnectResult["briefing"] {
+  const d = HARNESSES[tool].briefing;
+  return {
+    state: grants.briefing === false ? "off" : "on",
+    via: d.via,
+    ...(d.via === "none" ? { why: d.why } : { plugin: d.plugin }),
+  };
 }
 
 /** Never let the owner token into a message. Same rule (and same reason) as console-client's. */
@@ -314,8 +342,15 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
   //    verb that quietly narrows a tool you had widened.
   let grants = existing ? normalizeGrants(existing.grants) : { ...DEFAULT_GRANTS };
   const areas = (opts.areas ?? []).filter((a) => a !== "");
-  if (areas.length > 0) {
-    const r = await call(api, "PUT", `/api/agents/${spec.id}/grants`, { tier: "areas", areas });
+  // `PUT …/grants` REPLACES the envelope, so a write carries every field the row already holds:
+  // widening the areas must not silently take back an opt-out (or drop `queries` / `connections`).
+  const wantBriefingOff = opts.briefing === undefined ? grants.briefing === false : opts.briefing === "off";
+  const briefingChanged = wantBriefingOff !== (grants.briefing === false);
+  if (areas.length > 0 || briefingChanged) {
+    const next: Grants = { ...grants, ...(areas.length > 0 ? { tier: "areas" as const, areas } : {}) };
+    delete next.briefing;
+    if (wantBriefingOff) next.briefing = false;
+    const r = await call(api, "PUT", `/api/agents/${spec.id}/grants`, next);
     grants = normalizeGrants(r.json.grants as Partial<Grants>);
   }
   let projects = existing?.projects ?? [];
@@ -337,6 +372,7 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
     reconnected: reviving,
     rotated,
     grants,
+    briefing: briefingOf(spec.id, grants),
     projects,
     pending,
     token: token ? "keychain" : "unchanged",
@@ -696,7 +732,7 @@ async function removeClaudeConfig(ctx: HarnessCtx): Promise<ConfigRemoval> {
 // test (`connect.test.ts`, "the harness registry") then holds it to the three
 // rules every entry shares: its config names the bearer's variable and never
 // its value; a second write changes nothing; remove takes away only its own
-// entry. X-129's per-harness briefing delivery lands as a field on the entry.
+// entry. X-129's per-harness briefing delivery is the `briefing` field on it.
 
 /** Everything an entry's hooks need that is not the tool's own business. */
 export interface HarnessCtx {
@@ -730,8 +766,25 @@ export interface HarnessConfig {
   remove(ctx: HarnessCtx): Promise<ConfigRemoval>;
 }
 
+/**
+ * How a harness hands the session-start briefing to its agent (X-129). The
+ * briefing itself is the console's (`GET /api/briefing`, X-128); this is only
+ * the question "what carries it into the session", and whether anything does.
+ * A harness whose hook has not been verified says so and delivers nothing —
+ * the opt-out is still stored, so it holds the day the delivery exists.
+ */
+export type BriefingDelivery =
+  /** the plugin's SessionStart hook (`plugins/claude-code`) — asked once, at session start */
+  | { via: "session-start-hook"; plugin: string }
+  /** the plugin's system-prompt transform (`plugins/opencode`) — asked once per session, added to every turn */
+  | { via: "system-transform"; plugin: string }
+  /** nothing delivers it, and why */
+  | { via: "none"; why: string };
+
 export interface Harness {
   spec: ToolSpec;
+  /** how this tool's session gets the briefing; every entry says (the registry's conformance test holds it to that) */
+  briefing: BriefingDelivery;
   /** absent for a tool with no config this verb can reach (Devin's is a web form) */
   config?: HarnessConfig;
 }
@@ -739,6 +792,7 @@ export interface Harness {
 export const HARNESSES: Record<ConnectTool, Harness> = {
   "claude-code": {
     spec: TOOL_SPECS["claude-code"],
+    briefing: { via: "session-start-hook", plugin: "plugins/claude-code" },
     config: {
       file: ({ home, env }) => claudeConfigFile(home, env),
       container: "mcpServers",
@@ -750,6 +804,7 @@ export const HARNESSES: Record<ConnectTool, Harness> = {
   },
   cursor: {
     spec: TOOL_SPECS.cursor,
+    briefing: { via: "none", why: "Cursor's hook for injecting context at session start is not verified yet" },
     config: {
       file: ({ home }) => cursorConfigFile(home),
       container: "mcpServers",
@@ -759,9 +814,10 @@ export const HARNESSES: Record<ConnectTool, Harness> = {
       remove: (c) => removeConfigEntry(cursorConfigFile(c.home), c.key, "mcpServers", { headers: cursorServerEntry(c.mcpUrl, c.varName).headers }),
     },
   },
-  devin: { spec: TOOL_SPECS.devin },
+  devin: { spec: TOOL_SPECS.devin, briefing: { via: "none", why: "Devin runs in its own cloud and has no plugin this verb can reach" } },
   opencode: {
     spec: TOOL_SPECS.opencode,
+    briefing: { via: "system-transform", plugin: "plugins/opencode" },
     config: {
       file: ({ home, env }) => opencodeConfigFile(home, env),
       container: "mcp",
@@ -1090,6 +1146,7 @@ export function renderConnect(r: ConnectResult): string {
       `pending   this row enrolled --remote, so the bearer below authenticates NOTHING until you let it in: answer the "${r.display_name}" item in Needs You, or POST /api/agents/${r.agent_id}/approve. Until then ${r.mcp_url} and /capture answer the same 401 an unknown token gets.`,
     );
   }
+  lines.push(describeBriefing(r));
   lines.push("");
 
   if (r.tool === "cursor") {
@@ -1150,6 +1207,21 @@ export function renderConnect(r: ConnectResult): string {
   return lines.join("\n");
 }
 
+/** The one line `connect` prints about the briefing: the setting, what delivers it, and the verb that changes it. */
+export function describeBriefing(r: Pick<ConnectResult, "tool" | "display_name" | "grants" | "briefing">): string {
+  const b = r.briefing;
+  if (b.state === "off") return `briefing  OFF for this agent (your opt-out, kept with its grants) — \`metistry connect ${r.tool} --briefing on\` takes it back.`;
+  const how =
+    b.via === "session-start-hook"
+      ? `the ${b.plugin} plugin's SessionStart hook hands each new session`
+      : b.via === "system-transform"
+        ? `the ${b.plugin} plugin adds to each turn's system prompt`
+        : undefined;
+  if (how === undefined) return `briefing  on by default, but ${r.display_name} cannot carry it yet: ${b.why}. Your setting is kept, so it holds when delivery exists.`;
+  const grant = r.grants.tier === "none" ? " It is served nothing until this agent has a read grant (`--areas`)." : "";
+  return `briefing  on (the default): ${how} the project page, open tasks and recent sessions for the checkout, under this agent's grant.${grant} \`--briefing off\` opts this agent out.`;
+}
+
 export function describeGrants(g: Grants): string {
   const tier = g.tier === "areas" ? `areas (${g.areas.join(", ")})` : g.tier;
   return `tier ${tier}${g.queries ? " + queries" : ""}`;
@@ -1165,6 +1237,8 @@ export interface ConnectListRow {
   grants?: Grants;
   projects?: string[];
   last_seen_at?: string | null;
+  /** the session-start briefing: `on` · `off` (the owner opted this agent out) · `n/a` (no row, or nothing in this tool delivers it yet) */
+  briefing: "on" | "off" | "n/a";
   /** what this tool's own end looks like: the config file's entry, or the shape that has no file */
   config: string;
   /** is the bearer where this verb puts it? `n/a` for a `paste` tool, `unknown` off macOS */
@@ -1212,6 +1286,7 @@ export async function connectList(opts: ConnectListOptions): Promise<{ console_u
       display_name: spec.displayName,
       agent: row === undefined ? "absent" : row.revoked === true ? "revoked" : row.pending === true ? "pending" : "registered",
       ...(row ? { grants: normalizeGrants(row.grants), projects: row.projects ?? [], last_seen_at: row.last_seen_at ?? null } : {}),
+      briefing: row === undefined || row.revoked === true || HARNESSES[tool].briefing.via === "none" ? "n/a" : normalizeGrants(row.grants).briefing === false ? "off" : "on",
       config,
       token,
     });
@@ -1220,15 +1295,15 @@ export async function connectList(opts: ConnectListOptions): Promise<{ console_u
 }
 
 /** How a row's `agent`/`token` reads at a glance — the word is kept, the colour comes from the vocabulary (docs/ops/cli-style.md). */
-const LIST_STATUS: Record<string, string> = { registered: "ok", keychain: "ok", pending: "degraded", revoked: "failed", absent: "n/a", "n/a": "n/a", unknown: "n/a" };
+const LIST_STATUS: Record<string, string> = { on: "ok", off: "n/a", registered: "ok", keychain: "ok", pending: "degraded", revoked: "failed", absent: "n/a", "n/a": "n/a", unknown: "n/a" };
 
 export function renderConnectList(r: { console_url: string; tools: ConnectListRow[] }, ui: Ui = defaultUi()): string {
   const word = (v: string): string => `${ui.statusIcon(LIST_STATUS[v] ?? "n/a")} ${ui.paint(statusName(LIST_STATUS[v] ?? "n/a"), v)}`;
-  const rows = r.tools.map((t) => [t.tool, word(t.agent), word(t.token), ui.dim(t.config)]);
+  const rows = r.tools.map((t) => [t.tool, word(t.agent), word(t.token), t.briefing, ui.dim(t.config)]);
   return [
     ui.kv([["console", r.console_url]], { indent: 0 }),
     "",
-    ui.table(["tool", "agent", "token", "config"], rows),
+    ui.table(["tool", "agent", "token", "briefing", "config"], rows),
     "",
     ...ui
       .wrap(
@@ -1238,6 +1313,10 @@ export function renderConnectList(r: { console_url: string; tools: ConnectListRo
       .map((l) => ui.dim(l)),
     ...ui
       .wrap("token: whether the bearer is in the login Keychain where this verb puts it — its value is never read here.")
+      .split("\n")
+      .map((l) => ui.dim(l)),
+    ...ui
+      .wrap("briefing: the session-start briefing is on by default for an agent with a read grant; off = you opted this agent out (`connect <tool> --briefing off`); n/a = no live row, or nothing in that tool delivers it yet.")
       .split("\n")
       .map((l) => ui.dim(l)),
   ].join("\n");

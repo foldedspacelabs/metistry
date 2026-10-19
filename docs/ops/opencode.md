@@ -238,6 +238,38 @@ instead of dropped (SHOULD-10: one silent drop ends the trust) — the same fold
 `docs/ops/capture-shortcut.md` uses, and the same caveat applies: `inbox-drain`
 does not sweep it yet, so those notes wait until it does.
 
+## Session-start briefing
+
+Unlike the session capture, which is off until `METISTRY_CAPTURE_ON_STOP=1`, the
+briefing is **on by default** for an agent with a read grant (the owner's ruling,
+2026-10-04), once the plugin is linked. OpenCode has no session-start event, so
+`plugins/opencode/plugin.js` returns a `"experimental.chat.system.transform"`
+hook: on a session's first turn it calls `GET /api/briefing?repo=<checkout>&remote=<origin>`
+with `METISTRY_AGENT_TOKEN_OPENCODE` (else `METISTRY_OWNER_TOKEN`) and adds the
+text to the system prompt; every later turn of that session adds the **same**
+text from memory, so the console is asked once and the cached prompt prefix is
+not churned. A deleted session forgets its text.
+
+```sh
+metistry connect opencode --briefing off   # opt this agent out (on takes it back)
+```
+
+The opt-out is `briefing: false` in the agent's grants on the console, so it is
+the console that answers an opted-out agent the empty briefing — nothing is
+added. `METISTRY_BRIEFING=off` silences the hook for one profile. A console that
+is down, a refusal, a body that is not a briefing, or a redirect adds nothing,
+throws nothing at OpenCode, and logs one redacted `client.app.log` line.
+
+**What is verified, and what is not.** The hook's name and shape
+(`input: { sessionID?, model }`, `output: { system: string[] }`) are read from
+`@opencode-ai/plugin`'s `Hooks` type as installed with OpenCode **1.18.30**, and
+the plugin is tested against a stand-in for the console with the hook driven the
+way OpenCode calls it. A *running* OpenCode was not driven through a model turn
+to see the text arrive (that needs a provider call), and the hook is marked
+`experimental` upstream — so if a later OpenCode renames it, the briefing stops
+appearing and nothing else breaks. `metistry connect --list` shows the setting,
+not proof of delivery.
+
 ## The types package
 
 `@opencode-ai/plugin` gives a `Plugin` type for hook signatures. It is

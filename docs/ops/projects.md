@@ -47,6 +47,46 @@ names the flip in its system section; the weekly review counts them. The
 budget never un-flips: the user switches back by hand, and if the spend
 is still over, it flips again (recorded) without re-alerting that day.
 
+## A repository → its project page (CM-3)
+
+A coding agent knows where it is by its git remote; your projects are
+**pages**, `Projects/<Name>.md`. The map between them is the page's own
+frontmatter, which you write in Obsidian and git carries (invariant 1):
+
+```yaml
+---
+title: Metistry
+repos:
+  - git@github.com:foldedspacelabs/metistry.git
+  - https://github.com/foldedspacelabs/metistry-instance
+---
+```
+
+One remote or a list, in whichever clone spelling you copied. The
+reconciler's walk reduces each to one canonical shape — `host/path`, the
+scheme and any `user@` credential dropped, an SSH `user@host:path` folded
+to `host/path`, a trailing `.git` removed, the host lowercased and the path
+kept as written (core's `normalizeRepoRemote`, the Context Mode Engine's
+shape) — and indexes it into `project_repos (remote, path)`, a derived table
+rebuilt whole every cycle (`db/migrations/0042_project_repos_and_sessions.sql`).
+
+**Only your page counts.** `Projects/` is not a user-only directory — the
+fold creates entity pages there under its own `source:` — so the walk reads
+`repos:` only from a page with no `source:` or `source: user`. A page an
+agent wrote never makes a repository resolve to it. Only `Projects/<Name>.md`
+is a project page: a note inside a project's folder (`Projects/Drey/Notes.md`)
+is *in* the project but does not stand for it.
+
+**Never guessed.** The read is the named query `project_for_repo {remote}`
+(`seed/queries/project_for_repo.yaml`; `expose: generic`, so `GET
+/api/q/project_for_repo` and an agent's `queries_run` with a `queries: true`
+grant reach it): the remote is reduced in SQL exactly as the walk reduced the
+stored one, and the answer is the one page that claims it — path, title,
+description — or **no row** when none does or when two do. No fallback on a
+checkout basename, a title or a path: an unmapped repository is no project,
+because a wrong project page in a briefing is worse than none. No route was
+added (ruled 2026-10-04).
+
 ## Routes (passkey session only — this is the user's hand)
 
 | Route | Body | Effect |

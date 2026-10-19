@@ -81,6 +81,16 @@ touched, first prompt, last response); no model is called, and a transcript
 is never posted. Filenames are
 `claude-code-session-<UTC stamp>-<session id prefix>.md`.
 
+**The return path (CM-4).** The reconciler reads every session note back
+into `vault_sessions` — date, tool, repo, branch, turns, files touched and
+your first prompt clipped — and the named query `recent_sessions {repo,
+days}` serves them, newest first, for one checkout basename. Handles only:
+the note's `## Last response` is never parsed, a session is served only
+once the knowledge fold has read it, and a session an agent credential
+captured is never served as yours (`docs/ops/reconciler.md`, "Project repos
+and captured sessions"). Nothing reads it at session start yet; that is
+CM-1/CM-2's briefing.
+
 The summariser exists twice on purpose: the plugin ships as dependency-free
 `.mjs` a stranger runs out of `~/.claude/plugins`, so it cannot import
 `@foldedspacelabs/metistry-core`, which is what the CLI uses.

@@ -34,10 +34,10 @@
 //     render is named line by line and adopted into the store before the
 //     file is written again.
 
-import { chmod, cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { parseDocument } from "yaml";
 import { consoleSecretNames, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
 import {
@@ -87,7 +87,7 @@ import {
   inspectEnvText,
   lineHash,
   parseRenderRecord,
-  preRenderPath,
+  preRenderSnapshotPath,
   renderRecordPath,
   restampIfRendered,
   stampEnv,
@@ -541,6 +541,8 @@ export interface DerivedEnvValue {
   value: string;
   /** where it came from, for the report and the record — e.g. "deployment.yaml remote:" */
   from: string;
+  /** what superseding the file's value costs, said with it when it does (e.g. the passkeys bound to a dropped origin) — recorded for doctor's row too */
+  note?: string | undefined;
 }
 
 export interface DeliveredSecrets {
@@ -658,7 +660,7 @@ export async function renderEnvFile(opts: RenderEnvOptions): Promise<RenderEnvRe
     const d = derived[name]!;
     values.set(name, d.value);
     derivedNames.push(name);
-    if (prev.has(name) && prev.get(name) !== d.value) superseded[name] = d.from;
+    if (prev.has(name) && prev.get(name) !== d.value) superseded[name] = d.note ? `${d.from} — ${d.note}` : d.from;
   }
 
   // 2. the Keychain (or, without one, the file as the store)
@@ -762,16 +764,24 @@ export async function renderEnvFile(opts: RenderEnvOptions): Promise<RenderEnvRe
   const sha256 = inspectEnvText(text);
   if (sha256.kind !== "rendered") throw new Error("renderEnvFile: the file it just composed does not verify — a bug, not a hand edit");
 
-  // 5. write: the previous file kept beside the render whenever it was not a clean render
+  // 5. write: the previous file kept beside the render whenever it was not a
+  // clean render. The FIRST copy (`.env.pre-render`) is never overwritten —
+  // it is the hand-written file from before the file was derived, and the
+  // only copy of a value the render stopped honouring; a later hand-edited
+  // file is kept as `.env.pre-render.<n>`. Nothing here deletes any of them.
   let preRenderKept: string | undefined;
   await mkdir(stateDir, { recursive: true });
   if (seedExists && before.kind !== "rendered") {
-    preRenderKept = preRenderPath(stateDir);
-    await cp(opts.envFile, preRenderKept, { force: true });
+    preRenderKept = preRenderSnapshotPath(stateDir, existsSync);
+    await cp(opts.envFile, preRenderKept, { force: false });
     await chmod(preRenderKept, 0o600);
   }
-  await writeFile(target, text, { mode: 0o600 });
-  await chmod(target, 0o600);
+  // the file itself lands whole or not at all: a crash between a truncate and
+  // a write would leave the carried section — which has no other copy — empty
+  const tmp = `${target}.tmp-${process.pid}`;
+  await writeFile(tmp, text, { mode: 0o600 });
+  await chmod(tmp, 0o600);
+  await rename(tmp, target);
   const final = liveValues(text);
   const rec: EnvRenderRecord = {
     version: 1,
@@ -802,9 +812,13 @@ export async function renderEnvFile(opts: RenderEnvOptions): Promise<RenderEnvRe
   // service issues, filled from its item): not adopted, not kept — but named,
   // with the verb, and the edited line is in the copy kept beside
   const overruled = [...edited].filter((n) => values.has(n) && values.get(n) !== prev.get(n) && !(n in superseded)).sort();
-  if (overruled.length) out(`your edit of ${overruled.join(", ")} is not what is rendered — a credential another service issues is replaced with \`metistry secrets replace <name>\`; the edited line is in ${PRE_RENDER_FILENAME}`);
+  if (overruled.length) out(`your edit of ${overruled.join(", ")} is not what is rendered — a credential another service issues is replaced with \`metistry secrets replace <name>\`; the edited line is in ${preRenderKept ? basename(preRenderKept) : PRE_RENDER_FILENAME}`);
   for (const n of minted) out(`minted ${n} — it was in no store: ${GENERATED_SECRETS[n]}`);
-  for (const [n, from] of Object.entries(superseded)) out(`${n}: the file's value is superseded by ${from}, which is what is rendered${preRenderKept ? ` (the previous line is in ${PRE_RENDER_FILENAME})` : ""}`);
+  for (const n of Object.keys(superseded).sort()) {
+    const d = derived[n]!;
+    out(`${n}: the file's value is superseded by ${d.from}, which is what is rendered${preRenderKept ? ` (the previous line is in ${basename(preRenderKept)})` : ""}`);
+    if (d.note) out(d.note);
+  }
   if (dropped.length) out(`no longer delivered — nothing in compute.yaml, the connections or secrets.yaml names ${dropped.join(", ")} any more; the secret itself stays in the Keychain`);
   if (carriedNames.length) out(`carried as written (nothing in .metistry/*.yaml decides these yet): ${carriedNames.join(", ")}`);
   if (skipped.length) out(`in no store, so not rendered: ${skipped.join(", ")}`);

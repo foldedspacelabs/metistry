@@ -5,7 +5,7 @@
 // again. Everything here runs against a temp instance and a fake Keychain
 // (fake-security.ts); nothing touches the real one, and no value is printed.
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -219,9 +219,15 @@ describe("renderEnvFile", () => {
     expect(said).toContain("your edit of METISTRY_BRIDGE_TOKEN_EVENTKIT went into the login Keychain and is what is rendered");
     expect(said).toContain("removed by hand but still in the store, so rendered again: METISTRY_DB_PASSWORD");
     for (const v of ["ek-edited", "ek-by-hand", "pw-from-hand"]) expect(said).not.toContain(v);
-    // the file verifies again, and the hand-edited file is kept beside it
+    // the file verifies again, and the hand-edited file is kept beside it — as
+    // the next snapshot: the first copy (the hand-written file) is never overwritten
     expect(inspectEnvText(await readFile(envFile, "utf8")).kind).toBe("rendered");
-    expect(await readFile(join(stateDir, PRE_RENDER_FILENAME), "utf8")).toBe(edited);
+    expect(r.preRenderKept).toBe(join(stateDir, `${PRE_RENDER_FILENAME}.1`));
+    expect(await readFile(join(stateDir, `${PRE_RENDER_FILENAME}.1`), "utf8")).toBe(edited);
+    expect(await readFile(join(stateDir, PRE_RENDER_FILENAME), "utf8")).toBe(HAND_WRITTEN);
+    expect(said).toContain(`the previous file is kept at ${join(stateDir, `${PRE_RENDER_FILENAME}.1`)}`);
+    // the render landed whole: no temporary file left beside it
+    expect((await readdir(stateDir)).filter((f) => f.includes(".tmp-"))).toEqual([]);
     expect((await envFileRow(dir)).status).toBe("ok");
   });
 
@@ -240,8 +246,8 @@ describe("renderEnvFile", () => {
     expect(r.adoptedEdits).toEqual([]);
     // the store's value stands; the edit is named, with the verb that changes such a credential, and kept beside
     expect(parseDotEnv(await readFile(envFile, "utf8")).METISTRY_OPENROUTER_API_KEY).toBe("sk-store");
-    expect(lines.join("\n")).toContain("your edit of METISTRY_OPENROUTER_API_KEY is not what is rendered — a credential another service issues is replaced with `metistry secrets replace <name>`; the edited line is in .env.pre-render");
-    expect(await readFile(join(stateDir, PRE_RENDER_FILENAME), "utf8")).toBe(edited);
+    expect(lines.join("\n")).toContain("your edit of METISTRY_OPENROUTER_API_KEY is not what is rendered — a credential another service issues is replaced with `metistry secrets replace <name>`; the edited line is in .env.pre-render.1");
+    expect(await readFile(join(stateDir, `${PRE_RENDER_FILENAME}.1`), "utf8")).toBe(edited);
     for (const v of ["sk-store", "sk-hand", "sk-old"]) expect(lines.join("\n")).not.toContain(v);
   });
 
@@ -475,10 +481,41 @@ describe("metistry up derives the instance's .env", () => {
     expect(env.METISTRY_ORIGIN).toBe("http://127.0.0.1:8080");
     const said = lines.join("\n");
     expect(said).toContain("METISTRY_ORIGIN: the file's value is superseded by deployment.yaml `remote:` (`metistry remote set`), which is what is rendered");
+    // …and what that costs, in the remote rows' own words (X-105): the passkeys, and that no provider ships yet
+    expect(said).toContain("passkeys added at https://mac.example.ts.net no longer sign in");
+    expect(said).toContain("Until a provider adapter ships (Tailscale, X-106)");
     expect(await readFile(join(inst, ".metistry", "state", PRE_RENDER_FILENAME), "utf8")).toBe(handSet);
-    // doctor says so too, until the next render finds nothing to supersede
+    // doctor says so too — the same words — until the next render finds nothing to supersede
     const row = await envFileRow(inst);
     expect(row.status).toBe("degraded");
-    expect(row.remediation).toContain("METISTRY_ORIGIN (now decided by deployment.yaml `remote:` (`metistry remote set`))");
+    expect(row.remediation).toContain("METISTRY_ORIGIN (now decided by deployment.yaml `remote:` (`metistry remote set`) — METISTRY_ORIGIN in .env also names https://mac.example.ts.net");
+    expect(row.remediation).toContain("passkeys added at https://mac.example.ts.net no longer sign in");
+    expect(row.remediation).toContain("X-106");
+  });
+});
+
+describe("the previous file is kept for good", () => {
+  it("the first .env.pre-render is never overwritten; later hand-edited files are numbered snapshots", async () => {
+    const kc = fakeKeychain();
+    const { envFile, stateDir } = await instance();
+    await writeFile(envFile, HAND_WRITTEN);
+    const first = await renderEnvFile(renderOpts(kc, envFile, []));
+    expect(first.preRenderKept).toBe(join(stateDir, PRE_RENDER_FILENAME));
+    // two hand edits in a row, each rendered over
+    for (const n of [1, 2]) {
+      const edited = (await readFile(envFile, "utf8")).concat(`METISTRY_EDIT_${n}=${n}\n`);
+      await writeFile(envFile, edited);
+      const r = await renderEnvFile(renderOpts(kc, envFile, []));
+      expect(r.preRenderKept).toBe(join(stateDir, `${PRE_RENDER_FILENAME}.${n}`));
+      expect(await readFile(r.preRenderKept!, "utf8")).toBe(edited);
+      expect(await mode(r.preRenderKept!)).toBe(0o600);
+    }
+    // the hand-written original is still exactly what it was
+    expect(await readFile(join(stateDir, PRE_RENDER_FILENAME), "utf8")).toBe(HAND_WRITTEN);
+    // a clean re-render keeps nothing new
+    const before = (await readdir(stateDir)).sort();
+    await renderEnvFile(renderOpts(kc, envFile, []));
+    expect((await readdir(stateDir)).sort()).toEqual(before);
+    expect(before.filter((f) => f.startsWith(PRE_RENDER_FILENAME))).toEqual([PRE_RENDER_FILENAME, `${PRE_RENDER_FILENAME}.1`, `${PRE_RENDER_FILENAME}.2`]);
   });
 });

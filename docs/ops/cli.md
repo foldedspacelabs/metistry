@@ -1374,8 +1374,13 @@ the same yaml and Keychain are byte-identical (a test asserts exactly that):
   `remote:`, X-105; `docs/ops/remote-access.md`) — the provider's origin
   first, the loopback origin second, or with `none` the loopback origin
   alone. A remote origin written into the file by hand is superseded, named,
-  and kept in `.env.pre-render`; `metistry remote set <provider>` is how one
-  is configured.
+  and kept in `.env.pre-render` — and `up`'s plan and doctor's `env` row say
+  what that costs, in the remote rows' own words: the console no longer
+  answers for that origin and **passkeys added at it no longer sign in**, and
+  until a provider adapter ships (Tailscale, X-106) there is no supported way
+  to serve it, so the honest interim is the line kept in `.env.pre-render`
+  and waiting; `metistry remote set <provider>` is how a remote origin is
+  configured.
 - **from the login Keychain** — every secret-shaped variable this install
   knows (your `.env`, `.env.example`, the last render), from this
   instance's account; a `GENERATED_SECRETS` one minted when no store has it;
@@ -1394,9 +1399,13 @@ the same yaml and Keychain are byte-identical (a test asserts exactly that):
 
 The first render of a hand-written file loses nothing: its secrets are
 adopted, its configuration carried, and the file as it was is kept beside
-the render as `.metistry/state/.env.pre-render` (0600; delete it once the
-install is proven — nothing deletes it yet). The same copy is made whenever
-the previous file was not a clean render. Beside the file `up` writes
+the render as `.metistry/state/.env.pre-render` (0600). That first copy is
+never overwritten — it is the only copy of a value the render stopped
+honouring — and a later hand-edited file is kept as `.env.pre-render.1`,
+`.2`, …; nothing in the product deletes any of them (delete them yourself
+once the install is proven). The rendered file itself is written whole, via
+a temporary file and a rename, so a crash mid-write never loses the carried
+section's only copy. Beside the file `up` writes
 `.metistry/state/env-render.json`: every rendered name, the section it was
 written in and a sha256 of its `NAME=value` line — names and hashes, never
 a value.

@@ -200,3 +200,20 @@ export function composeEnvBody(sections: Record<EnvSection, string[]>, titles: R
   }
   return out.length ? `${out.join("\n")}\n` : "\n";
 }
+
+/**
+ * Where the previous file is kept beside a render that replaces something
+ * other than a clean render. The FIRST copy is `.env.pre-render` and is never
+ * overwritten: it is the hand-written file from before the file was derived,
+ * and the only copy of any value the render stopped honouring. A later one
+ * (a hand-edited rendered file) is `.env.pre-render.1`, `.2`, … — the lowest
+ * number not taken. Nothing in the product deletes any of them.
+ */
+export function preRenderSnapshotPath(stateDir: string, exists: (p: string) => boolean): string {
+  const first = preRenderPath(stateDir);
+  if (!exists(first)) return first;
+  for (let n = 1; ; n++) {
+    const p = `${first}.${n}`;
+    if (!exists(p)) return p;
+  }
+}

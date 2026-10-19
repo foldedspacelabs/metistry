@@ -650,7 +650,7 @@ export async function envFileRow(instanceDir: string): Promise<DoctorRow> {
           if (superseded.length > 0) {
             return {
               status: "degraded",
-              remediation: `the last render stopped honouring a value the file had: ${superseded.map(([n, from]) => `${n} (now decided by ${from})`).join(", ")} — the previous line is in ${PRE_RENDER_FILENAME}; set it where it now lives, and the next \`metistry up\` clears this row`,
+              remediation: `the last render stopped honouring a value the file had: ${superseded.map(([n, from]) => `${n} (now decided by ${from})`).join(", ")} — the previous line is in ${PRE_RENDER_FILENAME} (the first copy, never overwritten); set it where it now lives, and the next \`metistry up\` clears this row`,
               meta,
             };
           }

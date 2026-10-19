@@ -1387,8 +1387,15 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     // remote-access record (plan §2.23, X-105) — the provider's origin first,
     // the loopback origin second, or the loopback origin alone. A hand-set
     // remote origin the file held is superseded and NAMED, never kept silently
+    // — and what that costs is said with it, in the same words as the remote
+    // rows (X-105): passkeys bound to the dropped origin stop signing in, and
+    // until a provider adapter ships (X-106) the honest interim is the line
+    // kept in `.env.pre-render`
     const origins = consoleOrigins(values);
-    const derived = origins.value !== undefined ? { METISTRY_ORIGIN: { value: origins.value, from: "deployment.yaml `remote:` (`metistry remote set`)" } } : {};
+    const derived =
+      origins.value !== undefined
+        ? { METISTRY_ORIGIN: { value: origins.value, from: "deployment.yaml `remote:` (`metistry remote set`)", ...(origins.dropped.length > 0 ? { note: droppedOriginsNote(origins.dropped, remoteOf(deployment)) } : {}) } }
+        : {};
     let rendered: RenderEnvResult;
     try {
       rendered = await renderEnvFile({

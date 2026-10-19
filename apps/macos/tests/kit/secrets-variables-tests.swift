@@ -17,43 +17,12 @@ import Testing
 
 @testable import MetistryKit
 
-/// Shapes of real credentials — built by concatenation so no scanner mistakes
-/// this file for a leak (packages/core/test/variables.test.ts's own KEYS).
-private let keys: [String: String] = [
-    "openai": "sk-" + "proj-" + "Ab3dEf6hIj9kLm2nOp5qRs8t",
-    "anthropic": "sk-" + "ant-api03-" + "x7Yq2Lm9Pz4Kd8Wn3Rt6Vb1Hc5Jf0",
-    "stripe": "sk_" + "live_" + "51HqAbCdEfGh12345678",
-    "github": "gh" + "p_" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0",
-    "github_pat": "github_" + "pat_" + "11ABCDEFG0123456789_abcdefghij",
-    "gitlab": "gl" + "pat-" + "xY7zW3vU9tS1rQ5p",
-    "slack": "xo" + "xb-" + "1234567890-abcdefghij",
-    "aws": "AK" + "IA" + "IOSFODNN7EXAMPLE",
-    "google": "AI" + "za" + "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
-    "linear": "lin_" + "api_" + "aBcDeFgHiJkLmNoPqRsTuVwXyZ012345",
-    "devin": "ap" + "k_" + "user_ZGV2aW4tdGVzdC1rZXk",
-    "jwt": "ey" + "JhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
-    "pem": "-----BEGIN " + "OPENSSH PRIVATE KEY-----",
-    "bearer": "Bearer " + "abcdef0123456789",
-    "url_password": "https://owner:" + "hunter2hunter2@git.example.com/repo.git",
-    "url_token": "https://calendar.example.com/feed.ics?" + "token=Zq81mNa0pLx",
-    "hex": "3f9a1c0b7e2d4a6f8b1c3e5d7f9a0b2c4d6e8f01",
-    "base64": "q8ZtR2mXv9LpW4kN7sJ1hG5fD3aB6cE0yU",
-    "base36": "k8s7df9a0lqz3mx2vb6n4c1r5t",
-    "in_prose": "use " + "gh" + "p_" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0 for pushes",
-]
-
-private let plain = [
-    "Platform",
-    "foldedspacelabs/metistry, foldedspacelabs/metistry-instance",
-    "https://github.com/foldedspacelabs/metistry",
-    "platform-team-infrastructure-2026",
-    "MyCompanyEngineering2026",
-    "ENG",
-    "3f2a8c1e-9b4d-4e6f-8a1c-2b3d4e5f6a7b",
-    "Acme Corporation, Inc.",
-    "2026-10-01",
-    "/Users/owner/Development/metistry-instance",
-]
+/// Shapes of real credentials and values that are not — read from the file
+/// core's own tests run (`held-to-core/key-shape.json`), never copied here, so
+/// a case changed in core is a case changed for the app. `theKeyShape…` below
+/// fails if the file does not load.
+private let keys: [String: String] = HeldToCore.keyShapeKeys()
+private let plain: [String] = HeldToCore.keyShapePlain()
 
 private let instance = URL(fileURLWithPath: "/tmp/instance")
 
@@ -416,7 +385,10 @@ private func says(_ node: AXNode, _ text: String) -> Bool {
     #expect(settings.variablesPane.draft?.refusal?.words.hasPrefix("deploy: This looks like a key") == true)
 }
 
-@Test func theKeyShapeCheckIsCoresPatternForPattern() {
+@Test func theKeyShapeCheckIsCoresPatternForPattern() throws {
+    // core's looksLikeKey runs these same cases (packages/core/test/variables.test.ts)
+    _ = try HeldToCore.cases("key-shape")
+    #expect(keys.count >= 20 && plain.count >= 10, "the shared cases did not load: \(keys.count) keys, \(plain.count) plain")
     for (label, value) in keys { #expect(KeyShape.looksLikeKey(value), "\(label)") }
     for value in plain { #expect(!KeyShape.looksLikeKey(value), "\(value)") }
 }

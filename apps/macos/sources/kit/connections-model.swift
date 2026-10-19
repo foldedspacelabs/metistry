@@ -7,8 +7,10 @@
 // READ-ONLY OVER THE API. Everything on the pane is what three served routes
 // say — `GET /api/connections`, `GET /api/connections/:name` and
 // `GET /api/secrets` — and nothing else: no connection file is opened, no
-// server is dialled, and a field the routes do not serve is not drawn (the
-// last check, the agents a connection is lent to). Names, never values: the
+// server is dialled, and a field the routes do not serve is not drawn. The
+// last check (`last_checked`), everything that uses a connection (`used_by`:
+// syncs, and the agents and crews granted it) and each header's secret names
+// (`header_secrets`) are served since X-96. Names, never values: the
 // routes carry header, query-parameter, environment and secret NAMES and no
 // value, so there is nothing here that could hold one.
 //
@@ -141,13 +143,33 @@ public enum ConnectionReach: Equatable, Sendable {
     }
 }
 
-/// Who reads it today. The route serves syncs (`ConnectionUser`); agents are
-/// lent one through the lazy pair and are not in `used_by` yet.
+/// Who reads it: a `sync` that names it, or an `agent` or a `crew` granted it
+/// through the lazy pair (once the owner has offered it). The assistant reaches
+/// every connection and is not listed against each.
 public struct ConnectionUser: Equatable, Sendable, Identifiable {
     public let kind: String
     public let name: String
     public var id: String { "\(kind):\(name)" }
     public var said: String { "\(kind) \(name)" }
+}
+
+/// The newest check anyone ran (`last_checked`): when, and doctor's word for what it found.
+public struct ConnectionCheckStamp: Equatable, Sendable {
+    public let at: Date
+    public let status: CheckStatus
+
+    /// *Checked 12 Oct, 9:30 AM — degraded*; the words are doctor's (`CheckStatus.label`).
+    public func said(locale: Locale = .current, calendar: Calendar = .current) -> String {
+        let when = at.formatted(Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).month(.abbreviated).day().hour().minute())
+        return "\(when) — \(status.label)"
+    }
+}
+
+/// One header an HTTP connection sends, with the NAMES of the secrets its value names — never the value.
+public struct ConnectionHeader: Equatable, Sendable, Identifiable {
+    public let name: String
+    public let secrets: [String]
+    public var id: String { name }
 }
 
 /// What a connection's provider — its connection-type unit — declares.
@@ -180,6 +202,10 @@ public struct ConnectionRow: Identifiable, Equatable, Sendable {
     /// The detail route only.
     public let file: String?
     public let providerUnit: ConnectionProviderUnit?
+    /// `last_checked`: nil when no check has been recorded, or from a console that predates it.
+    public var lastChecked: ConnectionCheckStamp?
+    /// `reach.header_secrets`: each header with its secret names. Empty for a console that predates it — the header names alone are then in `reach`.
+    public var headerSecrets: [ConnectionHeader] = []
 
     public var id: String { name }
 
@@ -242,7 +268,14 @@ public struct ConnectionRow: Identifiable, Equatable, Sendable {
                 return ConnectionUser(kind: kind, name: name)
             },
             file: json.string("file"),
-            providerUnit: unit
+            providerUnit: unit,
+            lastChecked: json["last_checked"].flatMap { stamp in
+                guard let at = WireTime.date(stamp.string("at")), let status = stamp.string("status").flatMap(CheckStatus.init(rawValue:)) else { return nil }
+                return ConnectionCheckStamp(at: at, status: status)
+            },
+            headerSecrets: (json["reach"]?["header_secrets"]?.arrayValue ?? []).compactMap { header in
+                header.string("header").map { ConnectionHeader(name: $0, secrets: strings(header["secrets"])) }
+            }
         )
     }
 
@@ -338,8 +371,9 @@ public struct EgressDestination: Equatable, Sendable {
     }
 
     /// Core's `isLoopbackHost` (`packages/core/src/egress.ts`), spelled the same
-    /// way and held to it by `connections-view-tests.swift`, which reads core's
-    /// function: brackets stripped, lowercased, then `localhost`, `::1`, its
+    /// way and held to it by `connections-view-tests.swift`, which runs the cases
+    /// core's own test runs through that function
+    /// (`packages/core/test/held-to-core/loopback-hosts.json`): brackets stripped, lowercased, then `localhost`, `::1`, its
     /// long form, or `127.` and three more dotted groups of one to three digits.
     /// Nothing else is loopback — `foo.localhost` and `0.0.0.0` are not — so the
     /// Mac never calls a plain-http destination safe that the door would call

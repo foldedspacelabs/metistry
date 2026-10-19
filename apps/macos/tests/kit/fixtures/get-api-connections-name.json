@@ -55,15 +55,17 @@
         }
       ],
       "offer_to_agents": false,
+      "fold": true,
       "used_by": [
         {
           "kind": "sync",
           "name": "github-state"
         }
       ],
+      "last_checked": null,
       "file": ".metistry/connections/github.yaml",
       "provider_unit": null
     },
-    "as_of": "2026-09-30T06:54:06.433Z"
+    "as_of": "2026-10-19T05:43:57.362Z"
   }
 }

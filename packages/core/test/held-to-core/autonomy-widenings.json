@@ -1,0 +1,113 @@
+{
+  "_": "Core's autonomy arithmetic, as cases. packages/core/test/actions.test.ts runs every case through autonomyWidenings / effectiveActions; apps/macos/tests/kit/agents-view-tests.swift runs the same file through AgentAutonomy. Edit a case here and both suites move with it; ops/scripts/check-held-to-core.mjs keeps the Swift side reading this file.",
+  "kinds": ["dispatch", "task_update", "comment", "capture", "connection_call"],
+  "modes": ["deny", "propose", "allow"],
+  "levels": ["observe", "propose", "act_within_scope"],
+  "widenings": [
+    {
+      "why": "from nothing to propose: the level rises and every kind that was denied now asks",
+      "prev": {},
+      "next": { "level": "propose" },
+      "expect": [
+        "level observe → propose",
+        "actions.dispatch deny → propose",
+        "actions.task_update deny → propose",
+        "actions.comment deny → propose",
+        "actions.capture deny → propose"
+      ]
+    },
+    {
+      "why": "propose to act_within_scope: dispatch stays a human decision unless set by hand",
+      "prev": { "level": "propose" },
+      "next": { "level": "act_within_scope", "actions": { "dispatch": "allow" } },
+      "expect": [
+        "level propose → act_within_scope",
+        "actions.dispatch propose → allow",
+        "actions.task_update propose → allow",
+        "actions.comment propose → allow",
+        "actions.capture propose → allow"
+      ]
+    },
+    { "why": "a narrowing", "prev": { "level": "act_within_scope" }, "next": { "level": "propose" }, "expect": [] },
+    { "why": "a no-op", "prev": { "level": "propose" }, "next": { "level": "propose" }, "expect": [] },
+    {
+      "why": "a per-kind deny under the same level narrows",
+      "prev": { "level": "act_within_scope" },
+      "next": { "level": "act_within_scope", "actions": { "comment": "deny" } },
+      "expect": []
+    },
+    {
+      "why": "an entry raised under a ceiling that refuses it changes nothing, so it is no widening: the test is on the EFFECTIVE table, not the record",
+      "prev": { "level": "propose" },
+      "next": { "level": "propose", "actions": { "comment": "allow" } },
+      "expect": []
+    },
+    {
+      "why": "the observe ceiling swallows every entry",
+      "prev": {},
+      "next": { "actions": { "dispatch": "allow", "capture": "propose" } },
+      "expect": []
+    },
+    {
+      "why": "removing a per-kind deny under propose widens that kind alone",
+      "prev": { "level": "propose", "actions": { "capture": "deny" } },
+      "next": { "level": "propose" },
+      "expect": ["actions.capture deny → propose"]
+    },
+    {
+      "why": "the §4.21 keys are not this function's business either way",
+      "prev": { "max_open_bundles": 1 },
+      "next": { "max_open_bundles": 99 },
+      "expect": []
+    },
+    {
+      "why": "connection_call is propose at every level, never allow: a raise to allow is swallowed by its own ceiling",
+      "prev": {},
+      "next": { "actions": { "connection_call": "allow" } },
+      "expect": []
+    },
+    {
+      "why": "connection_call deny → propose is a widening: the owner turned asking off and it is on again",
+      "prev": { "actions": { "connection_call": "deny" } },
+      "next": {},
+      "expect": ["actions.connection_call deny → propose"]
+    }
+  ],
+  "effective": [
+    {
+      "why": "an absent level is observe: nothing can act, only a connection call may ask",
+      "record": {},
+      "expect": { "dispatch": "deny", "task_update": "deny", "comment": "deny", "capture": "deny", "connection_call": "propose" }
+    },
+    {
+      "why": "propose asks for everything",
+      "record": { "level": "propose" },
+      "expect": { "dispatch": "propose", "task_update": "propose", "comment": "propose", "capture": "propose", "connection_call": "propose" }
+    },
+    {
+      "why": "act_within_scope allows all but dispatch",
+      "record": { "level": "act_within_scope" },
+      "expect": { "dispatch": "propose", "task_update": "allow", "comment": "allow", "capture": "allow", "connection_call": "propose" }
+    },
+    {
+      "why": "dispatch may be set to allow by hand, at act_within_scope",
+      "record": { "level": "act_within_scope", "actions": { "dispatch": "allow" } },
+      "expect": { "dispatch": "allow", "task_update": "allow", "comment": "allow", "capture": "allow", "connection_call": "propose" }
+    },
+    {
+      "why": "an entry cannot exceed the level's ceiling",
+      "record": { "level": "propose", "actions": { "task_update": "allow", "comment": "deny" } },
+      "expect": { "dispatch": "propose", "task_update": "propose", "comment": "deny", "capture": "propose", "connection_call": "propose" }
+    },
+    {
+      "why": "connection_call can be denied for one agent, and never allowed",
+      "record": { "level": "act_within_scope", "actions": { "connection_call": "allow", "capture": "deny" } },
+      "expect": { "dispatch": "propose", "task_update": "allow", "comment": "allow", "capture": "deny", "connection_call": "propose" }
+    },
+    {
+      "why": "observe with entries: all swallowed but the connection_call deny",
+      "record": { "level": "observe", "actions": { "comment": "propose", "connection_call": "deny" } },
+      "expect": { "dispatch": "deny", "task_update": "deny", "comment": "deny", "capture": "deny", "connection_call": "deny" }
+    }
+  ]
+}

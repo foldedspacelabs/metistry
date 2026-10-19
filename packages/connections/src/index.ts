@@ -117,8 +117,11 @@ export {
   type ConnectionTypeSummary,
   type ConnectionUser,
   type DescribeOptions,
+  type HeaderSecrets,
+  type LastChecked,
   type ReachSummary,
 } from "./describe.js";
+export { CHECK_STAMPS_FILE, CHECK_VERDICTS, forgetCheck, readCheckStamps, stampCheck, type CheckVerdict } from "./stamps.js";
 export {
   MAIL_SYNC,
   agentConnections,

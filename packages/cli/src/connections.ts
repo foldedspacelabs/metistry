@@ -76,6 +76,7 @@ import {
   checkConnection,
   connectionGrantee,
   describeConnectionDetail,
+  forgetCheck,
   describeConnectionTypes,
   describeConnections,
   generatedToolsFor,
@@ -197,6 +198,7 @@ export function renderConnections(rows: ConnectionRow[]): string {
     if (r.reach) out.push(`    reaches  ${reachLine(r.reach)}`);
     if (r.reach) out.push(`    tools    ${toolCounts(r)}`);
     out.push(`    used by  ${r.used_by.length ? r.used_by.map((u) => `${u.kind} ${u.name}`).join(", ") : "nobody yet"}`);
+    out.push(`    checked  ${r.last_checked ? `${r.last_checked.at} — ${r.last_checked.status}` : "never"}`);
     for (const i of r.issues) out.push(`    ! ${i}`);
   }
   return out.join("\n");
@@ -205,7 +207,10 @@ export function renderConnections(rows: ConnectionRow[]): string {
 export function renderConnectionDetail(d: ConnectionDetail): string {
   const out = [renderConnections([d]), `    file     ${d.file}`];
   if (d.description) out.push(`    about    ${d.description}`);
-  if (d.reach?.class === "http" && (d.reach.headers.length || d.reach.query.length)) out.push(`    sends    ${[...d.reach.headers.map((h) => `header ${h}`), ...d.reach.query.map((q) => `query ${q}`)].join(", ")}`);
+  if (d.reach?.class === "http" && (d.reach.headers.length || d.reach.query.length)) {
+    const header = (h: { header: string; secrets: string[] }) => `header ${h.header}${h.secrets.length ? ` (${h.secrets.join(", ")})` : ""}`;
+    out.push(`    sends    ${[...d.reach.header_secrets.map(header), ...d.reach.query.map((q) => `query ${q}`)].join(", ")}`);
+  }
   if (d.reach?.class === "command" && d.reach.env.length) out.push(`    env      ${d.reach.env.join(", ")} (given to this command only; never written to disk)`);
   if (d.secrets.length) out.push(`    secrets  ${d.secrets.join(", ")}`);
   if (d.variables.length) out.push(`    vars     ${d.variables.join(", ")}`);
@@ -214,8 +219,8 @@ export function renderConnectionDetail(d: ConnectionDetail): string {
 }
 
 /** The tool table: by group, each tool with its mode in the owner's words. */
-export function renderPolicy(r: Pick<ConnectionRow, "name" | "tools" | "offer_to_agents">): string {
-  const out = [`  ${r.name}: offer to agents ${r.offer_to_agents ? "on" : "off"}`];
+export function renderPolicy(r: Pick<ConnectionRow, "name" | "tools" | "offer_to_agents" | "fold">): string {
+  const out = [`  ${r.name}: offer to agents ${r.offer_to_agents ? "on" : "off"}; fold large answers ${r.fold ? "on" : "off"}`];
   if (r.tools.length === 0) return [...out, "  no tools listed — nothing may be called. `metistry connections test <name>` shows what the server offers."].join("\n");
   const width = Math.max(...r.tools.map((t) => t.name.length));
   for (const g of TOOL_GROUPS) {
@@ -897,13 +902,16 @@ export interface PolicySpec {
   mode?: string | undefined;
   group?: string | undefined;
   offer?: string | undefined;
+  /** `--fold on|off`: whether `connections_call` folds this connection's large answers (X-132; on by default) */
+  fold?: string | undefined;
 }
 
 /**
  * `connections policy <name>` prints the tool table; `policy <name> <tool>
  * <allow|ask|never> [--group g]` sets one tool's mode (listing it, if it is
  * not yet — its group from the provider, or `--group`); `--offer on|off`
- * sets the offer switch. The owner's hand: nothing else moves a tool to Allow.
+ * sets the offer switch; `--fold on|off` the fold switch. The owner's hand:
+ * nothing else moves a tool to Allow.
  */
 export async function connectionsPolicy(name: string | undefined, spec: PolicySpec, opts: ConnectionsOptions): Promise<{ row: ConnectionRow; delivery?: ProtectedWrite | undefined }> {
   const e = await openConnection(name, opts);
@@ -932,6 +940,11 @@ export async function connectionsPolicy(name: string | undefined, spec: PolicySp
     if (spec.offer !== "on" && spec.offer !== "off") throw new StepFailed("--offer takes on or off");
     doc.setIn(["offer_to_agents"], spec.offer === "on");
     changes.push(`offer to agents ${spec.offer}`);
+  }
+  if (spec.fold !== undefined) {
+    if (spec.fold !== "on" && spec.fold !== "off") throw new StepFailed("--fold takes on or off");
+    doc.setIn(["fold"], spec.fold === "on");
+    changes.push(`fold large answers ${spec.fold}`);
   }
   if (changes.length === 0) {
     const detail = await describeConnectionDetail(e.name, e.catalog, connectionRel(opts.instanceDir, e.name));
@@ -963,6 +976,7 @@ export async function connectionsRemove(name: string | undefined, opts: Connecti
     fetchFn: opts.fetchFn ?? fetch,
     instanceDir: opts.instanceDir,
   });
+  if (opts.dryRun !== true) await forgetCheck(opts.instanceDir, e.name);
   return { name: e.name, referred_by: referredBy, delivery };
 }
 

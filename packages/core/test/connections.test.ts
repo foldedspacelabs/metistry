@@ -280,6 +280,12 @@ describe("connection files (§2.6)", () => {
     expect(conn(devin({ reach: { http: { url: "https://mcp.devin.ai/mcp" } }, secrets: [] })).reach.http?.auth).toEqual({ scheme: "none" });
   });
 
+  it("folds large answers by default; the owner turns it off per connection with `fold: false`, and nothing else is a value for it (X-132)", () => {
+    expect(conn(workCalendar()).fold).toBe(true);
+    expect(conn({ ...workCalendar(), fold: false }).fold).toBe(false);
+    expect(fileErrors({ ...workCalendar(), fold: "sometimes" })).toMatch(/fold/);
+  });
+
   it("refuses a secret used in a value but not listed in secrets", () => {
     const e = fileErrors(devin({ reach: { http: { url: "https://mcp.devin.ai/mcp", headers: { "X-Org": "{{ secret.devin_org_key }}" } } } }));
     expect(e).toMatch(/reach\.http\.headers\.X-Org: secret "devin_org_key" is used but not listed in secrets/);

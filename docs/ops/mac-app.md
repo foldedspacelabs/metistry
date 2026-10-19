@@ -828,7 +828,8 @@ assistant's own row and revoked ones left out) plus anyone the file grants —
 Screen 19 §2 drew *Save as Variable* beside it; the plan and T4-4's CLI refuse
 the value outright, and the plan wins, so no override is drawn. The app checks
 **first**, with `KeyShape` — core's `looksLikeKey`, pattern for pattern, held
-to core's own examples by a test — because a value that reaches `variables
+to core's own examples by a test that reads the file core's test reads
+(`packages/core/test/held-to-core/key-shape.json`) — because a value that reaches `variables
 set` is in that process's argv. While the value looks like a key the sheet
 draws no command at all; Save shows *This looks like a key. Variables can be
 read by agents.* with **Store as Secret**, which moves the name and value into
@@ -1886,8 +1887,10 @@ with `agent`, and `GET /api/compute` for the model dropdown. No route was added.
   sent; a record that moved sends nothing and offers the edit again. A
   narrowing goes at once. A widening confirms first, listing core's
   `autonomyWidenings` strings verbatim — `AgentAutonomy.widenings` is that
-  function carried over, held to core's own test cases and to the recorded
-  PUT's `widened` — plus reach added in the same `key a → b` shape; the button
+  function carried over, held to the cases core's own test runs (read from
+  `packages/core/test/held-to-core/autonomy-widenings.json`, so a changed case
+  fails the Swift copy before it merges; `ops/scripts/check-held-to-core.mjs`)
+  and to the recorded PUT's `widened` — plus reach added in the same `key a → b` shape; the button
   says **Widen**. Revoke and Rotate confirm, naming the cascade.
 - **Run Now** (C138) runs the agent's one routine (Item ▸ Run Now ⌘R); with
   none it is dimmed with *Nothing is scheduled for <id>.* beside **Give It

@@ -5,7 +5,13 @@ import Foundation
 
 public protocol ChatStore: Sendable {
     /// route: POST /message
-    func send(_ text: String, threadID: String?, tier: String?) async -> Result<MessageAccepted, ConsoleError>
+    ///
+    /// `captureSession` is the session-turn marker (X-84; docs/ops/client-api.md
+    /// "the session-turn marker"): the recorder's id of the recording the turn
+    /// is asked inside. The capture bar's Ask sets it while a recording runs;
+    /// the console holds such a turn to the private tier or refuses it, never
+    /// moving it. Nil sends no field, and the turn is routed as it always was.
+    func send(_ text: String, threadID: String?, tier: String?, captureSession: String?) async -> Result<MessageAccepted, ConsoleError>
     /// route: GET /api/messages
     func messages(limit: Int?, since: String?) async -> Result<MessagePage, ConsoleError>
     /// route: POST /api/messages/:id/feedback
@@ -21,7 +27,8 @@ public protocol ChatStore: Sendable {
 }
 
 public extension ChatStore {
-    func send(_ text: String) async -> Result<MessageAccepted, ConsoleError> { await send(text, threadID: nil, tier: nil) }
+    func send(_ text: String) async -> Result<MessageAccepted, ConsoleError> { await send(text, threadID: nil, tier: nil, captureSession: nil) }
+    func send(_ text: String, threadID: String?, tier: String?) async -> Result<MessageAccepted, ConsoleError> { await send(text, threadID: threadID, tier: tier, captureSession: nil) }
     func messages() async -> Result<MessagePage, ConsoleError> { await messages(limit: nil, since: nil) }
     /// Every turn of the session, oldest first.
     func session(_ sessionID: String) async -> Result<SessionDetail, ConsoleError> { await session(sessionID, turnID: nil) }
@@ -72,8 +79,8 @@ public struct TurnProgress: ConsoleBody { public let json: JSONValue; public ini
 public struct SessionDetail: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 
 extension ConsoleStores: ChatStore {
-    public func send(_ text: String, threadID: String?, tier: String?) async -> Result<MessageAccepted, ConsoleError> {
-        await perform("POST", "/message", .fields(["text": .string(text), "thread_id": .text(threadID), "tier": .text(tier)]))
+    public func send(_ text: String, threadID: String?, tier: String?, captureSession: String?) async -> Result<MessageAccepted, ConsoleError> {
+        await perform("POST", "/message", .fields(["text": .string(text), "thread_id": .text(threadID), "tier": .text(tier), "capture_session": .text(captureSession)]))
     }
 
     public func messages(limit: Int?, since: String?) async -> Result<MessagePage, ConsoleError> {

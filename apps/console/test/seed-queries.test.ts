@@ -14,6 +14,7 @@ import { parse } from "yaml";
 import { QueryStore, type SqlExecutor } from "@foldedspacelabs/metistry-queries";
 import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, finishRun, isRequestKind, requestWordOf, requestWordSql, startRun } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
+import { privateTables } from "./private-tables.js";
 
 loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
@@ -1944,7 +1945,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
   const DAY = "2026-09-20"; // fixed: nothing here may depend on the clock
 
   /** One vault_tasks row, with the NOT NULLs filled and everything else the caller's. */
-  const task = (pool: pg.Pool, o: Record<string, unknown>) => {
+  const task = (pool: pg.Pool | pg.PoolClient, o: Record<string, unknown>) => {
     const row: Record<string, unknown> = {
       checked: false,
       dropped: false,
@@ -2347,50 +2348,63 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
   // level rather than over HTTP.
   it("pending_count: always one row, a snoozed proposal is not counted, and `waiting` is exactly the pending-and-not-snoozed filter's count", async () => {
     const tag = `pc-${Date.now()}`;
-    const mk = (o: { decision?: string; snoozed?: string } = {}) =>
-      pool.query(
-        `INSERT INTO proposals (kind, source_agent, trust, payload, decision, snoozed_until) VALUES ('report', $1, 'internal', '{}'::jsonb, $2, $3) RETURNING id`,
-        [tag, o.decision ?? "pending", o.snoozed ?? null],
-      );
-    const rawCount = async () =>
-      Number(
-        (
-          await pool.query(
-            `SELECT count(*)::int AS n FROM proposals WHERE decision = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= now())`,
-          )
-        ).rows[0]!.n,
-      );
+    // `pending_count` counts the whole table and takes no filter, so a marker
+    // cannot scope it: any proposal another file raises in parallel would move
+    // the answer. This test counts on a connection whose `proposals` is its own
+    // (test/private-tables.ts) — nothing shared is read, written or deleted.
+    const db = await privateTables(pool, ["proposals"]);
+    const mine = new QueryStore(db);
+    await mine.loadDir(SEED_DIR);
+    try {
+      const mk = (o: { decision?: string; snoozed?: string } = {}) =>
+        db.query(
+          `INSERT INTO proposals (kind, source_agent, trust, payload, decision, snoozed_until) VALUES ('report', $1, 'internal', '{}'::jsonb, $2, $3) RETURNING id`,
+          [tag, o.decision ?? "pending", o.snoozed ?? null],
+        );
+      const rawCount = async () =>
+        Number(
+          (
+            await db.query(
+              `SELECT count(*)::int AS n FROM proposals WHERE decision = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= now())`,
+            )
+          ).rows[0]!.n,
+        );
 
-    // one row, always — even before this test adds anything of its own
-    const before = (await store.run("pending_count")).rows;
-    expect(before).toHaveLength(1);
-    expect(before[0]!.waiting).toBe(await rawCount());
+      // one row, always — even before this test adds anything of its own
+      const before = (await mine.run("pending_count")).rows;
+      expect(before).toHaveLength(1);
+      expect(before[0]!.waiting).toBe(0); // the shadow starts empty: no one else's row is in this count
+      expect(before[0]!.oldest_ts).toBeNull();
+      expect(before[0]!.waiting).toBe(await rawCount());
 
-    // a pending, unsnoozed row: the count moves by exactly one
-    await mk();
-    const withPending = (await store.run("pending_count")).rows;
-    expect(withPending).toHaveLength(1);
-    expect(withPending[0]!.waiting).toBe((before[0]!.waiting as number) + 1);
-    expect(withPending[0]!.waiting).toBe(await rawCount());
-    expect(withPending[0]!.oldest_ts).not.toBeNull();
+      // a pending, unsnoozed row: the count moves by exactly one
+      await mk();
+      const withPending = (await mine.run("pending_count")).rows;
+      expect(withPending).toHaveLength(1);
+      expect(withPending[0]!.waiting).toBe((before[0]!.waiting as number) + 1);
+      expect(withPending[0]!.waiting).toBe(await rawCount());
+      expect(withPending[0]!.oldest_ts).not.toBeNull();
 
-    // a row snoozed into the future: `later` is not an answer, but it has
-    // left the queue until its instant arrives — the count does not move
-    await mk({ snoozed: "2099-01-01T00:00:00Z" });
-    const withSnoozed = (await store.run("pending_count")).rows;
-    expect(withSnoozed).toHaveLength(1);
-    expect(withSnoozed[0]!.waiting).toBe(withPending[0]!.waiting);
-    expect(withSnoozed[0]!.waiting).toBe(await rawCount());
+      // a row snoozed into the future: `later` is not an answer, but it has
+      // left the queue until its instant arrives — the count does not move
+      await mk({ snoozed: "2099-01-01T00:00:00Z" });
+      const withSnoozed = (await mine.run("pending_count")).rows;
+      expect(withSnoozed).toHaveLength(1);
+      expect(withSnoozed[0]!.waiting).toBe(withPending[0]!.waiting);
+      expect(withSnoozed[0]!.waiting).toBe(await rawCount());
 
-    // a decided row: also not pending, also does not move it
-    await mk({ decision: "allow" });
-    const withDecided = (await store.run("pending_count")).rows;
-    expect(withDecided[0]!.waiting).toBe(withPending[0]!.waiting);
-    expect(withDecided[0]!.waiting).toBe(await rawCount());
+      // a decided row: also not pending, also does not move it
+      await mk({ decision: "allow" });
+      const withDecided = (await mine.run("pending_count")).rows;
+      expect(withDecided[0]!.waiting).toBe(withPending[0]!.waiting);
+      expect(withDecided[0]!.waiting).toBe(await rawCount());
 
-    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [tag]);
-    // back to the baseline once this test's own rows are gone
-    expect((await store.run("pending_count")).rows[0]!.waiting).toBe(before[0]!.waiting);
+      await db.query(`DELETE FROM proposals WHERE source_agent = $1`, [tag]);
+      // back to the baseline once this test's own rows are gone
+      expect((await mine.run("pending_count")).rows[0]!.waiting).toBe(before[0]!.waiting);
+    } finally {
+      await db.done();
+    }
   });
 
   it("pending_requests: every stored kind reads as the request type table says — action as action — and a kind it does not know as a report", async () => {
@@ -2418,49 +2432,57 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
   // directory listing `knowledge_pages` refuses to publish), and the reason
   // it is the only one of the five that is `expose: generic`.
   it("task_ageing: the measure only — buckets, totals, and a source KIND that can never be a path", async () => {
-    await pool.query(`DELETE FROM vault_tasks`);
     const tag = `ta-${Date.now()}`;
-    await task(pool, { path: `${tag}/a.md`, task_key: "t1", line_no: 1, text: "Fresh", text_norm: "fresh", first_seen_on: DAY });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t2", line_no: 2, text: "Three days", text_norm: "three days", first_seen_on: "2026-09-17", due: "2026-09-18" });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t3", line_no: 3, text: "A month", text_norm: "a month", first_seen_on: "2026-08-15", waiting: true, assigned: "People/Jim Fallon.md" });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t4", line_no: 4, text: "From a meeting", text_norm: "from a meeting", first_seen_on: "2026-09-19", source: `meeting:${tag}/Journal/Meetings/secret-topic.md` });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t5", line_no: 5, text: "Closed", text_norm: "closed", checked: true, done_on: "2026-09-19", first_seen_on: "2026-09-18" });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t6", line_no: 6, text: "A rule", text_norm: "a rule", recur_rule: "every week", recur_next: DAY });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t7", line_no: 7, text: "Unreadable", text_norm: "unreadable", parse_warning: "due nextweek", first_seen_on: DAY });
+    // `task_ageing` measures the whole table and takes no filter (that is its
+    // design), so it runs on a connection whose `vault_tasks` is its own
+    // (test/private-tables.ts). It used to empty the real table first — which
+    // took the rows out from under the files reading their own (X-25).
+    const db = await privateTables(pool, ["vault_tasks"]);
+    const ageing = new QueryStore(db);
+    await ageing.loadDir(SEED_DIR);
+    try {
+      await task(db, { path: `${tag}/a.md`, task_key: "t1", line_no: 1, text: "Fresh", text_norm: "fresh", first_seen_on: DAY });
+      await task(db, { path: `${tag}/a.md`, task_key: "t2", line_no: 2, text: "Three days", text_norm: "three days", first_seen_on: "2026-09-17", due: "2026-09-18" });
+      await task(db, { path: `${tag}/a.md`, task_key: "t3", line_no: 3, text: "A month", text_norm: "a month", first_seen_on: "2026-08-15", waiting: true, assigned: "People/Jim Fallon.md" });
+      await task(db, { path: `${tag}/a.md`, task_key: "t4", line_no: 4, text: "From a meeting", text_norm: "from a meeting", first_seen_on: "2026-09-19", source: `meeting:${tag}/Journal/Meetings/secret-topic.md` });
+      await task(db, { path: `${tag}/a.md`, task_key: "t5", line_no: 5, text: "Closed", text_norm: "closed", checked: true, done_on: "2026-09-19", first_seen_on: "2026-09-18" });
+      await task(db, { path: `${tag}/a.md`, task_key: "t6", line_no: 6, text: "A rule", text_norm: "a rule", recur_rule: "every week", recur_next: DAY });
+      await task(db, { path: `${tag}/a.md`, task_key: "t7", line_no: 7, text: "Unreadable", text_norm: "unreadable", parse_warning: "due nextweek", first_seen_on: DAY });
 
-    const { rows } = await store.run("task_ageing", { today: DAY, days: 7 });
-    const total = rows.find((r) => r.row_kind === "total")!;
-    expect(rows[0]).toBe(total); // the total reads first
-    expect(total).toMatchObject({ label: null });
-    expect(Number(total.n)).toBe(5); // five open non-rule lines
-    expect(Number(total.recurrence_rules)).toBe(1); // counted on its own line, never mixed in
-    expect(Number(total.overdue)).toBe(1);
-    expect(Number(total.carried)).toBe(1);
-    expect(Number(total.waiting)).toBe(1);
-    expect(Number(total.delegated)).toBe(1);
-    expect(Number(total.parse_warnings)).toBe(1);
-    expect(Number(total.unscheduled)).toBe(4);
-    expect(Number(total.done_in_window)).toBe(1);
-    expect(Number(total.created_in_window)).toBe(5); // six non-rule lines, one of them first seen 2026-08-15
-    expect(Number(total.oldest_open_days)).toBe(36);
-    expect(Number(total.completion_rate)).toBeCloseTo(1 / 5);
+      const { rows } = await ageing.run("task_ageing", { today: DAY, days: 7 });
+      const total = rows.find((r) => r.row_kind === "total")!;
+      expect(rows[0]).toBe(total); // the total reads first
+      expect(total).toMatchObject({ label: null });
+      expect(Number(total.n)).toBe(5); // five open non-rule lines
+      expect(Number(total.recurrence_rules)).toBe(1); // counted on its own line, never mixed in
+      expect(Number(total.overdue)).toBe(1);
+      expect(Number(total.carried)).toBe(1);
+      expect(Number(total.waiting)).toBe(1);
+      expect(Number(total.delegated)).toBe(1);
+      expect(Number(total.parse_warnings)).toBe(1);
+      expect(Number(total.unscheduled)).toBe(4);
+      expect(Number(total.done_in_window)).toBe(1);
+      expect(Number(total.created_in_window)).toBe(5); // six non-rule lines, one of them first seen 2026-08-15
+      expect(Number(total.oldest_open_days)).toBe(36);
+      expect(Number(total.completion_rate)).toBeCloseTo(1 / 5);
 
-    const buckets = rows.filter((r) => r.row_kind === "age");
-    expect(buckets.map((b) => [b.label, Number(b.n)])).toEqual([
-      ["today", 2],
-      ["1-3d", 2],
-      ["31-90d", 1],
-    ]);
+      const buckets = rows.filter((r) => r.row_kind === "age");
+      expect(buckets.map((b) => [b.label, Number(b.n)])).toEqual([
+        ["today", 2],
+        ["1-3d", 2],
+        ["31-90d", 1],
+      ]);
 
-    // the KIND, never the value: `meeting:<path>` must not put a vault path
-    // into an aggregate the generic door serves
-    const sources = rows.filter((r) => r.row_kind === "source");
-    expect(sources.map((s) => s.label).sort()).toEqual(["meeting", "typed"]);
-    expect(JSON.stringify(rows)).not.toContain("secret-topic");
-    expect(JSON.stringify(rows)).not.toContain(tag);
-    expect(JSON.stringify(rows)).not.toContain("Jim");
-
-    await pool.query(`DELETE FROM vault_tasks`);
+      // the KIND, never the value: `meeting:<path>` must not put a vault path
+      // into an aggregate the generic door serves
+      const sources = rows.filter((r) => r.row_kind === "source");
+      expect(sources.map((s) => s.label).sort()).toEqual(["meeting", "typed"]);
+      expect(JSON.stringify(rows)).not.toContain("secret-topic");
+      expect(JSON.stringify(rows)).not.toContain(tag);
+      expect(JSON.stringify(rows)).not.toContain("Jim");
+    } finally {
+      await db.done();
+    }
   });
 
   // T1-11's own test line: "expired rows are not returned" — session_detail

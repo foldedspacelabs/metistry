@@ -43,14 +43,19 @@ import { TargetRegistry } from "./dispatch.js";
 import {
   dirSink,
   vaultSink,
+  DEFAULT_CONNECTION_ANSWER_KEEP_HOURS,
   DEFAULT_CONNECTION_ASKS_PER_HOUR,
   DEFAULT_CONNECTION_CALLS_PER_HOUR,
   DEFAULT_CONNECTION_CONFIRM_TTL_S,
+  DEFAULT_CONNECTION_FOLD_ARRAY_KEEP,
+  DEFAULT_CONNECTION_FOLD_ARRAY_OVER,
+  DEFAULT_CONNECTION_FOLD_BYTES,
   DEFAULT_MAX_TRACKED_BYTES,
   INBOX_PREFIX,
   vaultBridgeLister,
   vaultBridgeSearcher,
   vaultBridgeWriter,
+  type ConnectionFold,
   type ConnectionLimits,
 } from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, listAgents, revokeAgent, validateGrants } from "./agents.js";
@@ -449,6 +454,17 @@ const connectionLimits: ConnectionLimits = {
   asksPerHour: intEnv("METISTRY_CONNECTION_ASKS_PER_HOUR", DEFAULT_CONNECTION_ASKS_PER_HOUR),
 };
 
+// The proxy's fold (X-132; docs/ops/connections.md "Folded answers"): an
+// upstream answer over the threshold is folded on `connections_call` and
+// kept whole for its caller to page, for the keep hours. Every number is the
+// owner's to move (R4); the per-connection off switch is the file's `fold`.
+const connectionFold: ConnectionFold = {
+  thresholdBytes: intEnv("METISTRY_CONNECTION_FOLD_BYTES", DEFAULT_CONNECTION_FOLD_BYTES),
+  arrayOver: intEnv("METISTRY_CONNECTION_FOLD_ARRAY_OVER", DEFAULT_CONNECTION_FOLD_ARRAY_OVER),
+  arrayKeep: intEnv("METISTRY_CONNECTION_FOLD_ARRAY_KEEP", DEFAULT_CONNECTION_FOLD_ARRAY_KEEP),
+  keepHours: intEnv("METISTRY_CONNECTION_ANSWER_KEEP_HOURS", DEFAULT_CONNECTION_ANSWER_KEEP_HOURS),
+};
+
 // The routine pause (C5): a routine that declares `requires.engine` is not
 // started at all when the tier its turn would run on is over a `stop` budget
 // — the same verdict the engine's guard reaches, from the same `spend` query
@@ -630,6 +646,7 @@ const server = makeServer(pool, queries, {
   ...(connections ? { calendars: calendarRsvpOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) } : {}),
   ...(openImap ? { mail: openImap } : {}),
   connectionLimits,
+  connectionFold,
   origins,
   ...(identity ? { identity } : {}),
   ...(instancesFiles ? { instancesFiles } : {}),

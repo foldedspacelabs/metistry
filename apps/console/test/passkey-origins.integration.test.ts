@@ -62,7 +62,7 @@ describe.skipIf(!hasDb)("passkeys per origin — the rpID follows the request (X
 
   /** Enrol `pk` through the real routes from `origin`; returns the session cookie. */
   async function enrol(pk: SoftwarePasskey, origin: string, label: string): Promise<string> {
-    const code = await store.mintEnrollmentCode(pool);
+    const { code } = await store.mintEnrollmentCode(pool);
     const start = await post("/auth/enroll/start", { code }, origin);
     expect(start.status).toBe(200);
     const { options } = (await start.json()) as { options: { challenge: string; rp: { id: string } } };
@@ -129,7 +129,7 @@ describe.skipIf(!hasDb)("passkeys per origin — the rpID follows the request (X
   });
 
   it("an origin outside the list is refused at both starts, naming both sides, and the ceremonies' challenges are never issued", async () => {
-    const code = await store.mintEnrollmentCode(pool);
+    const { code } = await store.mintEnrollmentCode(pool);
     const enroll = await post("/auth/enroll/start", { code }, "https://evil.example");
     expect(enroll.status).toBe(401);
     expect(((await enroll.json()) as any).error.message).toBe(
@@ -153,7 +153,7 @@ describe.skipIf(!hasDb)("passkeys per origin — the rpID follows the request (X
     const r = await post("/auth/login/start", {});
     expect(r.status).toBe(200);
     expect(((await r.json()) as any).options.rpId).toBe(FIRST_HOST);
-    const code = await store.mintEnrollmentCode(pool);
+    const { code } = await store.mintEnrollmentCode(pool);
     const e = await post("/auth/enroll/start", { code });
     expect(e.status).toBe(200);
     expect(((await e.json()) as any).options.rp.id).toBe(FIRST_HOST);

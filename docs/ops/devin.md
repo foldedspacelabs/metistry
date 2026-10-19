@@ -118,8 +118,11 @@ curl -X POST http://127.0.0.1:8080/api/agents/devin/revoke \
 
 `--list` reports Devin's row honestly and says nothing about its config:
 there is no file on this machine to read, so "connected" for Devin means
-"the row exists and you pasted it". Revocation is permanent — the row stays
-for provenance and the id cannot be re-minted.
+"the row exists and you pasted it". `metistry connect --remove devin` revokes
+the row; there is no file or Keychain item on this machine, so deleting the
+server at Customize → MCPs is yours. A revoked row can be registered again —
+`metistry connect devin` revives it under the same id (old proposals keep their
+provenance) with a new bearer, printed once, and default-deny grants.
 
 ## Knowledge in
 

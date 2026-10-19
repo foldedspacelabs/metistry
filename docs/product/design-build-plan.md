@@ -5014,6 +5014,251 @@ the relay works with attestation turned off**.
 *Accept:* R-8's finding recorded, and, if positive, a signed build registers and
 a source build is refused.
 
+#### X — Follow-ups ruled 2026-10-04
+
+What the owner's 2026-10-04 rulings (`docs/product/decisions-log.md`, *Rulings
+made by the owner, recorded at W5*), that evening's session on the live
+instance, and the Hindsight, Context Mode and Mods reviews asked for. X-121,
+X-122, X-126 and X-127 are in W5 (§3.2); the rest stay in §3.2's *Candidates*
+row until the owner schedules them. Each is its own PR, outside any track's
+files.
+
+**X-121 · The complexity fixtures, generated and blind-relabelled** · M · W5 · deps T9-3 —
+*Spec:* the owner ruled (Q-g) to run T9-3's eval and accept T9-4, but has no
+time to author `complexity.jsonl`'s 150-plus items, and C11 forbids a
+Claude-authored label. A generator in `packages/eval` writes them with two
+non-Claude models through OpenRouter, the key read from the environment at
+run time (the owner's; never stored, never in argv). A **writer** model sees
+only the three class names and §7.2's structural rules of
+`docs/ops/dynamic-router.md` — at least 50 items per class, the long-simple and
+short-demanding traps, at least five D08-class items — and never §2's
+descriptions or the planner's wording. A **relabeller**, a second non-Claude
+model, labels every item blind, from the class names alone. An item both label
+alike is kept; a disagreement either becomes an `accept` or goes to an owner
+adjudication pile, never silently resolved; every D08-class item goes to the
+pile, since §7.2 has the owner label each. A length-against-label check holds
+|r| < 0.2, and a stats report gives the counts per class and trap, the
+agreement rate, the pile and r. The output is
+`<instance>/.metistry/eval/complexity.generated.jsonl`, apart from anything the
+owner wrote; the owner spot-checks it, and `metistry-eval complexity` scores
+generated and owner-written fixtures **separately**, each against the bar (the
+Routr review's lesson, #492). This amends §7.2's "the owner's, never the
+product's" for generated items only, on the owner's 2026-10-04 approval; the
+shipped example stays empty, and no agent runs the generator against the live
+instance.
+*Files:* `packages/eval/src/generate.ts` (new), `packages/eval/src/main.ts`,
+`packages/eval/src/complexity.ts`, `docs/ops/dynamic-router.md` (§7.2).
+*Tests:* offline, on recorded model responses: **no request carries §2's
+descriptions or the planner's wording; an item the two models label
+differently is never kept under one label alone; every D08-class item lands in
+the pile**; the two fixture sets report separately.
+*Accept:* the owner spot-checks a generated set and runs the eval (§3.4).
+
+**X-122 · Doctor waits out a job it has just started** · S · W5 —
+*Spec:* two doctor runs failed a healthy install on 2026-10-04. After
+`metistry update`, doctor reported 16 schedule rows failed ("last ran … over
+2× its interval — the console's runner is not running it") because the console
+had just been kickstarted and its scheduler had not ticked yet
+(`packages/cli/src/doctor.ts`, the `OVERDUE_FACTOR` row); at `up`, doctor raced
+the recorder helper's socket. A check that depends on a job kickstarted moments
+before, or on the console's first scheduler tick, re-probes for a bounded grace
+before it fails: inside the grace the row reads pending, with why; past it, it
+fails as now. The grace comes from configuration or carries R4's
+`// limit: fixed — <reason>` (`ops/scripts/audit-limits.mjs`).
+*Files:* `packages/cli/src/doctor.ts`, `packages/cli/src/up.ts`,
+`packages/cli/src/update.ts`, `docs/ops/cli.md`.
+*Tests:* **a schedule row whose console started inside the grace is not
+failed, and the same row past the grace is; a recorder socket that answers
+within the grace passes**.
+*Accept:* —
+
+**X-123 · `metistry doctor` repairs what it finds** · L · deps X-122, X-48 —
+*Spec:* the owner, 2026-10-04: "regardless of the problems found, the user only
+needs to run `metistry doctor` to fix it". Spec in the self-managing-instance
+design note (W5), which the owner confirms; its proposed contract: every check
+is classified **fixable**, **your hand** or **informational**; plain `doctor`
+applies each fixable row's fix and re-checks it; `--check` is read-only, for
+`update`, CI and the wave checkpoint; a destructive fix previews and asks first;
+every fix is audited as `up`'s steps are; one pass, never a loop. X-122 and
+X-48 land first, so no fix is applied to a false reading.
+*Files:* `packages/cli/src/doctor.ts`, `packages/cli/src/up.ts`,
+`packages/cli/src/update.ts`, `docs/ops/cli.md`.
+*Tests:* **`--check` changes nothing; a destructive fix never runs without its
+confirm; a your-hand row applies nothing and says what the owner does; each
+applied fix is re-checked once**.
+*Accept:* the design note is merged and the owner has confirmed the contract.
+
+**X-124 · `.env` is derived, never hand-edited** · M —
+*Spec:* M7 reversed (2026-10-04): secrets and config manage themselves.
+`.metistry/state/.env` becomes a derived file, written only from
+`.metistry/*.yaml` and the login Keychain by `up`, `update` and the app's
+actions. A hand edit is detected (the file carries the hash it was written
+with) and doctor's row offers to derive it again, naming the lines that
+differed. Gated on the self-managing-instance design note (W5), which says
+which keys are derived and where each comes from.
+*Files:* `packages/cli/src/up.ts`, `packages/cli/src/secrets.ts`,
+`packages/cli/src/doctor.ts`, `docs/ops/cli.md`.
+*Tests:* **two derivations from the same yaml and Keychain are byte-identical;
+a hand-edited line is reported, never silently kept or silently lost**.
+*Accept:* the design note is merged.
+
+**X-125 · Fix All in the Status window** · S · deps X-123 —
+*Spec:* X-123's app half: the Status window gains **Fix All**, one closed-set
+action (invariant 10) that runs `metistry doctor` through the CLI door (§2.2,
+M6) and shows each fix and its re-check, generalising the `open_secrets` row
+action. A destructive fix keeps its confirm in the app; a your-hand row shows
+what to do and runs nothing.
+*Files:* `apps/macos/sources/kit/status-panel.swift`,
+`apps/macos/sources/kit/doctor-report.swift`, `docs/ops/mac-app.md`.
+*Tests:* §2.18; **Fix All runs the fixable rows only, and a destructive fix
+asks first**.
+*Accept:* —
+
+**X-126 · The policy mirror's rename-revoke test is deterministic** · S · W5 —
+*Spec:* `apps/reconciler/test/policy-mirror.test.ts`'s "mirrors at start,
+follows a hand-edited revoke written by rename, and removes the mirror when the
+policy is deleted" failed intermittently on #456. Its `until` helper waits a
+fixed 2 s of wall clock for an interval-driven mirror — the likely cause on a
+loaded runner, to be proven first. Remove the race; the behaviour it pins
+stays. The other #456 flake, `collectors/test/linear.integration.test.ts`'s
+"an issue closed or given to someone else …", is X-26's (the sync's reads are
+unordered, `collectors/linear/run.ts`), not this ticket's.
+*Files:* `apps/reconciler/test/policy-mirror.test.ts`,
+`apps/reconciler/src/policy-mirror.ts` only if the race is there.
+*Tests:* **the test passes 50 runs in a row**.
+*Accept:* —
+
+**X-127 · Every terminal read behaves like `secrets set`** · S · W5 —
+*Spec:* #486 gave `secrets set` and `secrets replace` a terminal reader —
+prompt on stderr, one hidden line, Ctrl-C exits 130 (`readHiddenLine`,
+`packages/cli/src/secrets.ts`). Three stdin reads still wait for EOF in a
+terminal: `connect-repo --auth token` (`packages/cli/src/connect-repo.ts`)
+says the token is "never echoed" while a terminal echoes it, and
+`console call --body -` and `agents define --prompt-file -`
+(`packages/cli/src/main.ts`) wait silently for Ctrl-D. The token takes
+`readHiddenLine`. A body and a prompt are neither secret nor one line, so in a
+terminal they prompt on stderr that input ends with Ctrl-D, and keep the echo.
+Piped stdin is unchanged everywhere. `compute providers add`'s "then Ctrl-D"
+line (`packages/cli/src/compute.ts`), stale since #486 routed it through
+`secrets set`, says what happens now.
+*Files:* `packages/cli/src/connect-repo.ts`, `packages/cli/src/main.ts`,
+`packages/cli/src/compute.ts`, `packages/cli/src/secrets.ts`, `docs/ops/cli.md`.
+*Tests:* **a token typed at a terminal is never echoed; piped stdin reads to
+EOF as before; a terminal `--body -` prompts on stderr, never stdout**.
+*Accept:* —
+
+**X-128 · A session-start briefing: handles and the owner's text** · M · deps X-130, X-131, X-133 —
+*Spec:* the Context Mode review's CM-1 (`docs/research/2026-10-04-context-mode-review.md`
+§5–§6), shaped by the owner's rulings (Hindsight Q1: evaluate a push; Context
+Mode Q1: handles plus owner-written text). The console assembles a briefing
+with no model (invariant 4), from named queries and `canSeeUnder` under the
+caller's grant: the project page's own summary and links (X-130), open tasks
+in the project, the latest `Journal/Fold/` lines naming it, and the recent
+sessions in this repository (X-131). Owner-written text (`source: user` pages,
+the project page's summary) appears as text; whatever the assistant wrote
+appears as a handle only — path, title, date — never synthesized prose, never an
+imperative. The budget is the owner's (default ≈ 1,200 tokens by chars/4);
+every string passes `sanitizeForAgent`, inside a labelled reference block that
+addresses nobody, with `as_of` and each note's `sha256`; one `runs` row per
+briefing carries the handles and a hash of what was sent. It is assembled once
+per session start and never changes mid-session. Served to external principals
+as a read — a route, or behind `queries_run`, is the first design choice, since
+named queries do not apply knowledge tiers by themselves.
+*Files:* `apps/console/src/`, `seed/queries/`, `packages/core/src/`,
+`docs/ops/client-api.md`.
+*Tests:* U2; **a `none` grant gets an empty briefing; an `index` grant gets
+titles from its tier only; no assistant-written line appears as text**.
+*Accept:* —
+
+**X-129 · Plugins deliver the briefing at session start, on by default** · S · deps X-128 —
+*Spec:* CM-2, with the owner's 2026-10-04 override of the review's opt-in:
+**on by default for every agent with a read grant, opt-out per agent** —
+"getting the right knowledge to the right place" is the core feature. A
+`SessionStart` hook in `plugins/claude-code` sends the cwd and the repository
+and emits the briefing as context; `plugins/opencode` does the same through its
+system transform; Cursor and Devin are documented as unsupported until
+verified. A failure exits 0 and injects nothing. The opt-out is the owner's,
+per agent, and lives with the agent's grants so it goes where a revoke goes;
+how it is set is this ticket's first choice. Each harness's delivery is one
+entry in X-133's harness registry. A mod is the display layer, later and in
+addition (the Mods review's MD-6), not this ticket.
+*Files:* `plugins/claude-code/`, `plugins/opencode/`,
+`docs/ops/claude-code-plugin.md`, `packages/cli/src/connect.ts`.
+*Tests:* **an opted-out agent's session starts with nothing injected; a console
+that does not answer injects nothing and the hook exits 0**.
+*Accept:* —
+
+**X-130 · A repository maps to a project page** · S —
+*Spec:* CM-3: `repos:` frontmatter on `Projects/<slug>.md`, written by the
+owner, so the mapping is git-durable (invariant 1) and editable in Obsidian.
+The reconciler fills a derived column (an additive migration, its number
+reserved in §2.9 first), and a named query `project_for_repo {remote}`
+normalises the remote — scheme, a trailing `.git`, the host's case.
+*Files:* `apps/reconciler/src/`, `db/migrations/`, `seed/queries/`,
+`docs/ops/projects.md`.
+*Tests:* U4; **two spellings of one remote resolve to one project; a
+repository no page names resolves to none**.
+*Accept:* —
+
+**X-131 · Last time in this repository** · S · deps X-130 —
+*Spec:* CM-4 under the owner's ruling (Context Mode Q3): a captured session is
+served back **before the fold only to agents in the same project**, and after
+the fold to any agent its grant allows. A named query
+`recent_sessions {repo, days}` over captured `kind: session` rows returns the
+date, the tool, files, turns and the owner's first prompt, clipped — never the
+agent's last reply, which is agent-written and stays a handle.
+*Files:* `seed/queries/`, `docs/ops/claude-code-plugin.md`.
+*Tests:* U2; **an unfolded session never reaches an agent outside its project;
+no agent-written reply is returned as text**.
+*Accept:* —
+
+**X-132 · `connections_call` folds a large answer** · M —
+*Spec:* CM-6, allowed by the owner (Context Mode Q4). `connections_call`
+returns an upstream answer whole (`packages/mcp-brain/src/connections-tools.ts`).
+After redaction, a deterministic fold is applied once, as a pure function of
+the text: a JSON array over N items becomes its first k, its last one and a
+count; repeated lines become counts; anything else gets a head-and-tail byte
+cap. The whole answer goes to a derived, short-lived table keyed by the run and
+readable only by the same principal; read-back is an optional `page` on
+`connections_call` or a named query — **no new tool** (X-49). `runs.meta`
+records bytes in, bytes out and the handle; the owner can turn folding off per
+connection; N, k and the cap are configuration (R4).
+*Files:* `packages/mcp-brain/src/connections-tools.ts`,
+`packages/connections/src/`, `db/migrations/`, `docs/ops/connections.md`.
+*Tests:* U4; **one answer folds identically twice; another principal cannot
+read the stored answer back; with folding off the answer comes whole**.
+*Accept:* —
+
+**X-133 · `connect claude-code` reads as well as writes** · S —
+*Spec:* the Hindsight review's HS-1 (`docs/research/2026-09-30-hindsight-review.md`
+§6), one-command wiring: besides the capture `export` lines, `connect
+claude-code` registers the console's `/mcp` for Claude Code with the bearer
+taken from the Keychain-backed variable — never written literally into a
+config file — and `connect --list` shows both halves. The owner ruled
+(Hindsight Q2) for a harness registry built for growth, with the main
+harnesses supported now: each harness is one registry entry with its own
+conformance test. The first test decides whether Claude Code expands `${VAR}`
+in a user-scope MCP header (write the entry) or not (print the
+`claude mcp add` line).
+*Files:* `packages/cli/src/connect.ts`, `docs/ops/cli.md`,
+`docs/ops/claude-code-plugin.md`.
+*Tests:* **no file `connect` writes contains a bearer's value; each registry
+entry passes its conformance test**.
+*Accept:* —
+
+**X-134 · `connect --remove`, and a reconnect after a revoke** · M · deps X-133 —
+*Spec:* HS-7 and the owner's Hindsight Q3 ruling — reconnecting after an
+accidental revoke is allowed. `metistry connect --remove <tool>` removes exactly
+the entries `connect` wrote (the Cursor and OpenCode config keys, the Keychain
+item) and revokes the agent's row; it is idempotent. A reconnect after a revoke
+mints a new agent (`claude-code-2`) rather than reviving the revoked id, which
+stays revoked so old proposals keep their provenance;
+`packages/cli/src/connect.ts` refuses the reconnect today.
+*Files:* `packages/cli/src/connect.ts`, `docs/ops/cli.md`.
+*Tests:* **a second `--remove` changes nothing; a revoked id is never minted
+again; a reconnect after a revoke takes one command**.
+*Accept:* —
+
 #### W5 — Acceptance
 
 **X-1 · The document sweep** · S · W5 — glossary, `reply-feedback.md`, `board.md`,

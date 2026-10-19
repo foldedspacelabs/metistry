@@ -1064,6 +1064,16 @@ export {
   redactedSecret,
 } from "./redact.js";
 export { parseBearer, tokenEquals, authorized, tokenHash, mintToken } from "./auth.js";
+export {
+  ENROLLMENT_CODE_TTL_MIN,
+  cancelEnrollmentCode,
+  consumeEnrollmentCode,
+  mintEnrollmentCode,
+  peekEnrollmentCode,
+  type CancelEnrollmentOutcome,
+  type EnrollmentDb,
+  type MintedEnrollmentCode,
+} from "./enrollment-codes.js";
 export { sanitizeForAgent } from "./sanitize.js";
 export {
   QUESTION_MAX_OPTION,

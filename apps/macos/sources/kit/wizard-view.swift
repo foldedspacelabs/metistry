@@ -142,7 +142,7 @@ public struct WizardView: View {
     private func body(for step: FirstRunStep, _ p: Palette) -> some View {
         VStack(alignment: .leading, spacing: MetistrySpace.s2) {
             Text("\(step.rawValue). \(step.title)").metistryText(.title2, p)
-            Text(step.summary)
+            Text(step.summary(assistantName: steps.assistantName))
                 .metistryText(.callout, p, .textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -157,7 +157,7 @@ public struct WizardView: View {
             PasskeyStepView(steps: steps)
                 .task(id: consoleURL) { steps.passkey.adopt(consoleURL: consoleURL) }
         case .compute:
-            ComputeStepView(model: steps.compute)
+            ComputeStepView(model: steps.compute, assistantName: steps.assistantName)
                 .task { await steps.compute.refresh() }
         }
         if !step.hasOwnScreen {
@@ -371,7 +371,7 @@ public struct WizardView: View {
 
             VStack(alignment: .leading, spacing: MetistrySpace.s3) {
                 Text("Deployment Shape").metistryText(.headline, p)
-                ForEach(WizardOptions.shape) { option in
+                ForEach(WizardOptions.shape(assistantName: steps.assistantName)) { option in
                     choiceRow(
                         title: option.title + (option.value == resolvedShape ? " — current" : ""),
                         detail: "\(option.pro)\n\(option.con)",

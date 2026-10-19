@@ -197,56 +197,56 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 ## W5 — 39 tickets, 69 agent-days
 
-- [ ] [X-103](x/x-103.md) · The console's proxy listener — the local owner token never crosses a tunnel · M · opus
-- [ ] [X-104](x/x-104.md) · Passkeys per origin — the rpID follows the request · M · opus
-- [ ] [X-111](x/x-111.md) · A console on the internet — rate limits and headers on the proxy listener · M · opus · after X-103
-- [ ] [X-88](x/x-88.md) · The workspace test script isolates each package's database · M · opus
+- [ ] [X-103](x/x-103.md) · The console's proxy listener — the local owner token never crosses a tunnel · M · opus · **in-review**
+- [ ] [X-104](x/x-104.md) · Passkeys per origin — the rpID follows the request · M · opus · **in-review**
+- [ ] [X-111](x/x-111.md) · A console on the internet — rate limits and headers on the proxy listener · M · opus · after X-103 · **in-review**
+- [ ] [X-88](x/x-88.md) · The workspace test script isolates each package's database · M · opus · **in-review**
 - [ ] [X-80](x/x-80.md) · `metistry up` mints the recorder's control token · S · sonnet · after T8-5 · **in-review**
-- [ ] [X-85](x/x-85.md) · The targets shim comes out · S · sonnet · after T4-11
+- [ ] [X-85](x/x-85.md) · The targets shim comes out · S · sonnet · after T4-11 · **in-review**
 - [ ] [X-102](x/x-102.md) · The recorder leaves no fixed-id rows behind · S · sonnet · after X-31 · **in-review**
 - [ ] [X-101](x/x-101.md) · Bare `metistry doctor` resolves the product directory it runs from · S · sonnet · **in-review**
-- [ ] [X-87](x/x-87.md) · The calendar collectors export `check()` · M · opus · after T4-14
-- [ ] [X-75](x/x-75.md) · `metistry enroll` — an enrolment code minted on this Mac · M · opus high
-- [ ] [X-76](x/x-76.md) · Removing a device revokes its passkey · M · opus high
+- [ ] [X-87](x/x-87.md) · The calendar collectors export `check()` · M · opus · after T4-14 · **in-review**
+- [ ] [X-75](x/x-75.md) · `metistry enroll` — an enrolment code minted on this Mac · M · opus high · **in-review**
+- [ ] [X-76](x/x-76.md) · Removing a device revokes its passkey · M · opus high · **in-review**
 - [ ] [X-78](x/x-78.md) · The phone's half: enrol, install, sign in · M · opus · **in-review**
-- [ ] [X-105](x/x-105.md) · `metistry remote` — the record, the adapter interface, and None · M · opus · after X-103, X-104
-- [ ] [X-112](x/x-112.md) · Provider tool packs — pinned, signed, fetched on choice · M · opus · after X-105
+- [ ] [X-105](x/x-105.md) · `metistry remote` — the record, the adapter interface, and None · M · opus · after X-103, X-104 · **in-review**
+- [ ] [X-112](x/x-112.md) · Provider tool packs — pinned, signed, fetched on choice · M · opus · after X-105 · **in-review**
 - [ ] [X-106](x/x-106.md) · The Tailscale adapter — Funnel by default, tailnet as the alternative · L · opus high · after X-105, X-111, X-112
-- [ ] [X-77](x/x-77.md) · Settings ▸ Devices and the Add a Phone sheet · L · opus high · after X-75, X-76
-- [ ] [X-79](x/x-79.md) · The phone guide, and the website's copy re-checked · S · sonnet · after X-75, X-76, X-77, X-78
-- [ ] [X-114](x/x-114.md) · Add a Phone sees the phone arrive — *Opened on your phone* · S · sonnet · after X-75, X-77, X-103
+- [ ] [X-77](x/x-77.md) · Settings ▸ Devices and the Add a Phone sheet · L · opus high · after X-75, X-76 · **in-review**
+- [ ] [X-79](x/x-79.md) · The phone guide, and the website's copy re-checked · S · sonnet · after X-75, X-76, X-77, X-78 · **in-review**
+- [ ] [X-114](x/x-114.md) · Add a Phone sees the phone arrive — *Opened on your phone* · S · sonnet · after X-75, X-77, X-103 · **in-review**
 - [ ] [X-107](x/x-107.md) · Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access · L · opus high · after X-105, X-106, X-112, X-77
-- [ ] [X-82](x/x-82.md) · The Mac's meeting group decodes `group_id` · S · sonnet · after T8-7
+- [ ] [X-82](x/x-82.md) · The Mac's meeting group decodes `group_id` · S · sonnet · after T8-7 · **in-review**
 - [ ] [X-86](x/x-86.md) · The Mac's Secrets pane hides Grant for an owner-door secret · S · sonnet · after X-41, T6-14 · **in-review**
-- [ ] [X-90](x/x-90.md) · The hot-key and accessibility audits see what they miss · S · sonnet · after T6-16
-- [ ] [X-91](x/x-91.md) · The three-pointers test tolerates the device-local keys · S · sonnet · after T6-16, T6-15
+- [ ] [X-90](x/x-90.md) · The hot-key and accessibility audits see what they miss · S · sonnet · after T6-16 · **in-review**
+- [ ] [X-91](x/x-91.md) · The three-pointers test tolerates the device-local keys · S · sonnet · after T6-16, T6-15 · **in-review**
 - [ ] [X-92](x/x-92.md) · Dispatch's `REPO_RE` has a misuse test · S · sonnet · after T4-11 · **in-review**
 - [ ] [X-93](x/x-93.md) · `socketDestination` keeps IMAP's port · S · sonnet · after T4-15 · **in-review**
-- [ ] [X-94](x/x-94.md) · The wizard's copy templates the configured name · S · sonnet · after T6-12
-- [ ] [X-95](x/x-95.md) · The Mac's loopback set matches core's · S · sonnet · after T6-13a
-- [ ] [X-96](x/x-96.md) · A connection's detail says who uses it and when it was checked · S · sonnet · after T6-13a
+- [ ] [X-94](x/x-94.md) · The wizard's copy templates the configured name · S · sonnet · after T6-12 · **in-review**
+- [ ] [X-95](x/x-95.md) · The Mac's loopback set matches core's · S · sonnet · after T6-13a · **in-review**
+- [ ] [X-96](x/x-96.md) · A connection's detail says who uses it and when it was checked · S · sonnet · after T6-13a · **in-review**
 - [ ] [X-97](x/x-97.md) · Variables: when it was set, the preview an agent sees, and a key's expiry · S · sonnet · after T6-14
-- [ ] [X-98](x/x-98.md) · Agents and Compute: the model line, the key note and the download · S · sonnet · after T6-12, T6-5
+- [ ] [X-98](x/x-98.md) · Agents and Compute: the model line, the key note and the download · S · sonnet · after T6-12, T6-5 · **in-review**
 - [ ] [X-99](x/x-99.md) · The phone's writable rows have controls · S · sonnet · after T7-6 · **in-review**
-- [ ] [X-100](x/x-100.md) · The "held to core" Swift tests cannot drift · S · sonnet · after T6-14, T6-5
+- [ ] [X-100](x/x-100.md) · The "held to core" Swift tests cannot drift · S · sonnet · after T6-14, T6-5 · **in-review**
 - [ ] [X-83](x/x-83.md) · The activity feed's capture subject reads the title only · S · sonnet · after T8-6 · **in-review**
-- [ ] [X-84](x/x-84.md) · `POST /message` carries a session-turn marker · M · opus · after T8-6, T6-15
+- [ ] [X-84](x/x-84.md) · `POST /message` carries a session-turn marker · M · opus · after T8-6, T6-15 · **in-review**
 - [ ] [X-121](x/x-121.md) · The complexity fixtures, generated and blind-relabelled · M · opus · after T9-3
-- [ ] [X-122](x/x-122.md) · Doctor waits out a job it has just started · S · sonnet
-- [ ] [X-126](x/x-126.md) · The policy mirror's rename-revoke test is deterministic · S · sonnet
-- [ ] [X-127](x/x-127.md) · Every terminal read behaves like `secrets set` · S · sonnet
+- [ ] [X-122](x/x-122.md) · Doctor waits out a job it has just started · S · sonnet · **in-review**
+- [ ] [X-126](x/x-126.md) · The policy mirror's rename-revoke test is deterministic · S · sonnet · **in-review**
+- [ ] [X-127](x/x-127.md) · Every terminal read behaves like `secrets set` · S · sonnet · **in-review**
 - [ ] [X-1](x/x-1.md) · The document sweep · S · sonnet
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W4 candidates — 68 tickets, 125 agent-days, no wave yet
+## W4 candidates — 95 tickets, 155 agent-days, no wave yet
 
 Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
 
-- [ ] [X-25](x/x-25.md) · DB-backed suites survive file parallelism · M · opus
-- [ ] [X-26](x/x-26.md) · Linear's sync reads in a stable order · S · sonnet · after T4-26
-- [ ] [X-27](x/x-27.md) · The router-policy test has no wall-clock bound · S · sonnet
-- [ ] [X-28](x/x-28.md) · The chat viewport test is deterministic · S · sonnet
+- [ ] [X-25](x/x-25.md) · DB-backed suites survive file parallelism · M · opus · **in-review**
+- [ ] [X-26](x/x-26.md) · Linear's sync reads in a stable order · S · sonnet · after T4-26 · **in-review**
+- [ ] [X-27](x/x-27.md) · The router-policy test has no wall-clock bound · S · sonnet · **in-review**
+- [ ] [X-28](x/x-28.md) · The chat viewport test is deterministic · S · sonnet · **in-review**
 - [ ] [X-30](x/x-30.md) · The recorder checks the values a contract depends on · M · opus · after X-29
 - [ ] [X-33](x/x-33.md) · The PWA's last browser dialogs · S · sonnet
 - [ ] [X-34](x/x-34.md) · Ask First raises one card per subject · M · opus · after T4-9
@@ -262,7 +262,7 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-45](x/x-45.md) · A secret too short to redact safely is refused when stored · S · sonnet · after X-7
 - [ ] [X-46](x/x-46.md) · A provider refusal is one request per secret · S · sonnet · after T4-23
 - [ ] [X-47](x/x-47.md) · `secrets sync` restarts only what changed · M · opus
-- [ ] [X-48](x/x-48.md) · Doctor's sandbox row reports what runs · S · sonnet
+- [ ] [X-48](x/x-48.md) · Doctor's sandbox row reports what runs · S · sonnet · **in-review**
 - [ ] [X-49](x/x-49.md) · The brain's eager surface has headroom · M · opus
 - [ ] [X-50](x/x-50.md) · Session-purge is quiet while the Session Fold is paused · S · sonnet · after T3-10
 - [ ] [X-51](x/x-51.md) · A routine's dated file the assistant created · S · sonnet · after X-11
@@ -288,7 +288,7 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-71](x/x-71.md) · `init` resolves the shape before it asks about keep-awake · S · sonnet · after X-20
 - [ ] [X-72](x/x-72.md) · The recorder's sockets live under the instance · S · sonnet · after T8-2b
 - [ ] [X-73](x/x-73.md) · Transcripts land where the ruling says · S · sonnet · after T8-2b
-- [ ] [X-74](x/x-74.md) · CI's Swift-helper filter is anchored · S · sonnet
+- [ ] [X-74](x/x-74.md) · CI's Swift-helper filter is anchored · S · sonnet · **in-review**
 - [ ] [X-81](x/x-81.md) · Kept recordings have a list route · S · sonnet · after T6-15, T8-4
 - [ ] [X-89](x/x-89.md) · A request raised while the console is down still pushes · S · sonnet · after X-32
 - [ ] [X-108](x/x-108.md) · The Cloudflare Tunnel adapter · L · opus high · after X-105, X-111, X-112
@@ -301,13 +301,40 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-118](x/x-118.md) · `u.metistry.app` on the Public Suffix List · S · sonnet
 - [ ] [X-119](x/x-119.md) · Device-only relay addresses — one label per phone · L · opus high · after X-75, X-77, X-104, X-116, X-117
 - [ ] [X-120](x/x-120.md) · App Attest at relay registration — an extra layer · M · opus · after X-116, X-117
-- [ ] [X-123](x/x-123.md) · `metistry doctor` repairs what it finds · L · opus high · after X-122, X-48
+- [ ] [X-123](x/x-123.md) · `metistry doctor` repairs what it finds · L · opus high · after X-122, X-48 · **in-review**
 - [ ] [X-124](x/x-124.md) · `.env` is derived, never hand-edited · M · opus
 - [ ] [X-125](x/x-125.md) · Fix All in the Status window · S · sonnet · after X-123
-- [ ] [X-128](x/x-128.md) · A session-start briefing: handles and the owner's text · M · opus · after X-130, X-131, X-133
-- [ ] [X-129](x/x-129.md) · Plugins deliver the briefing at session start, on by default · S · sonnet · after X-128
+- [ ] [X-128](x/x-128.md) · A session-start briefing: handles and the owner's text · M · opus · after X-130, X-131, X-133 · **in-review**
+- [ ] [X-129](x/x-129.md) · Plugins deliver the briefing at session start, on by default · S · sonnet · after X-128 · **in-review**
 - [ ] [X-130](x/x-130.md) · A repository maps to a project page · S · sonnet
-- [ ] [X-131](x/x-131.md) · Last time in this repository · S · sonnet · after X-130
+- [ ] [X-131](x/x-131.md) · Last time in this repository · S · sonnet · after X-130 · **in-review**
 - [ ] [X-132](x/x-132.md) · `connections_call` folds a large answer · M · opus
-- [ ] [X-133](x/x-133.md) · `connect claude-code` reads as well as writes · S · sonnet
-- [ ] [X-134](x/x-134.md) · `connect --remove`, and a reconnect after a revoke · M · opus · after X-133
+- [ ] [X-133](x/x-133.md) · `connect claude-code` reads as well as writes · S · sonnet · **in-review**
+- [ ] [X-134](x/x-134.md) · `connect --remove`, and a reconnect after a revoke · M · opus · after X-133 · **blocked**
+- [ ] [X-135](x/x-135.md) · The Mac's accessibility text probes read macOS 27 · S · sonnet
+- [ ] [X-136](x/x-136.md) · The Mac tests wait on state, never on a count · M · opus · after X-28
+- [ ] [X-137](x/x-137.md) · A fresh install's `up` applies the pending migrations · S · sonnet · after X-123
+- [ ] [X-138](x/x-138.md) · `init --shape launchd` prints a second instance's own ports · S · sonnet
+- [ ] [X-139](x/x-139.md) · The fixture recorder's fixed work ids advance the sequence · S · sonnet
+- [ ] [X-140](x/x-140.md) · Two DB-backed suites leave their siblings' rows alone · S · sonnet · after X-25
+- [ ] [X-141](x/x-141.md) · Every capture attempt names its own file · S · sonnet
+- [ ] [X-142](x/x-142.md) · The `.env` render's line hashes are keyed · S · sonnet · after X-124
+- [ ] [X-143](x/x-143.md) · The hidden read restores the terminal in `finally`, and Ctrl-C is tested on `connect-repo` · S · sonnet · after X-127
+- [ ] [X-144](x/x-144.md) · No fixture spells the assistant's name · S · sonnet
+- [ ] [X-145](x/x-145.md) · The devices-pane stubs speak `enroll`'s current refusals · S · sonnet · after X-79
+- [ ] [X-146](x/x-146.md) · `connect --remove`'s help names what it refuses · S · sonnet · after X-134
+- [ ] [X-147](x/x-147.md) · A reconnected agent starts without its predecessor's declines · S · sonnet · after X-134
+- [ ] [X-148](x/x-148.md) · An opted-out agent's briefing says so, not `tier: none` · S · sonnet · after X-128
+- [ ] [X-149](x/x-149.md) · `GET /api/briefing` is bounded per bearer and answered from a short cache · S · sonnet · after X-128
+- [ ] [X-150](x/x-150.md) · The briefing's marker directory is the user's own · S · sonnet · after X-129
+- [ ] [X-151](x/x-151.md) · The CLI's slow tests declare their timeouts · S · sonnet
+- [ ] [X-152](x/x-152.md) · M6 admits `doctor` by its exact form, not by prefix · S · sonnet · after X-123, X-125
+- [ ] [X-153](x/x-153.md) · Doctor's restart fixer takes the path `metistry restart` takes · S · sonnet · after X-123
+- [ ] [X-154](x/x-154.md) · Doctor's rules 4, 7 and 9 · M · opus · after X-123
+- [ ] [X-155](x/x-155.md) · Connection check stamps survive two writers · S · sonnet · after X-96
+- [ ] [X-156](x/x-156.md) · `used_by` lists only who can reach a connection · S · sonnet · after X-96
+- [ ] [X-157](x/x-157.md) · The compose shape carries every proxy-listener variable · S · sonnet · after X-111
+- [ ] [X-158](x/x-158.md) · Linear's planner test resets what it `SET` · S · sonnet · after X-26
+- [ ] [X-159](x/x-159.md) · The Add a Phone sheet cancels its code when its window closes · S · sonnet · after X-77
+- [ ] [X-160](x/x-160.md) · The recorder's refusal of a non-scratch database has a test · S · sonnet
+- [ ] [X-161](x/x-161.md) · The watchdog's all-ok test is deterministic · S · sonnet

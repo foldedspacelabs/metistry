@@ -2515,7 +2515,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-25.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-26": {
       "title": "Linear's sync reads in a stable order",
@@ -2529,7 +2529,7 @@
         "T4-26"
       ],
       "file": "docs/product/tickets/x/x-26.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-27": {
       "title": "The router-policy test has no wall-clock bound",
@@ -2541,7 +2541,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-27.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-28": {
       "title": "The chat viewport test is deterministic",
@@ -2553,7 +2553,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-28.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-29": {
       "title": "Main's Mac fixtures match the recorder",
@@ -2820,7 +2820,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-48.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-49": {
       "title": "The brain's eager surface has headroom",
@@ -3176,7 +3176,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-74.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-80": {
       "title": "`metistry up` mints the recorder's control token",
@@ -3219,7 +3219,7 @@
         "T8-7"
       ],
       "file": "docs/product/tickets/x/x-82.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-83": {
       "title": "The activity feed's capture subject reads the title only",
@@ -3248,7 +3248,7 @@
         "T6-15"
       ],
       "file": "docs/product/tickets/x/x-84.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-85": {
       "title": "The targets shim comes out",
@@ -3262,7 +3262,7 @@
         "T4-11"
       ],
       "file": "docs/product/tickets/x/x-85.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-86": {
       "title": "The Mac's Secrets pane hides Grant for an owner-door secret",
@@ -3291,7 +3291,7 @@
         "T4-14"
       ],
       "file": "docs/product/tickets/x/x-87.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-88": {
       "title": "The workspace test script isolates each package's database",
@@ -3303,7 +3303,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-88.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-89": {
       "title": "A request raised while the console is down still pushes",
@@ -3331,7 +3331,7 @@
         "T6-16"
       ],
       "file": "docs/product/tickets/x/x-90.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-91": {
       "title": "The three-pointers test tolerates the device-local keys",
@@ -3346,7 +3346,7 @@
         "T6-15"
       ],
       "file": "docs/product/tickets/x/x-91.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-92": {
       "title": "Dispatch's `REPO_RE` has a misuse test",
@@ -3388,7 +3388,7 @@
         "T6-12"
       ],
       "file": "docs/product/tickets/x/x-94.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-95": {
       "title": "The Mac's loopback set matches core's",
@@ -3402,7 +3402,7 @@
         "T6-13a"
       ],
       "file": "docs/product/tickets/x/x-95.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-96": {
       "title": "A connection's detail says who uses it and when it was checked",
@@ -3416,7 +3416,7 @@
         "T6-13a"
       ],
       "file": "docs/product/tickets/x/x-96.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-97": {
       "title": "Variables: when it was set, the preview an agent sees, and a key's expiry",
@@ -3445,7 +3445,7 @@
         "T6-5"
       ],
       "file": "docs/product/tickets/x/x-98.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-99": {
       "title": "The phone's writable rows have controls",
@@ -3474,7 +3474,7 @@
         "T6-5"
       ],
       "file": "docs/product/tickets/x/x-100.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-101": {
       "title": "Bare `metistry doctor` resolves the product directory it runs from",
@@ -3512,7 +3512,7 @@
       "effort": "high",
       "deps": [],
       "file": "docs/product/tickets/x/x-75.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-76": {
       "title": "Removing a device revokes its passkey",
@@ -3524,7 +3524,7 @@
       "effort": "high",
       "deps": [],
       "file": "docs/product/tickets/x/x-76.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-77": {
       "title": "Settings ▸ Devices and the Add a Phone sheet",
@@ -3539,7 +3539,7 @@
         "X-76"
       ],
       "file": "docs/product/tickets/x/x-77.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-78": {
       "title": "The phone's half: enrol, install, sign in",
@@ -3568,7 +3568,7 @@
         "X-78"
       ],
       "file": "docs/product/tickets/x/x-79.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-103": {
       "title": "The console's proxy listener — the local owner token never crosses a tunnel",
@@ -3580,7 +3580,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-103.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-104": {
       "title": "Passkeys per origin — the rpID follows the request",
@@ -3592,7 +3592,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-104.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-105": {
       "title": "`metistry remote` — the record, the adapter interface, and None",
@@ -3607,7 +3607,7 @@
         "X-104"
       ],
       "file": "docs/product/tickets/x/x-105.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-106": {
       "title": "The Tailscale adapter — Funnel by default, tailnet as the alternative",
@@ -3654,7 +3654,7 @@
         "X-103"
       ],
       "file": "docs/product/tickets/x/x-111.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-108": {
       "title": "The Cloudflare Tunnel adapter",
@@ -3714,7 +3714,7 @@
         "X-105"
       ],
       "file": "docs/product/tickets/x/x-112.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-113": {
       "title": "The zrok adapter",
@@ -3746,7 +3746,7 @@
         "X-103"
       ],
       "file": "docs/product/tickets/x/x-114.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-115": {
       "title": "Metistry Relay data plane — the PoC, then the instance",
@@ -3862,7 +3862,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-122.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-123": {
       "title": "`metistry doctor` repairs what it finds",
@@ -3877,7 +3877,7 @@
         "X-48"
       ],
       "file": "docs/product/tickets/x/x-123.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-124": {
       "title": "`.env` is derived, never hand-edited",
@@ -3915,7 +3915,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-126.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-127": {
       "title": "Every terminal read behaves like `secrets set`",
@@ -3927,7 +3927,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-127.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-128": {
       "title": "A session-start briefing: handles and the owner's text",
@@ -3943,7 +3943,7 @@
         "X-133"
       ],
       "file": "docs/product/tickets/x/x-128.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-129": {
       "title": "Plugins deliver the briefing at session start, on by default",
@@ -3957,7 +3957,7 @@
         "X-128"
       ],
       "file": "docs/product/tickets/x/x-129.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-130": {
       "title": "A repository maps to a project page",
@@ -3983,7 +3983,7 @@
         "X-130"
       ],
       "file": "docs/product/tickets/x/x-131.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-132": {
       "title": "`connections_call` folds a large answer",
@@ -4007,7 +4007,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-133.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-134": {
       "title": "`connect --remove`, and a reconnect after a revoke",
@@ -4021,6 +4021,369 @@
         "X-133"
       ],
       "file": "docs/product/tickets/x/x-134.md",
+      "status": "blocked"
+    },
+    "X-135": {
+      "title": "The Mac's accessibility text probes read macOS 27",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-135.md",
+      "status": "todo"
+    },
+    "X-136": {
+      "title": "The Mac tests wait on state, never on a count",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-28"
+      ],
+      "file": "docs/product/tickets/x/x-136.md",
+      "status": "todo"
+    },
+    "X-137": {
+      "title": "A fresh install's `up` applies the pending migrations",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-137.md",
+      "status": "todo"
+    },
+    "X-138": {
+      "title": "`init --shape launchd` prints a second instance's own ports",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-138.md",
+      "status": "todo"
+    },
+    "X-139": {
+      "title": "The fixture recorder's fixed work ids advance the sequence",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-139.md",
+      "status": "todo"
+    },
+    "X-140": {
+      "title": "Two DB-backed suites leave their siblings' rows alone",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-25"
+      ],
+      "file": "docs/product/tickets/x/x-140.md",
+      "status": "todo"
+    },
+    "X-141": {
+      "title": "Every capture attempt names its own file",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-141.md",
+      "status": "todo"
+    },
+    "X-142": {
+      "title": "The `.env` render's line hashes are keyed",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-124"
+      ],
+      "file": "docs/product/tickets/x/x-142.md",
+      "status": "todo"
+    },
+    "X-143": {
+      "title": "The hidden read restores the terminal in `finally`, and Ctrl-C is tested on `connect-repo`",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-127"
+      ],
+      "file": "docs/product/tickets/x/x-143.md",
+      "status": "todo"
+    },
+    "X-144": {
+      "title": "No fixture spells the assistant's name",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-144.md",
+      "status": "todo"
+    },
+    "X-145": {
+      "title": "The devices-pane stubs speak `enroll`'s current refusals",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-79"
+      ],
+      "file": "docs/product/tickets/x/x-145.md",
+      "status": "todo"
+    },
+    "X-146": {
+      "title": "`connect --remove`'s help names what it refuses",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-134"
+      ],
+      "file": "docs/product/tickets/x/x-146.md",
+      "status": "todo"
+    },
+    "X-147": {
+      "title": "A reconnected agent starts without its predecessor's declines",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-134"
+      ],
+      "file": "docs/product/tickets/x/x-147.md",
+      "status": "todo"
+    },
+    "X-148": {
+      "title": "An opted-out agent's briefing says so, not `tier: none`",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-128"
+      ],
+      "file": "docs/product/tickets/x/x-148.md",
+      "status": "todo"
+    },
+    "X-149": {
+      "title": "`GET /api/briefing` is bounded per bearer and answered from a short cache",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-128"
+      ],
+      "file": "docs/product/tickets/x/x-149.md",
+      "status": "todo"
+    },
+    "X-150": {
+      "title": "The briefing's marker directory is the user's own",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-129"
+      ],
+      "file": "docs/product/tickets/x/x-150.md",
+      "status": "todo"
+    },
+    "X-151": {
+      "title": "The CLI's slow tests declare their timeouts",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-151.md",
+      "status": "todo"
+    },
+    "X-152": {
+      "title": "M6 admits `doctor` by its exact form, not by prefix",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-123",
+        "X-125"
+      ],
+      "file": "docs/product/tickets/x/x-152.md",
+      "status": "todo"
+    },
+    "X-153": {
+      "title": "Doctor's restart fixer takes the path `metistry restart` takes",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-153.md",
+      "status": "todo"
+    },
+    "X-154": {
+      "title": "Doctor's rules 4, 7 and 9",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-154.md",
+      "status": "todo"
+    },
+    "X-155": {
+      "title": "Connection check stamps survive two writers",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-96"
+      ],
+      "file": "docs/product/tickets/x/x-155.md",
+      "status": "todo"
+    },
+    "X-156": {
+      "title": "`used_by` lists only who can reach a connection",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-96"
+      ],
+      "file": "docs/product/tickets/x/x-156.md",
+      "status": "todo"
+    },
+    "X-157": {
+      "title": "The compose shape carries every proxy-listener variable",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-111"
+      ],
+      "file": "docs/product/tickets/x/x-157.md",
+      "status": "todo"
+    },
+    "X-158": {
+      "title": "Linear's planner test resets what it `SET`",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-26"
+      ],
+      "file": "docs/product/tickets/x/x-158.md",
+      "status": "todo"
+    },
+    "X-159": {
+      "title": "The Add a Phone sheet cancels its code when its window closes",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-77"
+      ],
+      "file": "docs/product/tickets/x/x-159.md",
+      "status": "todo"
+    },
+    "X-160": {
+      "title": "The recorder's refusal of a non-scratch database has a test",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-160.md",
+      "status": "todo"
+    },
+    "X-161": {
+      "title": "The watchdog's all-ok test is deterministic",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-161.md",
       "status": "todo"
     },
     "X-1": {
@@ -4040,7 +4403,7 @@
     "tickets": 205,
     "agent_days": 555.5,
     "waves": 6,
-    "candidates": 68
+    "candidates": 95
   },
   "critical_path": {
     "days": 37.5,
@@ -4125,9 +4488,36 @@
       "X-131",
       "X-132",
       "X-133",
-      "X-134"
+      "X-134",
+      "X-135",
+      "X-136",
+      "X-137",
+      "X-138",
+      "X-139",
+      "X-140",
+      "X-141",
+      "X-142",
+      "X-143",
+      "X-144",
+      "X-145",
+      "X-146",
+      "X-147",
+      "X-148",
+      "X-149",
+      "X-150",
+      "X-151",
+      "X-152",
+      "X-153",
+      "X-154",
+      "X-155",
+      "X-156",
+      "X-157",
+      "X-158",
+      "X-159",
+      "X-160",
+      "X-161"
     ],
-    "count": 68,
-    "agent_days": 125
+    "count": 95,
+    "agent_days": 155
   }
 }

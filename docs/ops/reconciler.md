@@ -104,8 +104,8 @@ Two more maps, derived on the same terms (migration
 (none when two do); `recent_sessions {repo, days}` serves a repository's
 folded sessions back as handles. Both are `expose: route` — every row is a
 vault path, the owner's title or the owner's own first prompt — so neither
-is reachable through an agent's `queries_run`; CM-1's briefing route is the
-consumer, under the caller's `canSeeUnder`. `POST /reconcile` returns their sizes as
+is reachable through an agent's `queries_run`; the session-start briefing,
+`GET /api/briefing` (X-128), is the consumer, under the caller's grant. `POST /reconcile` returns their sizes as
 `project_repos` and `sessions`. A `vault_sessions` row is rewritten only when
 the note's bytes change and deleted when the note is gone; both tables come
 back whole from one walk after a wipe.

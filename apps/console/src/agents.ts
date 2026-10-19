@@ -96,6 +96,16 @@ export interface Grants {
   areas: string[];
   queries?: boolean;
   connections?: string[];
+  /**
+   * The session-start briefing's opt-out (X-128; ruled 2026-10-04, Context
+   * Mode Q2: ON by default for every agent with a read grant, opt-out per
+   * agent). Present only as `false` — the default is on and is spelled by
+   * absence, so an old row needs no rewrite. It lives with the grants so it
+   * goes where a revoke goes, and comes off this row alone: never inherited
+   * from a project, never widened by an approval. How the owner sets it is
+   * X-129's; `GET /api/briefing` reads it.
+   */
+  briefing?: false;
 }
 
 /**
@@ -272,7 +282,7 @@ function validateConnectionsGrant(input: unknown): string[] {
 
 /** Validate + normalize a grants payload. Throws AgentError on any miss. */
 export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants {
-  const g = (input ?? {}) as { tier?: unknown; areas?: unknown; queries?: unknown; connections?: unknown };
+  const g = (input ?? {}) as { tier?: unknown; areas?: unknown; queries?: unknown; connections?: unknown; briefing?: unknown };
   if (!TIERS.includes(g.tier as Tier)) throw new AgentError("invalid_request", "tier must be none | index | areas");
   const tier = g.tier as Tier;
   const rawAreas = g.areas === undefined ? [] : g.areas;
@@ -293,7 +303,8 @@ export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants
   if (g.queries !== undefined && typeof g.queries !== "boolean") throw new AgentError("invalid_request", "queries must be a boolean");
   const queries = g.queries === true;
   const connections = validateConnectionsGrant(g.connections);
-  return { tier, areas, ...(queries ? { queries } : {}), ...(connections.length > 0 ? { connections } : {}) };
+  if (g.briefing !== undefined && typeof g.briefing !== "boolean") throw new AgentError("invalid_request", "briefing must be a boolean");
+  return { tier, areas, ...(queries ? { queries } : {}), ...(connections.length > 0 ? { connections } : {}), ...(g.briefing === false ? { briefing: false as const } : {}) };
 }
 
 /** Project ids share the agent slug shape (§4.19 projects are a view, keyed by slug). */
@@ -370,6 +381,7 @@ function coerceGrants(raw: unknown): Grants {
     areas: Array.isArray(g.areas) ? g.areas : [],
     ...(g.queries === true ? { queries: true } : {}),
     ...(connections.length > 0 ? { connections } : {}),
+    ...(g.briefing === false ? { briefing: false as const } : {}),
   };
 }
 
@@ -463,6 +475,8 @@ export async function authenticateAgent(
     areas: [...inherited.areas],
     ...(inherited.queries === true ? { queries: true } : {}),
     ...(own.connections !== undefined && own.connections.length > 0 ? { connections: [...own.connections] } : {}),
+    // the briefing opt-out (X-128) is this row's alone — not a project's to lend back, not a run's
+    ...(own.briefing === false ? { briefing: false as const } : {}),
   };
   // …and, for a crew mid-routine, ∪ that run's read grant (T3-8, §2.5) — never written back either
   const runReads = kind === "crew" && Array.isArray(row.run_routines) ? row.run_routines.flatMap((m: unknown) => routineRunReads(m)) : [];
@@ -769,6 +783,7 @@ export function widenedGrants(current: Grants, area: string): Grants {
     areas,
     ...(current.queries === true ? { queries: true } : {}),
     ...(current.connections !== undefined && current.connections.length > 0 ? { connections: [...current.connections] } : {}),
+    ...(current.briefing === false ? { briefing: false as const } : {}), // an approval widens a read; it never turns the briefing back on
   };
 }
 

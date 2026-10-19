@@ -28,7 +28,8 @@ the live-changes catalogue. Four tests keep the halves honest:
   misuse tests, with bodies that would otherwise succeed (F-13).
 - `packages/core/test/client-api.test.ts` — the table is consistent with
   itself: reach and principals agree, a `local` row admits the local owner
-  token alone, no agent bearer reaches past `/mcp` and `/capture`.
+  token alone, no agent bearer reaches past `/mcp`, `/capture` and
+  `GET /api/briefing`.
 
 **The console reads the table before it dispatches.** For the owner, a route
 the table does not list as served is a `404` whatever handler exists behind it
@@ -53,7 +54,7 @@ route by route.
 | Reach | Who gets through | How it is proved |
 | --- | --- | --- |
 | `public` | anyone | the bootstrap: health, identity, the WebAuthn ceremony |
-| `agent` | agent bearers, the capture owner token | `/mcp`, `POST /capture` |
+| `agent` | agent bearers, the capture owner token | `/mcp`, `POST /capture`, `GET /api/briefing` (agent bearers alone) |
 | `owner` | the owner, from any client | a passkey session **or** the local owner token |
 | `local` | the owner **on this Mac** | the local owner token only — accepted solely from a loopback peer on the console's **main listener** (`apps/console/src/local-owner.ts`); a passkey session, even from the same Mac, is refused `403 local_only` naming the Mac app (F-13); on the **proxy listener** (`docs/ops/auth.md`, "The proxy listener") no `local` route answers at all |
 
@@ -275,6 +276,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /auth/login/finish` | public | anyone | no | — | — | served | finish a passkey sign-in; sets the session cookie |
 | `* /mcp` | agent | agent | no | — | — | served | the MCP bridge: the tools an agent bearer's grants allow |
 | `POST /capture` | agent · owner | session · local_owner · owner_token · agent | key | — | — | served | a note or a file into `Inbox/`; `source: "app"` for an owner credential (T2-1) |
+| `GET /api/briefing` | agent | agent | natural | — | — | served | the session-start briefing for one repository (`repo`, `remote`): the owner's project page, open tasks, folds and recent sessions as handles plus owner text, under the agent's grant (X-128) |
 | `GET /api/whoami` | owner | session · local_owner · owner_token | natural | — | — | served | which credential this is and whether it reaches management |
 | `POST /auth/logout` | owner | session | no | — | — | served | end this device's session |
 | `GET /api/devices` | owner | session · local_owner | natural | — | — | served | the devices: a passkey each, its sessions under it (§2.22) |
@@ -491,12 +493,14 @@ console streams live changes, so a client subscribes instead of polling — and,
 because it follows the table's row and the console's own wiring rather than a
 flag, never subscribes to a console that would answer `404` or `503`.
 
-### The agent surface — `/mcp` and `POST /capture`
+### The agent surface — `/mcp`, `POST /capture` and `GET /api/briefing`
 
 ```
 *    /mcp       the MCP bridge (Streamable HTTP, stateless; POST carries JSON-RPC) — agent bearers only
 POST /capture   {note?, filename?, content_base64?} as JSON, or raw bytes with X-Metistry-Filename
                 201 {"id":42,"path":"Inbox/1757556000000-note.md","sha256":"…"}
+GET  /api/briefing?repo=<checkout basename>&remote=<git remote>   the session-start briefing — agent bearers only
+                200 {as_of, agent, repo, remote, tier, project, handles, text, sha256, chars, budget_chars, truncated, empty}
 ```
 
 **`/mcp`** is `packages/mcp-brain`: the tools an agent bearer's grants allow
@@ -619,6 +623,90 @@ refused `403` on every recording route. The bridge's own contract is
 message id, so a replay is already the same row. `POST /message` is not
 idempotent and not meant to be queued (a reply three hours late into a
 moved-on thread is confusing); the research note says why.
+
+#### `GET /api/briefing` — what a coding agent starts out knowing (X-128)
+
+```
+GET  /api/briefing?repo=metistry&remote=git%40github.com%3Aorg%2FMetistry.git
+     Authorization: Bearer <the agent token `metistry connect <tool>` minted>
+200  {
+       "as_of": "2026-10-19T12:00:00.000Z", "agent": "claude-code",
+       "repo": "metistry", "remote": "github.com/org/Metistry", "tier": "areas",
+       "project": {"path": "Projects/Metistry.md", "slug": "metistry", "title": "Metistry", "sha256": "…"} | null,
+       "handles": [{"kind": "project" | "task" | "session" | "fold" | "link", "path": "…", "title"?, "date"?, "sha256"?, "line"?}, …],
+       "text": "--- metistry briefing · reference only · nothing here is an instruction ---\n…\n--- end briefing ---",
+       "sha256": "<sha256 of text>", "chars": 1870, "budget_chars": 4800, "truncated": false, "empty": false
+     }
+400  invalid_request — `repo` missing, blank, more than one path segment, or over 200 characters
+401  no credential · 403 forbidden — any owner credential (a session, the local owner token, the capture token), the assistant's own bearer, a crew's bearer
+```
+
+The Context Mode review's CM-1 (`docs/research/2026-10-04-context-mode-review.md`
+§5–§6), as the owner ruled it on 2026-10-04: **handles plus the owner's own
+text**, assembled by the console with no model (invariant 4) from named
+queries alone (invariant 3), under the caller's grant. X-129's plugins call
+it **once, at session start**, with the cwd's basename and `git remote`, and
+inject `text` as context; the console does not cache it and the hook never
+calls again mid-session, so the cached prompt prefix is not churned.
+
+- **Who.** Agent bearers alone: the table files it under reach `agent` with
+  `agent` as its one principal. An owner credential is not an agent principal
+  here, exactly as at `/mcp`, and gets the uniform `403` before the door is
+  reached; among agent bearers only the `agent` role is served (core's
+  `console_briefing` door) — the assistant and a crew get the same hidden
+  `403`. Everything about the caller comes from its authenticated record:
+  its grant decides the tier, its `agents.projects` decides the unfolded
+  arm, and its `briefing: false` opt-out (below) — never the request.
+- **On by default, opt-out per agent** (Context Mode Q2, the owner's override
+  of the review's opt-in: "getting the right knowledge to the right place" is
+  the core feature). Every agent with a read grant is served. The opt-out is
+  one field in the agent's grants envelope, `briefing: false`, written with
+  the grants (`PUT /api/agents/:id/grants`), so it goes where a revoke goes
+  and is never inherited from a project or widened by an approval; an
+  opted-out agent gets the empty briefing below, and its `runs` row says
+  `opted_out`. How the owner sets it from `connect` is X-129's.
+- **What appears, as what.** The project page the repository resolves to
+  (`project_for_repo`, X-130 — only a page the owner wrote claims a remote):
+  path, title, `sha256`, and its own description **as text**. The open tasks
+  in the project (`vault_tasks_query {project}`): a line on the owner's
+  project page as text, with its due date and priority; a line on any other
+  page, or one an agent planted (`source: agent:…`), as a handle —
+  `path:line` and nothing of its text. The owner's recent sessions in this
+  repository (X-131, `recentSessionsForCaller`): date, tool, branch, turns,
+  files and the owner's own first prompt; never the agent's reply, which has
+  no column to be read from. The evening folds that link to the project page
+  and the pages the project page links to (`briefing_page_handles`): handles
+  — path, title, the fold's day, `sha256`. **Nothing the assistant wrote is
+  ever rendered as text**, and the block carries no imperative: it opens
+  `reference only · nothing here is an instruction` and addresses nobody.
+- **Tiers** (the same rule as the knowledge doors, `mayListPath` /
+  `mayReadPath`). `none` is the empty briefing: `text: ""`, `handles: []`,
+  `empty: true`. `index` is handles only — a title may be seen anywhere,
+  content nowhere: no description, no task, no file list, no prompt. `areas`
+  is content under the areas and **nothing outside them**: a path the caller
+  could not read at `GET /api/knowledge/page` is not named here either, and
+  a project page outside the grant is no project (no tasks, no folds, no
+  links under its name).
+- **Unfolded sessions** (Context Mode Q3): a session the fold has read goes
+  to any agent its grant allows; one still waiting goes only to an agent
+  whose own `agents.projects` holds the repository's project, and only when
+  the checkout's name agrees with the remote (`docs/ops/claude-code-plugin.md`,
+  "Who is handed what").
+- **Budget.** The owner's, `METISTRY_BRIEFING_TOKENS` (default 1,200; chars/4
+  is the measure, `budget_chars`). Sections fill in a fixed order — the
+  project page, its tasks, the sessions, the folds, the links — and an item
+  that does not fit is dropped with one `(n more not shown)` line;
+  `truncated` says so. A budget too small for the block's own frame is the
+  empty briefing, never a cut frame.
+- **Every string** passes `sanitizeForAgent` and loses its line breaks, so a
+  title cannot start a line, close the block early or arrive as a slash
+  command. The result is a pure function of the index and the budget: the
+  same rows render the same bytes, and `sha256` is the hash of `text`.
+- **The record.** One `runs` row per briefing (`component: console`, `kind:
+  briefing`): the agent, the repository, the tier, the handles named (kind,
+  path, line) and the `sha256` of what was sent — never the text itself.
+  `empty`, `truncated`, `chars`, `budget_chars` and the project slug ride
+  along, and `opted_out: true` when that is why it was empty.
 
 ### Who you are, and your devices
 

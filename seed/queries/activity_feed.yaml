@@ -60,10 +60,13 @@ sql: |
       i.ts,
       'capture'                                                                           AS kind,
       coalesce(i.source_agent, i.source)                                                  AS actor,
-      coalesce(
-        nullif(btrim(split_part(regexp_replace(coalesce(i.note, ''), '^---.*?\n---\n', '', 's'), E'\n', 1)), ''),
-        regexp_replace(i.path, '^.*/', '')
-      )                                                                                   AS subject,
+      -- The file name, and nothing of the note (Q-c, ruled 2026-10-04). The
+      -- subject used to be the note body's first line, so a capture session's
+      -- first spoken line was servable through `queries_run` on any tier —
+      -- unlike `recording_review`, which the assistant cannot reach. The path
+      -- is the title: a name the owner or a bridge chose, never a line of
+      -- what was said. `i.note` is read nowhere in this branch.
+      regexp_replace(i.path, '^.*/', '')                                                  AS subject,
       concat_ws(' · ', i.source, i.status)                                                AS detail,
       'inbox:' || i.id                                                                    AS ref,
       NULL::text                                                                          AS proj,

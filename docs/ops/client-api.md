@@ -1870,8 +1870,12 @@ routine's display name, not its raw component id — `plan-tomorrow` reads
 `Tomorrow's Plan` (Ruling 25, X-21), the runner's own `meta.display_name`
 stamp read straight from the manifest, or (a row from before that stamp
 existed) the same identifier-to-title fallback a manifest-less New Routine
-gets. `actor` still carries the component id unchanged. `turn_id` returns
-every call one reply made, whatever the window's `limit` left out.
+gets. `actor` still carries the component id unchanged. A `capture` row's
+`subject` is the file name of its path (`Inbox/…/note.md` reads `note.md`) and
+no part of the note: the feed is servable through `queries_run` on any tier, so
+a transcript's first spoken line must not be (Q-c, ruled 2026-10-04); `detail`
+is `source · status`. `turn_id` returns every call one reply made, whatever the
+window's `limit` left out.
 
 #### `GET /api/runs/export` — the audit ledger as NDJSON (S5)
 

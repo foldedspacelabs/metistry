@@ -1188,6 +1188,25 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
   // TIMELINE. A capture is in it the instant it lands — the accidental
   // latency the review found was that it waited for the `*/5` drain — and the
   // stream is filterable by kind and pullable incrementally.
+  // Q-c (ruled 2026-10-04): `activity_feed` is servable through `queries_run`
+  // on any tier, and a transcript's first spoken line must not be. The capture
+  // branch reads the path alone.
+  it("activity_feed shows a capture's file name as its subject, and no line of the note reaches the feed", async () => {
+    const tag = `spoken-${Date.now()}`;
+    const spoken = ["my password is hunter2 and I owe the landlord", "second spoken line", "third spoken line"];
+    await pool.query(`INSERT INTO inbox (source, path, note, status) VALUES ($1, $2, $3, 'new')`, [
+      tag,
+      `Inbox/Recordings/${tag}-transcript.md`,
+      `---\ntitle: "a frontmatter title"\n---\n${spoken.join("\n")}`,
+    ]);
+    const rows = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "capture", subject: `${tag}-transcript.md`, detail: `${tag} · new` });
+    const served = JSON.stringify(rows);
+    for (const line of [...spoken, "a frontmatter title"]) expect(served).not.toContain(line);
+    expect(served).not.toContain("hunter2");
+  });
+
   it("activity_feed carries inbox captures, derives a group per row, and filters by kind", async () => {
     const tag = `tl-${Date.now()}`;
     await pool.query(`INSERT INTO inbox (source, path, note, status) VALUES ($1, $2, $3, 'new')`, [
@@ -1201,10 +1220,13 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
       kind: "capture",
       group: "capture",
       actor: tag,
-      subject: "renew the cert", // the first BODY line, not the frontmatter and not the whole note
+      subject: `${tag}.md`, // the file name (Q-c) — no line of the note
       detail: `${tag} · new`, // source · status — the "still being triaged" pill
     });
     expect(String(capture[0]!.ref)).toMatch(/^inbox:\d+$/);
+    // Q-c: the feed is servable through `queries_run` on any tier, so no line of
+    // a note — frontmatter, first spoken line or later ones — reaches any column
+    expect(JSON.stringify(capture[0])).not.toMatch(/renew the cert|second line|ignored|todo/);
 
     // a capture with no note falls back to the file name, never to an empty row
     await pool.query(`INSERT INTO inbox (source, path, status) VALUES ($1, $2, 'new')`, [tag, `Inbox/${tag}-photo.heic`]);

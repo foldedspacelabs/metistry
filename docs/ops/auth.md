@@ -457,6 +457,39 @@ Both origins are already known to the caller (it presented its own) and to
 anyone who can load the login page, so nothing leaks; what it buys is that a
 misconfigured install stops looking like a broken one.
 
+## Adding a phone: enrolment codes
+
+A device's first passkey is created against a **one-time enrolment code**:
+`POST /auth/enroll/start` checks it without spending it, `POST
+/auth/enroll/finish` spends it as the passkey is stored. A code is 16 random
+bytes, stored as its SHA-256 in `auth_enrollment_codes` (migration `0003`),
+good for **ten minutes and one use** — a fixed security parameter, not a
+setting. Every refusal at the door is the same uniform `401 unauthenticated`:
+an unknown code, a spent one, an expired one and a cancelled one are
+indistinguishable from outside.
+
+**Only the Mac mints one.** Shell access to the host is the root of trust for
+a first credential (plan §4.2), so **no HTTP route mints a code** — not an
+unauthenticated one and not a `local` one — and two tests hold that: the
+client API table has no such row (and the conformance test holds the server
+to the table), and no console source calls the mint. What mints is
+`metistry enroll` (`docs/ops/cli.md`, "Adding a phone"; plan §2.22, M19),
+which the Mac app's *Add a Phone…* sheet drives through `--json`, and
+`apps/console/scripts/enroll.mjs` on the compose shape. Both call the one
+`mintEnrollmentCode` in `packages/core/src/enrollment-codes.ts`, the module
+the console's `peek` and `consume` come from, so a minter and the spender
+cannot disagree on the hash or the lifetime.
+
+`metistry enroll` **refuses before it mints** when the phone cannot complete
+the ceremony against the first `METISTRY_ORIGIN` entry: a loopback host
+(every install's default), `http:`, an IP literal, or an origin this Mac
+itself cannot reach within 5 s (or whose `/api/identity` names another
+instance). A refusal writes no row. `metistry enroll --cancel <code_id>`
+expires an unused code at once — its `expires_at` is moved to now, so the
+door's existing rule refuses it; there is no new column and no new state.
+Each mint and cancel is a `runs` row (`auth`), carrying the row's id and
+never the code.
+
 ## Rotating and revoking
 
 - **The local owner token:** `metistry secrets mint METISTRY_LOCAL_OWNER_TOKEN`

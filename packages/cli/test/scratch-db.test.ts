@@ -36,5 +36,6 @@ describe.skipIf(!hasDb)("scratch databases answer in UTC (real db)", () => {
         await pool.end();
       }
     }
-  });
+    // 30 s, not vitest's 5 s: two DROP + CREATE DATABASE … TEMPLATE round trips, slow on a loaded shared CI runner.
+  }, 30_000);
 });

@@ -4,13 +4,16 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import pg from "pg";
 import { dbRows, openDbFromEnv, type Db } from "../src/doctor.js";
 import { assertScratchDb, loadTestEnv, testDb, testDbEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+
+// 30 s, not vitest's 5 s: every test here is Postgres round trips, slow on a loaded shared CI runner.
+vi.setConfig({ testTimeout: 30_000 });
 
 describe.skipIf(!hasDb)("doctor: db + migrations against the scratch db", () => {
   let pool: pg.Pool;

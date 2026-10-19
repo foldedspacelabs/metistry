@@ -129,7 +129,7 @@ build_tailscale() {
   t0="$(date -u +%s)"
   if [ -f "$prefix/.done" ]; then say "tailscale $TAILSCALE_VERSION: cached"; return 0; fi
   log "tailscale $TAILSCALE_VERSION (tailscaled + tailscale, from source)"
-  command -v go >/dev/null || die "no go — tailscaled is built from source (the macos-14 runner ships Go; locally: go.dev/dl). The build itself uses GOTOOLCHAIN=$TAILSCALE_GO_TOOLCHAIN, fetched and verified by the go command"
+  command -v go >/dev/null || die "no go — tailscaled is built from source and the macos-14 runner image ships none. In CI the remote-packs job in .github/workflows/release.yml must run actions/setup-go (version from TAILSCALE_GO_TOOLCHAIN in runtime-versions.env); locally install Go from go.dev/dl. The build itself then uses GOTOOLCHAIN=$TAILSCALE_GO_TOOLCHAIN, fetched and verified by the go command"
   fetch "https://github.com/tailscale/tailscale/archive/refs/tags/v$TAILSCALE_VERSION.tar.gz" "$tarball" "$TAILSCALE_SHA256"
 
   rm -rf "$prefix" "$src"

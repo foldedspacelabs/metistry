@@ -2,9 +2,13 @@
 // The policy tests are the misuse tests for §4.18.B: a brief that would
 // carry comms-derived content or a personal vault path off the machine is
 // refused by the tool, whatever a prompt said.
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { DataPolicy } from "@foldedspacelabs/metistry-core";
+import { envSecretSource, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
 import { checkBrief, dispatch, resolveRef, returnFooter, TargetRegistry } from "../src/dispatch.js";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -230,5 +234,107 @@ describe("target registry", () => {
     expect(reg.get("github-issues")!.data_policy.max_brief_bytes).toBe(1);
     expect(() => reg.add({ ...manifest, data_policy: "no_personal_comms" })).toThrow(/data_policy/);
     expect(() => reg.add({ name: "x", type: "service", runs_on: "host" })).toThrow(/not a target/);
+  });
+});
+
+// X-92: `config.repo` of a github-issue connection goes into a URL path
+// (`/repos/<repo>/issues`), so `REPO_RE` is what keeps a connection file from
+// steering the write token at another path. The pattern is private, so the
+// test drives it where it acts: a real scratch instance catalog, presented by
+// the registry's `refresh()` — a refused repo leaves its connection unbound
+// (never dispatchable) with the reason; an accepted one is a target.
+describe("a github-issue connection's config.repo (REPO_RE) — enforced at the tool", () => {
+  const refused: [string, string][] = [
+    ["../x", "parent traversal in front"],
+    ["x/..", "parent traversal behind"],
+    ["../..", "traversal in both parts"],
+    ["./x", "current-directory prefix"],
+    ["x/.", "current directory behind"],
+    ["/etc/passwd", "an absolute path"],
+    ["/o/r", "a leading slash"],
+    ["o/r/extra", "a third segment"],
+    ["o/r/", "a trailing slash"],
+    ["o/r/..", "traversal as a third segment"],
+    ["o//r", "an empty middle segment"],
+    ["o", "no repository part"],
+    ["o/", "an empty repository"],
+    ["/r", "an empty owner"],
+    ["..", "bare traversal"],
+    [".", "a bare dot"],
+    ["o/r?x=1", "a query"],
+    ["o/r#frag", "a fragment"],
+    ["o/r%2e%2e", "a percent escape"],
+    ["o r/x", "whitespace inside"],
+    ["o\\r", "a backslash separator"],
+    ["o/r\\..", "a backslash traversal"],
+    ["o:r/x", "a character outside GitHub's set"],
+    ["", "empty"],
+    ["  ", "only whitespace"],
+  ];
+  const accepted = ["o/r", "foldedspacelabs/metistry", "a.b/c-d_e", "o/.github", "o/a..b", "o/r..", "..x/r", " o/padded "];
+
+  const name = (i: number, kind: "bad" | "ok") => `gh-${kind}-${i}`;
+  const conn = (n: string, repo: string) =>
+    [
+      `name: ${n}`,
+      "type: agent",
+      "provider: github-issues",
+      "reach:",
+      "  http:",
+      "    url: https://api.github.com",
+      "    auth: { scheme: bearer, secret: github_write_token }",
+      "secrets: [github_write_token]",
+      "config:",
+      `  repo: ${JSON.stringify(repo)}`,
+      "",
+    ].join("\n");
+
+  async function presented(repos: { name: string; repo: string }[]): Promise<TargetRegistry> {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-repo-re-"));
+    try {
+      await mkdir(join(dir, ".metistry/connections"), { recursive: true });
+      for (const r of repos) await writeFile(join(dir, ".metistry/connections", `${r.name}.yaml`), conn(r.name, r.repo));
+      await writeFile(
+        join(dir, ".metistry/secrets.yaml"),
+        ["secrets:", "  github_write_token:", "    hosts: [api.github.com]", `    grants: { ${repos.map((r) => `"connection:${r.name}": on`).join(", ")} }`, ""].join("\n"),
+      );
+      const reg = new TargetRegistry({ env: {}, fetchFn: (async () => Response.json({})) as typeof fetch });
+      reg.bindConnections({
+        catalog: () => loadInstanceCatalog({ instanceDir: dir, seedDir: `${root}seed` }),
+        secrets: envSecretSource({ METISTRY_SECRET_GITHUB_WRITE_TOKEN: "x".repeat(40) }),
+      });
+      await reg.refresh();
+      return reg;
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("`../x` is refused, with the repository named in the reason and nothing bound to dispatch to", async () => {
+    const reg = await presented([{ name: "gh-traversal", repo: "../x" }]);
+    expect(reg.get("gh-traversal")).toBeUndefined();
+    expect(reg.names()).not.toContain("gh-traversal");
+    expect(reg.unavailableConnection("gh-traversal")).toEqual({
+      status: "failed",
+      why: 'connection gh-traversal: config.repo must be owner/repo — got "../x"',
+    });
+  });
+
+  it("refuses every shape that is not exactly owner/repo — traversal, `./`, an absolute path, a third segment", async () => {
+    const reg = await presented(refused.map(([repo], i) => ({ name: name(i, "bad"), repo })));
+    for (const [i, [repo, why]] of refused.entries()) {
+      const n = name(i, "bad");
+      expect(reg.get(n), `${JSON.stringify(repo)} (${why}) must not become a target`).toBeUndefined();
+      expect(reg.unavailableConnection(n), `${JSON.stringify(repo)} (${why})`).toMatchObject({ status: "failed", why: expect.stringContaining("config.repo must be owner/repo") });
+    }
+  });
+
+  it("accepts a plain owner/repo, GitHub's own characters, and a part that merely contains dots; the repo goes in the target as trimmed", async () => {
+    const reg = await presented(accepted.map((repo, i) => ({ name: name(i, "ok"), repo })));
+    for (const [i, repo] of accepted.entries()) {
+      const n = name(i, "ok");
+      expect(reg.unavailableConnection(n), JSON.stringify(repo)).toBeUndefined();
+      expect(reg.get(n), JSON.stringify(repo)).toMatchObject({ transport: "github", submit: { repo: repo.trim() } });
+    }
   });
 });

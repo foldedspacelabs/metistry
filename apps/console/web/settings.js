@@ -15,16 +15,24 @@
 // settings rows — Agents, Scheduled, Vault — where they read naturally.
 //
 // Where it writes, each through a door the console already has:
+//   - **the assistant's model and effort**: `POST /api/compute/assign`, for
+//     `default` only, from the models `GET /api/compute/models` lists on the
+//     providers the instance already runs (X-99) — never a provider, a key or
+//     a base URL;
 //   - **spending limits**: `POST /api/compute/budget` — the instance's, and
 //     each provider's (daily, monthly, what happens at the limit);
 //   - **each project's daily budget**: `PUT /api/projects/:slug`;
+//   - **Scheduled's pause**: `POST /api/scheduled/routines/:name/pause|resume`
+//     and, for a sync, `PUT /api/scheduled/syncs/:name` with `{paused}` (X-99)
+//     — the Mac's own doors; a schedule, Run Now and what a routine runs are
+//     not offered here;
 //   - **devices**: `POST /api/devices/:id/revoke`, one device at a time, and
 //     Sign Out Everywhere as that same door once per device, this one last.
 // Each is confirmed or edited in the page — never `window.confirm` (X-33) —
 // and none is offered while the console cannot be reached (T7-4).
 //
 // Where it reads: `/api/identity`, `/api/whoami`, `/api/status`,
-// `/api/compute`, `/api/projects`, `/api/devices`, `/api/connections`,
+// `/api/compute`, `/api/scheduled`, `/api/projects`, `/api/devices`, `/api/connections`,
 // `/api/secrets` (names, never a value) and `/api/vault/status`. Each group
 // reads on its own, so one refusal never blanks the page.
 //
@@ -67,7 +75,7 @@ export const SETTINGS_GROUPS = [
   {
     id: "compute", title: "Compute", part: "head",
     rows: [
-      { read: "assignment" },
+      { write: "assignment" },
       { write: "limits" },
       { write: "project-budgets" },
       { read: "providers" },
@@ -101,6 +109,7 @@ export const SETTINGS_GROUPS = [
   {
     id: "scheduled", title: "Scheduled", part: "rest",
     rows: [
+      { write: "scheduled" },
       {
         mac: "A Routine's Agent, Task and Grants; New Routine", why: "it changes what runs.",
         local: ["PUT /api/scheduled/routines/:name/assignment", "POST /api/scheduled/routines"],
@@ -162,6 +171,13 @@ export const LIMIT_ACTIONS = [
   ["allow", "Allow", "Record the overrun and keep going."],
 ];
 const actionWord = (a) => LIMIT_ACTIONS.find(([k]) => k === a)?.[1] ?? String(a ?? "");
+
+/** The efforts `POST /api/compute/assign` takes (EFFORTS, packages/core), in the Mac's order. */
+export const EFFORT_CHOICES = ["low", "medium", "high"];
+const titleCase = (w) => `${String(w)[0]?.toUpperCase() ?? ""}${String(w).slice(1)}`;
+
+/** The act → the group whose receipt says it (offline, or refused). */
+const GROUP_OF = { "edit-model": "compute", "edit-limit": "compute", "edit-project": "compute", pause: "scheduled", resume: "scheduled" };
 
 /** Dollars, the Mac's way: whole numbers plain, anything else to the cent. */
 export const money = (v) => { const n = asNum(v); return n === Math.round(n) ? String(n) : n.toFixed(2); };
@@ -233,12 +249,65 @@ export function healthRowsHtml(status) {
   return `<li class="kv checks-summary"><span class="k">Health</span><span class="v">${esc(checksSummary(checks))}</span></li>` + checks.map(checkRowHtml).join("");
 }
 
-/** The assistant's model and effort: the `default` assignment, as the engine runs it. */
+/** `<provider>/<model>` — exactly what an assignment takes. */
+export const refOf = (a) => `${a.provider}/${a.model}`;
+
+/** The assistant's `default` assignment, as the engine runs it. */
+export const defaultAssignment = (compute) => (compute?.assignments ?? []).find((x) => x.target === "default");
+
+/**
+ * The assistant's model and effort: the `default` assignment, as the engine
+ * runs it, and Change (X-99) — unless the console says it cannot write the file
+ * (`writable: false`), when there is nothing to press and nothing to fail.
+ */
 export function assignmentRowHtml(compute, assistant) {
-  const a = (compute?.assignments ?? []).find((x) => x.target === "default");
+  const a = defaultAssignment(compute);
   const who = assistant ? `${assistant}'s Model` : "The Assistant's Model";
-  if (!a) return kv(who, '<span class="muted">not assigned</span>');
-  return kv(who, `${esc(a.model)} <span class="muted">· ${esc(a.provider)}</span>`, a.effort ? `${a.effort[0].toUpperCase()}${a.effort.slice(1)} effort` : "");
+  const change = compute?.writable === false ? "" :
+    ` <button type="button" class="secondary" data-act="edit-model" aria-label="${attr(`Change ${who}`)}" data-needs-connection>${a ? "Change" : "Choose"}</button>`;
+  if (!a) return kv(who, `<span class="muted">not assigned</span>${change}`);
+  return kv(who, `${esc(a.model)} <span class="muted">· ${esc(a.provider)}</span>${change}`, a.effort ? `${titleCase(a.effort)} effort` : "");
+}
+
+/**
+ * The models to choose from: every model the providers the instance runs
+ * serve (`GET /api/compute/models`), grouped by provider and skipping one that
+ * is switched off or did not answer — and the current one, always, so Save
+ * without a change is a no-op rather than a surprise.
+ */
+export function modelChoices(models, compute) {
+  const off = new Set((compute?.providers ?? []).filter((p) => p.enabled === false).map((p) => p.name));
+  const groups = [];
+  for (const p of models?.providers ?? []) {
+    if (off.has(p.name) || p.ok === false || !Array.isArray(p.models)) continue;
+    const refs = p.models.map((m) => `${p.name}/${m}`);
+    if (refs.length) groups.push({ provider: p.name, refs });
+  }
+  const now = defaultAssignment(compute);
+  if (now && !groups.some((g) => g.refs.includes(refOf(now)))) {
+    const own = groups.find((g) => g.provider === now.provider);
+    if (own) own.refs.unshift(refOf(now));
+    else groups.unshift({ provider: now.provider, refs: [refOf(now)] });
+  }
+  return groups;
+}
+
+/** The assistant's model, being changed: the models in a menu, the effort in another, Save and Cancel. */
+export function modelFormHtml(compute, models, assistant, why = "") {
+  const a = defaultAssignment(compute);
+  const who = assistant ? `${assistant}'s Model` : "The Assistant's Model";
+  const now = a ? refOf(a) : "";
+  const groups = modelChoices(models, compute);
+  const options = (a ? "" : '<option value="" selected>Choose a model</option>') + groups.map((g) =>
+    `<optgroup label="${attr(g.provider)}">${g.refs.map((r) => `<option value="${attr(r)}"${r === now ? " selected" : ""}>${esc(r.slice(g.provider.length + 1))}</option>`).join("")}</optgroup>`).join("");
+  const effort = a?.effort ?? "medium";
+  return `<li class="edit"><form class="setting-form" data-form="model" aria-label="${attr(`${who}: model and effort`)}">` +
+    `<p class="k">${esc(who)}<span class="sub">${esc(a ? `Now ${now}, ${effort} effort` : "Nothing is assigned yet")}</span></p>` +
+    (why ? `<p class="muted" role="status">${esc(why)}</p>` : "") +
+    `<label>Model <select id="model-ref">${options}</select></label>` +
+    `<label>Effort <select id="model-effort">${EFFORT_CHOICES.map((e) => `<option value="${e}"${e === effort ? " selected" : ""}>${esc(titleCase(e))}</option>`).join("")}</select></label>` +
+    `<p class="muted">The models are the ones your providers already serve. Providers and keys are set on the Mac.</p>` +
+    `<div class="acts"><button type="submit" data-needs-connection>Save</button><button type="button" class="secondary" data-act="cancel">Cancel</button></div></form></li>`;
 }
 
 /** One spending limit: its summary, what is spent, and Change — or, while editing, its form. */
@@ -273,6 +342,28 @@ export function projectBudgetRowHtml(p, { editing = false } = {}) {
     `<label>A day, in dollars <input type="number" inputmode="decimal" min="0" step="0.01" id="proj-${idOf(p.id)}-daily" value="${has ? attr(String(p.daily_budget_usd)) : ""}"></label>` +
     `<p class="muted">Blank is no daily budget.</p>` +
     `<div class="acts"><button type="submit" data-needs-connection>Save</button><button type="button" class="secondary" data-act="cancel">Cancel</button></div></form></li>`;
+}
+
+/**
+ * Scheduled's pause (X-99): one row per routine and per sync — its name, when
+ * it runs or why it does not, and Pause or Resume. Nothing else of Scheduled
+ * is drawn: a schedule, Run Now and what a routine runs stay where they are.
+ */
+export function scheduledRowHtml(u, kind, { busy = false } = {}) {
+  const paused = u?.paused?.value === true;
+  const bits = [u.describe, paused ? "paused" : u.held ? `held — ${u.held}` : u.next_run ? `next ${dateTime(u.next_run)}` : ""].filter(Boolean);
+  const act = paused ? "resume" : "pause";
+  const title = u.title ?? u.name;
+  return `<li class="kv"><span class="k">${esc(title)}<span class="sub">${esc(bits.join(" · "))}</span></span>` +
+    `<span class="v"><button type="button" class="secondary" data-act="${act}" data-kind="${attr(kind)}" data-name="${attr(u.name)}" aria-label="${attr(`${paused ? "Resume" : "Pause"} ${title}`)}"${busy ? " disabled" : ""} data-needs-connection>${paused ? "Resume" : "Pause"}</button></span></li>`;
+}
+
+export function scheduledRowsHtml(body, busy = new Set()) {
+  const rows = [
+    ...(body?.routines ?? []).map((r) => scheduledRowHtml(r, "routine", { busy: busy.has(`routine:${r.name}`) })),
+    ...(body?.syncs ?? []).map((r) => scheduledRowHtml(r, "sync", { busy: busy.has(`sync:${r.name}`) })),
+  ];
+  return rows.length ? rows.join("") : kv("Scheduled", '<span class="muted">nothing is scheduled</span>');
 }
 
 export function providersRowHtml(compute) {
@@ -360,12 +451,16 @@ const READS = {
   whoami: "/api/whoami",
   status: "/api/status",
   compute: "/api/compute",
+  scheduled: "/api/scheduled",
   projects: "/api/projects",
   devices: "/api/devices",
   connections: "/api/connections",
   secrets: "/api/secrets",
   vault: "/api/vault/status",
 };
+
+/** Read only when a form needs it: the providers' live model lists are a call to each provider, so they are never part of the page's own reads or its refetch. */
+const LAZY_READS = { models: "/api/compute/models" };
 
 /**
  * Mount Settings. `offline()` is the shell's: while it says so, no write is
@@ -375,12 +470,13 @@ const READS = {
  */
 export function mountSettings({ $, api, show, notify = null, offline = () => false }) {
   const data = {}; // read name → { ok: true, body } | { ok: false, reason }
-  let editing = null; // "limit:<scope>" · "project:<slug>" · "revoke:<id>" · "everywhere"
+  let editing = null; // "model" · "limit:<scope>" · "project:<slug>" · "revoke:<id>" · "everywhere"
   const said = {}; // group id → the last receipt in it
+  const busy = new Set(); // "routine:<name>" · "sync:<name>" — a pause in flight
 
   async function read(name) {
     try {
-      const res = await api(READS[name]);
+      const res = await api(READS[name] ?? LAZY_READS[name]);
       const body = await res.json().catch(() => ({}));
       data[name] = res.ok ? { ok: true, body } : { ok: false, reason: body?.error?.message ?? `the console answered ${res.status}` };
     } catch (e) {
@@ -408,7 +504,8 @@ export function mountSettings({ $, api, show, notify = null, offline = () => fal
       case "identity": return readRows("identity", "the instance", identityRowsHtml);
       case "version": return readRows("identity", "the version", versionRowHtml);
       case "health": return readRows("status", "the checks", healthRowsHtml);
-      case "assignment": return readRows("compute", "compute", (c) => assignmentRowHtml(c, assistantName()));
+      case "assignment": return readRows("compute", "compute", (c) => editing === "model" ? modelEditHtml(c) : assignmentRowHtml(c, assistantName()));
+      case "scheduled": return readRows("scheduled", "Scheduled", (b) => scheduledRowsHtml(b, busy));
       case "providers": return data.compute?.ok ? providersRowHtml(data.compute.body) : ""; // compute's state is said once, above
       case "limits": return data.compute?.ok ? limitsRowsHtml(data.compute.body.limits) : "";
       case "project-budgets": return readRows("projects", "the projects", (b) => (b.projects ?? []).map((p) => projectBudgetRowHtml(p, { editing: editing === `project:${p.id}` })).join(""));
@@ -418,6 +515,13 @@ export function mountSettings({ $, api, show, notify = null, offline = () => fal
       case "vault": return readRows("vault", "the vault's status", vaultRowsHtml);
       default: return "";
     }
+  }
+
+  /** The model form, once the models have been asked for: reading while they are, the form with the reason when they could not be. */
+  function modelEditHtml(compute) {
+    const m = data.models;
+    if (!m) return readingRowHtml("the models");
+    return modelFormHtml(compute, m.ok ? m.body : null, assistantName(), m.ok ? "" : `Couldn't list the models — ${m.reason}. The effort can still change.`);
   }
 
   function limitsRowsHtml(limits) {
@@ -460,6 +564,46 @@ export function mountSettings({ $, api, show, notify = null, offline = () => fal
   }
 
   // ----- the doors -----
+
+  async function saveModel() {
+    const ref = String($("model-ref").value ?? "").trim();
+    const effort = String($("model-effort").value ?? "");
+    if (ref === "") return say("compute", "Not saved — choose a model.");
+    if (!EFFORT_CHOICES.includes(effort)) return say("compute", "Not saved — effort is low, medium or high.");
+    const res = await api("/api/compute/assign", { method: "POST", body: JSON.stringify({ tier: "default", model: ref, effort }) });
+    if (!res.ok) return say("compute", await refusalText(res, `Not saved — the console answered ${res.status}.`));
+    editing = null;
+    await read("compute");
+    say("compute", `Saved — ${assistantName() ?? "the assistant"} uses ${ref} at ${effort} effort.`);
+  }
+
+  /** Pause or resume one routine or sync, through the door the Mac uses; the list is read again either way. */
+  async function setPaused(kind, name, pause) {
+    const id = `${kind}:${name}`;
+    if (busy.has(id)) return;
+    busy.add(id);
+    paint();
+    const enc = encodeURIComponent(name);
+    const u = (data.scheduled?.body?.[kind === "sync" ? "syncs" : "routines"] ?? []).find((x) => x.name === name);
+    const label = u?.title ?? name;
+    let why = null;
+    try {
+      const res = kind === "sync"
+        ? await api(`/api/scheduled/syncs/${enc}`, { method: "PUT", body: JSON.stringify({ paused: pause }) })
+        : pause
+          ? await api(`/api/scheduled/routines/${enc}/pause`, { method: "POST", body: "{}" })
+          : await api(`/api/scheduled/routines/${enc}/resume`, { method: "POST", body: "{}" });
+      if (!res.ok) why = await refusalText(res, `the console answered ${res.status}`);
+    } catch (e) {
+      if (e?.message === "unauthenticated") throw e;
+      why = String(e?.message ?? e);
+    }
+    busy.delete(id);
+    if (why) said.scheduled = `${label} was not ${pause ? "paused" : "resumed"} — ${why}.`;
+    else said.scheduled = pause ? `${label} is paused.` : `${label} is running again.`;
+    await read("scheduled");
+    paint();
+  }
 
   async function saveLimit(scope) {
     const key = idOf(scope);
@@ -532,8 +676,18 @@ export function mountSettings({ $, api, show, notify = null, offline = () => fal
     const act = el.dataset.act;
     if (act === "view") return show(el.dataset.view);
     if (act === "cancel") { editing = null; return paint(); }
-    if (offline()) return say(act.includes("limit") || act.includes("project") ? "compute" : "account", OFFLINE_SETTING); // not offered offline (T7-4)
+    if (offline()) return say(GROUP_OF[act] ?? "account", OFFLINE_SETTING); // not offered offline (T7-4)
+    if (act === "pause" || act === "resume") return setPaused(el.dataset.kind === "sync" ? "sync" : "routine", el.dataset.name, act === "pause");
     // a form opens with focus in its first field; a confirmation with focus on Cancel, the default (P3)
+    if (act === "edit-model") {
+      editing = "model";
+      delete data.models; // the providers' lists may have moved since the last time
+      paint();
+      await read("models");
+      if (editing !== "model") return; // cancelled while the providers answered
+      paint();
+      return $("model-ref")?.focus?.();
+    }
     if (act === "edit-limit") { editing = `limit:${el.dataset.scope}`; paint(); return $(`lim-${idOf(el.dataset.scope)}-daily`)?.focus?.(); }
     if (act === "edit-project") { editing = `project:${el.dataset.slug}`; paint(); return $(`proj-${idOf(el.dataset.slug)}-daily`)?.focus?.(); }
     if (act === "ask-revoke") { editing = `revoke:${el.dataset.id}`; paint(); return $("settings-confirm-cancel")?.focus?.(); }
@@ -547,6 +701,7 @@ export function mountSettings({ $, api, show, notify = null, offline = () => fal
     if (!form) return;
     e.preventDefault();
     if (offline()) return say("compute", OFFLINE_SETTING); // a setting never waits (T7-4)
+    if (form.dataset.form === "model") return saveModel();
     if (form.dataset.form === "limit") return saveLimit(form.dataset.scope);
     if (form.dataset.form === "project") return saveProject(form.dataset.slug);
   });

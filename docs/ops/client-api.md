@@ -4142,7 +4142,12 @@ New Routine, Purge Now, restoring a file and a vault rollback are `local` rows
 in the table. The rest of the Mac-only column is the CLI (above).
 
 The PWA draws this table as More ▸ Settings (T7-6), grouped as the Mac's
-panes: what the phone reads, the budgets (`POST /api/compute/budget`,
+panes: what the phone reads, the assistant's model and effort
+(`POST /api/compute/assign` with `{tier: "default", model, effort}`, the model
+chosen from `GET /api/compute/models` on the providers already switched on —
+read only when the form opens), Scheduled's pause (`POST
+/api/scheduled/routines/:name/pause|resume`, and `PUT /api/scheduled/syncs/:name`
+with `{paused}` for a sync, X-99), the budgets (`POST /api/compute/budget`,
 `PUT /api/projects/:slug`) and devices (`POST /api/devices/:id/revoke`, and
 Sign Out Everywhere as that door once per live device, the caller's own
 session last) it writes, and every row whose phone column is **—**, or whose

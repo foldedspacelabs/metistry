@@ -1983,6 +1983,79 @@ judged exactly as the reader will before anything is written. `list --json`
 prints the rows `GET /api/connections` serves; `show --json` the body of `GET
 /api/connections/:name` (`docs/ops/client-api.md`).
 
+## Adding a phone: `metistry enroll`
+
+```
+metistry enroll [--json] [--instance <dir>] [--env-file <path>]
+metistry enroll --cancel <code_id> [--json] [--instance <dir>] [--env-file <path>]
+```
+
+A phone gets its own passkey by opening a one-time **enrolment code** (plan
+§2.22, M19; `docs/ops/auth.md`, "Adding a phone"). `metistry enroll` mints one
+on this Mac — single use, ten minutes, stored hashed in
+`auth_enrollment_codes` — and prints the URL to open on the phone:
+
+```
+$ metistry enroll
+Open this on the phone — it works once, for 10 minutes (until 14:52):
+  https://metis.example/#enroll=Qm9…
+Your phone must be able to open metis.example.
+Code 42 — `metistry enroll --cancel 42` ends it early.
+```
+
+The URL is `<first METISTRY_ORIGIN entry>/#enroll=<code>` — the canonical
+origin passkeys bind to. **No HTTP route mints a code**, not an
+unauthenticated one and not a `local` one: shell access to this Mac is the
+root of trust for a first credential (plan §4.2), and a test holds the route
+table to it. The Mac app's *Add a Phone…* sheet runs this verb (X-77) and
+draws the QR itself; the CLI prints the URL only (a terminal QR needs an
+encoder nobody has asked for — open question 1 in §2.22). The mint is core's
+`mintEnrollmentCode`, the function the console spends a code with, so the two
+cannot disagree; `apps/console/scripts/enroll.mjs` (the compose shape, and
+`--owner-token`) calls the same one.
+
+**It refuses before it mints** when the phone cannot possibly complete the
+ceremony against that origin. The first `METISTRY_ORIGIN` entry is checked,
+in this order, and a refusal writes no row and exits 1:
+
+| when | the refusal |
+| --- | --- |
+| the host is loopback — `127.0.0.0/8`, `::1`, `localhost`; **every install's default** (`init` writes `http://127.0.0.1:<port>`) | *Your phone can't reach this Mac yet: Metistry only answers on this Mac. Choose how your phone reaches it in Settings ▸ Remote Access (`metistry remote set`).* |
+| the scheme is `http:` | *A passkey needs HTTPS. METISTRY_ORIGIN is `<origin>`; set it to the https:// address your phone will open.* |
+| the host is an IP literal | *A passkey needs a name, not an IP address. METISTRY_ORIGIN is `<origin>`; set it to a hostname your phone can open.* |
+| `GET <origin>/health` does not answer from this Mac within 5 s, or `GET <origin>/api/identity` names another instance's `instance_id` | *`<origin>` doesn't answer from this Mac, so your phone won't reach it either. Settings ▸ Remote Access shows what `<provider>` reports.* — the provider `deployment.yaml`'s `remote.provider` records (§2.23), "your remote-access provider" until one is chosen; the failing probe is printed under it |
+
+An unset or unparsable `METISTRY_ORIGIN` is refused by name as well. Every
+refusal names `METISTRY_ORIGIN` and ends with the same pointer: Settings ▸
+Remote Access on the Mac, `metistry remote` in a terminal. The checks are
+necessary, not sufficient — a name that resolves only on this Mac still
+passes, which is what *"Your phone must be able to open `<host>`"* is for.
+
+**`--json`** writes exactly one document. On a mint:
+
+```json
+{"url":"https://metis.example/#enroll=Qm9…","code_id":42,"origin":"https://metis.example","expires_at":"2026-10-18T14:52:10.123Z"}
+```
+
+`code_id` is the row's id, never the code. On a refusal, exit 1 and one
+document on stdout — `{"refused":{"case":"loopback","message":"…","origin":"http://127.0.0.1:8080","fix":"…"}}`
+(`case` is one of `origin_unset`, `origin_invalid`, `loopback`, `http`,
+`ip_literal`, `unreachable`, `other_instance`; `detail` carries the failing
+probe when there is one) — so the Mac's sheet shows the refusal's own words.
+
+**`--cancel <code_id>`** expires an unused code at once, so a QR left on
+screen or in a screenshot is dead the moment the owner is done with it; the
+Mac's sheet runs it when it closes and before *Make a New Code*. It takes the
+id, never the code. A code already used or expired is reported, exit 0
+(`already_used`, `already_expired`); an id nothing has is exit 1
+(`not_found`). `--json`: `{"code_id":42,"outcome":"cancelled","cancelled":true}`.
+
+Both acts land in `runs` (`auth` / `enroll`, `enroll_cancel`) with the id,
+never the code. The database comes from `METISTRY_DB_*` in the install's
+environment (`--instance <dir>` picks up `<instance>/.metistry/state/.env`);
+without `METISTRY_DB_PASSWORD` the verb exits 2 and says so — it never
+guesses a database.
+
 ## Importing Claude Code sessions
 
 ```
@@ -3139,8 +3212,8 @@ operator-facing parts of it happen:
 
 ## Not yet
 
-`metistry enroll` (§4.2 passkey enrollment from the host) and `metistry
-create <bridge|collector|…>` (§5 extension scaffolds) are not started.
+`metistry create <bridge|collector|…>` (§5 extension scaffolds) is not
+started.
 `connect-repo --auth device` has been exercised only against an injected
 fetch: the live GitHub round trip waits on the OAuth App being
 registered.

@@ -408,8 +408,9 @@ POST /auth/login/finish    {key, response}         200 {ok:true} + Set-Cookie me
 `GET /health` is a liveness probe (`metistry doctor` reads it) and the cheapest
 way to learn the contract version without signing in. The four ceremonies are
 `docs/ops/auth.md`'s: a one-time, ten-minute enrolment code minted on the host
-(`apps/console/scripts/enroll.mjs` — shell access is the root of trust for a
-first passkey, so no route mints one) starts a passkey registration, and a
+(`metistry enroll`, `docs/ops/cli.md`; `apps/console/scripts/enroll.mjs` on the
+compose shape — shell access is the root of trust for a first passkey, so no
+route mints one, and a test holds this table to that) starts a passkey registration, and a
 sign-in is the standard WebAuthn assertion. An origin mismatch is a `401` with
 the reason, never a `500`.
 

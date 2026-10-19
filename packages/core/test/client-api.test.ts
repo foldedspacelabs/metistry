@@ -86,6 +86,22 @@ describe("every row", () => {
   });
 });
 
+describe("minting an enrolment code (plan §2.22, X-75)", () => {
+  it("is no route's job: the only enrolment rows are the two ceremonies that SPEND a code, and nothing in the table mints one", () => {
+    // Shell access to the Mac is the root of trust for a first passkey (plan
+    // §4.2): `metistry enroll` mints, and the console's conformance test holds
+    // the server to this table — so a row here is the only way a mint could be
+    // served, and there is none. Not an unauthenticated one, not a `local` one.
+    const enrolment = CLIENT_API.filter((r) => /enrol/i.test(r.path));
+    expect(enrolment.map(key).sort()).toEqual(["POST /auth/enroll/finish", "POST /auth/enroll/start"]);
+    for (const r of enrolment) expect(r.reach, key(r)).toEqual(["public"]);
+    // the only mints the table knows are agent bearer tokens (`/api/agents`), never a code for a passkey
+    const mints = CLIENT_API.filter((r) => /\bmint/i.test(r.summary) || /mint/i.test(r.path));
+    expect(mints.map(key).sort()).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate"]);
+    expect(CLIENT_API.filter((r) => /enrol\w*\s+code|passkey\s+code|one-time\s+code/i.test(r.summary) && !/enrol/i.test(r.path)).map(key)).toEqual([]);
+  });
+});
+
 describe("reach and principals", () => {
   it("a public row needs no credential, and only a public row", () => {
     for (const r of CLIENT_API) {

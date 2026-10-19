@@ -9,38 +9,12 @@ export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
 }
 
-const ENROLL_TTL_MIN = 10;  // limit: fixed — a one-shot enrolment code's lifetime is a security parameter, and it is interpolated into SQL
-
-export async function mintEnrollmentCode(db: Db): Promise<string> {
-  const code = mintToken(16);
-  await db.query(
-    `INSERT INTO auth_enrollment_codes (code_hash, expires_at)
-     VALUES ($1, now() + interval '${ENROLL_TTL_MIN} minutes')`,
-    [tokenHash(code)],
-  );
-  return code;
-}
-
-/** Valid-without-burning check (enrollment /start). */
-export async function peekEnrollmentCode(db: Db, code: string): Promise<boolean> {
-  const { rows } = await db.query(
-    `SELECT 1 FROM auth_enrollment_codes
-     WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()`,
-    [tokenHash(code)],
-  );
-  return rows.length === 1;
-}
-
-/** Consume a code: single-use, unexpired. Returns false on any miss. */
-export async function consumeEnrollmentCode(db: Db, code: string): Promise<boolean> {
-  const { rows } = await db.query(
-    `UPDATE auth_enrollment_codes SET used_at = now()
-     WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
-     RETURNING id`,
-    [tokenHash(code)],
-  );
-  return rows.length === 1;
-}
+// The enrolment-code functions live in core (`enrollment-codes.ts`) so the
+// CLI's `metistry enroll` — which mints and cancels a code and may not import
+// this app — and the console — which spends one — run the same code and can
+// never disagree (plan §2.22). Re-exported here so every console caller keeps
+// its `store.*` spelling.
+export { cancelEnrollmentCode, consumeEnrollmentCode, mintEnrollmentCode, peekEnrollmentCode } from "@foldedspacelabs/metistry-core";
 
 export async function storePasskey(
   db: Db,
@@ -118,18 +92,7 @@ export async function listDevices(db: Db): Promise<any[]> {
   return rows;
 }
 
-/** Host-minted owner access token (Shortcuts/CLI — no WebAuthn there). */
-export async function mintOwnerToken(db: Db, label: string): Promise<string> {
-  const token = mintToken(32);
-  await db.query(`INSERT INTO owner_tokens (token_hash, label) VALUES ($1, $2)`, [tokenHash(token), label]);
-  return token;
-}
-
-export async function checkOwnerToken(db: Db, token: string): Promise<boolean> {
-  const { rows } = await db.query(
-    `UPDATE owner_tokens SET last_used_at = now()
-     WHERE token_hash = $1 AND revoked_at IS NULL RETURNING id`,
-    [tokenHash(token)],
-  );
-  return rows.length === 1;
-}
+// Owner access tokens live in core too (`owner-tokens.ts`): `metistry up`
+// records the recorder's inbox token and scripts/enroll.mjs mints one with the
+// same statements the console checks against.
+export { checkOwnerToken, mintOwnerToken } from "@foldedspacelabs/metistry-core";

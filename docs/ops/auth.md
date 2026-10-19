@@ -437,25 +437,73 @@ the moment the job restarts.
 
 ## Passkeys: origins
 
-`METISTRY_ORIGIN` is the canonical HTTPS origin passkeys bind to. It may be
-a **comma-separated list** when one install is loaded under more than one
-origin (a tailnet name and a public hostname, say) — `@simplewebauthn`
-v13's `expectedOrigin` takes an array. The **first** entry stays canonical:
-it is the rpID's source, what enrolled passkeys record, and the base
-relative URLs resolve against.
+`METISTRY_ORIGIN` is the HTTPS origin passkeys bind to. It may be a
+**comma-separated list** when one install is loaded under more than one
+origin — the remote-access origin and the loopback one `init` wrote
+(design-build-plan §2.23), say — and `@simplewebauthn/server` v14 takes
+`expectedOrigin` and `expectedRPID` as arrays. The **first** entry is
+canonical for two things: it is the base relative URLs resolve against, and
+its host is what a passkey enrolled before migration `0039` reads as.
 
-An origin the console does not expect no longer surfaces as HTTP 500. The
+**The rpID follows the request** (X-104). A passkey is scoped by the browser
+to one rpID — the host it was created on — and is never offered anywhere
+else, so a console that issued every ceremony the first entry's host could
+never finish one at a second origin on another host. Now:
+
+- `POST /auth/enroll/start` and `POST /auth/login/start` read the `Origin`
+  header a browser sends on every POST, match it **exactly** against the
+  list, and issue that origin's host as `rp.id` / `rpId`. An `Origin` outside
+  the list is refused there and then — 401, naming both sides (below) — and an
+  enrolment code is not burned by a refused start.
+- A client that sends no `Origin` — the Mac app's enrolment, which performs
+  its ceremony at `https://<rpID>`, or a probe — is issued the **canonical**
+  origin's host, as every ceremony was before; it states another configured
+  origin with an `Origin` header. `Host` is not read: TLS terminators rewrite
+  it, and the console's one client without a browser reaches it over loopback
+  for a ceremony it performs at the canonical host.
+- `POST /auth/enroll/finish` verifies the browser's own signed statement of
+  the origin against the whole list (`expectedOrigin`), the credential's rpID
+  against every configured host (`expectedRPID`), and records the host the
+  passkey was bound to in `passkeys.rp_id` (`0039`, durable) and the origin
+  the browser stated in `rp_origin`.
+- `POST /auth/login/finish` verifies against the passkey's **own** host —
+  `rp_id`, or the first origin's host when it is null — never the whole
+  list: an assertion claiming a sibling host for a passkey that was never
+  offered there is refused, naming both sides. A passkey from before `0039`
+  therefore signs in at the first origin exactly as it did.
+- `GET /api/devices` serves each passkey's `rp_id`, resolved (a null reads as
+  the first origin's host) so a client never needs the origin list to tell
+  which passkeys a provider change stranded (`docs/ops/client-api.md`).
+
+**Changing the list strands passkeys.** A passkey added at
+`old.example.com` signs in nowhere else; after the origin changes, Devices
+can say so from `rp_id` (*"Added for old.example.com. Remove it and add this
+phone again."*, X-107). Removing the first entry changes what every
+pre-`0039` passkey reads as, so add the new origin and keep the old one first
+until those phones are re-added, or accept re-enrolling them.
+
+An origin the console does not expect never surfaces as HTTP 500. The
 ceremony answers 401 with a reason naming both sides:
 
 ```json
 {"error":{"code":"unauthenticated","message":"origin mismatch: this console
- expects https://metis.example, the browser presented https://elsewhere.example
- — set METISTRY_ORIGIN to the origin you actually load"}}
+ expects https://metis.example or https://metis.tailnet.ts.net, the browser
+ presented https://elsewhere.example — set METISTRY_ORIGIN to the origin you
+ actually load"}}
 ```
 
-Both origins are already known to the caller (it presented its own) and to
+and a passkey presented where it was not added:
+
+```json
+{"error":{"code":"unauthenticated","message":"rpID mismatch: this passkey was
+ added for metis.tailnet.ts.net, the browser presented https://metis.example
+ — a passkey signs in only where it was added; add this device again there"}}
+```
+
+Both sides are already known to the caller (it presented its own) and to
 anyone who can load the login page, so nothing leaks; what it buys is that a
-misconfigured install stops looking like a broken one.
+misconfigured install stops looking like a broken one. Each refusal is one
+audit row (`auth` · `enroll` or `login`, `ok: false`, with the reason).
 
 ## Rotating and revoking
 

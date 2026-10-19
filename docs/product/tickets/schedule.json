@@ -3190,7 +3190,7 @@
         "T8-5"
       ],
       "file": "docs/product/tickets/x/x-80.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-81": {
       "title": "Kept recordings have a list route",
@@ -3233,7 +3233,7 @@
         "T8-6"
       ],
       "file": "docs/product/tickets/x/x-83.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-84": {
       "title": "`POST /message` carries a session-turn marker",
@@ -3277,7 +3277,7 @@
         "T6-14"
       ],
       "file": "docs/product/tickets/x/x-86.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-87": {
       "title": "The calendar collectors export `check()`",
@@ -3374,7 +3374,7 @@
         "T4-15"
       ],
       "file": "docs/product/tickets/x/x-93.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-94": {
       "title": "The wizard's copy templates the configured name",
@@ -3459,7 +3459,7 @@
         "T7-6"
       ],
       "file": "docs/product/tickets/x/x-99.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-100": {
       "title": "The \"held to core\" Swift tests cannot drift",
@@ -3486,7 +3486,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-101.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-102": {
       "title": "The recorder leaves no fixed-id rows behind",
@@ -3551,7 +3551,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-78.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-79": {
       "title": "The phone guide, and the website's copy re-checked",

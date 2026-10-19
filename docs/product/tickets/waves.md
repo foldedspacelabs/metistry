@@ -201,14 +201,14 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [ ] [X-104](x/x-104.md) · Passkeys per origin — the rpID follows the request · M · opus
 - [ ] [X-111](x/x-111.md) · A console on the internet — rate limits and headers on the proxy listener · M · opus · after X-103
 - [ ] [X-88](x/x-88.md) · The workspace test script isolates each package's database · M · opus
-- [ ] [X-80](x/x-80.md) · `metistry up` mints the recorder's control token · S · sonnet · after T8-5
+- [ ] [X-80](x/x-80.md) · `metistry up` mints the recorder's control token · S · sonnet · after T8-5 · **in-review**
 - [ ] [X-85](x/x-85.md) · The targets shim comes out · S · sonnet · after T4-11
 - [ ] [X-102](x/x-102.md) · The recorder leaves no fixed-id rows behind · S · sonnet · after X-31 · **in-review**
-- [ ] [X-101](x/x-101.md) · Bare `metistry doctor` resolves the product directory it runs from · S · sonnet
+- [ ] [X-101](x/x-101.md) · Bare `metistry doctor` resolves the product directory it runs from · S · sonnet · **in-review**
 - [ ] [X-87](x/x-87.md) · The calendar collectors export `check()` · M · opus · after T4-14
 - [ ] [X-75](x/x-75.md) · `metistry enroll` — an enrolment code minted on this Mac · M · opus high
 - [ ] [X-76](x/x-76.md) · Removing a device revokes its passkey · M · opus high
-- [ ] [X-78](x/x-78.md) · The phone's half: enrol, install, sign in · M · opus
+- [ ] [X-78](x/x-78.md) · The phone's half: enrol, install, sign in · M · opus · **in-review**
 - [ ] [X-105](x/x-105.md) · `metistry remote` — the record, the adapter interface, and None · M · opus · after X-103, X-104
 - [ ] [X-112](x/x-112.md) · Provider tool packs — pinned, signed, fetched on choice · M · opus · after X-105
 - [ ] [X-106](x/x-106.md) · The Tailscale adapter — Funnel by default, tailnet as the alternative · L · opus high · after X-105, X-111, X-112
@@ -217,19 +217,19 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [ ] [X-114](x/x-114.md) · Add a Phone sees the phone arrive — *Opened on your phone* · S · sonnet · after X-75, X-77, X-103
 - [ ] [X-107](x/x-107.md) · Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access · L · opus high · after X-105, X-106, X-112, X-77
 - [ ] [X-82](x/x-82.md) · The Mac's meeting group decodes `group_id` · S · sonnet · after T8-7
-- [ ] [X-86](x/x-86.md) · The Mac's Secrets pane hides Grant for an owner-door secret · S · sonnet · after X-41, T6-14
+- [ ] [X-86](x/x-86.md) · The Mac's Secrets pane hides Grant for an owner-door secret · S · sonnet · after X-41, T6-14 · **in-review**
 - [ ] [X-90](x/x-90.md) · The hot-key and accessibility audits see what they miss · S · sonnet · after T6-16
 - [ ] [X-91](x/x-91.md) · The three-pointers test tolerates the device-local keys · S · sonnet · after T6-16, T6-15
 - [ ] [X-92](x/x-92.md) · Dispatch's `REPO_RE` has a misuse test · S · sonnet · after T4-11 · **in-review**
-- [ ] [X-93](x/x-93.md) · `socketDestination` keeps IMAP's port · S · sonnet · after T4-15
+- [ ] [X-93](x/x-93.md) · `socketDestination` keeps IMAP's port · S · sonnet · after T4-15 · **in-review**
 - [ ] [X-94](x/x-94.md) · The wizard's copy templates the configured name · S · sonnet · after T6-12
 - [ ] [X-95](x/x-95.md) · The Mac's loopback set matches core's · S · sonnet · after T6-13a
 - [ ] [X-96](x/x-96.md) · A connection's detail says who uses it and when it was checked · S · sonnet · after T6-13a
 - [ ] [X-97](x/x-97.md) · Variables: when it was set, the preview an agent sees, and a key's expiry · S · sonnet · after T6-14
 - [ ] [X-98](x/x-98.md) · Agents and Compute: the model line, the key note and the download · S · sonnet · after T6-12, T6-5
-- [ ] [X-99](x/x-99.md) · The phone's writable rows have controls · S · sonnet · after T7-6
+- [ ] [X-99](x/x-99.md) · The phone's writable rows have controls · S · sonnet · after T7-6 · **in-review**
 - [ ] [X-100](x/x-100.md) · The "held to core" Swift tests cannot drift · S · sonnet · after T6-14, T6-5
-- [ ] [X-83](x/x-83.md) · The activity feed's capture subject reads the title only · S · sonnet · after T8-6
+- [ ] [X-83](x/x-83.md) · The activity feed's capture subject reads the title only · S · sonnet · after T8-6 · **in-review**
 - [ ] [X-84](x/x-84.md) · `POST /message` carries a session-turn marker · M · opus · after T8-6, T6-15
 - [ ] [X-121](x/x-121.md) · The complexity fixtures, generated and blind-relabelled · M · opus · after T9-3
 - [ ] [X-122](x/x-122.md) · Doctor waits out a job it has just started · S · sonnet

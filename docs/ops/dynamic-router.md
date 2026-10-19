@@ -541,6 +541,32 @@ the fitted threshold, the cost table, and the two weeks' `route-report` policy r
 The owner runs it — the fixtures and the local server are the instance's, and no
 agent touches the live instance.
 
+**Generating fixtures** (ruled 2026-10-04, Q-g; X-121). The owner may have the
+150-plus items written for them instead of writing each — but not by the bar.
+`metistry-eval generate-complexity` calls two **non-Claude** models from two
+families through an OpenAI-compatible endpoint, the owner's key read from the
+environment at run time (`METISTRY_EVAL_GEN_BASE_URL`, `METISTRY_EVAL_GEN_API_KEY`,
+`METISTRY_EVAL_GEN_MODEL`, `METISTRY_EVAL_GEN_RELABEL_MODEL`; a model id naming
+Claude, or a pair from one family, is refused before anything is dialled). The
+*writer* is told the three class names and the structural rules above — the
+counts, the two traps, the D08-class items — and **never §2's descriptions nor the
+planner's wording**: every prompt is checked against a frozen phrase list taken
+from §2 and against the live planner prompt before it leaves the machine, and a
+match aborts the run. A *relabeller*, the second model, labels every item blind from
+the names alone. Agreement keeps the label; an adjacent disagreement keeps the
+writer's with the relabeller's as `accept`, written in `notes`; an opposite one,
+and **every D08-class item** (§7.2 has the owner label each), goes to
+`adjudicate.jsonl` for the owner — capped at about twenty, the overflow dropped
+and counted, never kept. The generator computes the length-against-label
+correlation (|r| < 0.2) and the counts, and prints a stats report. The output is
+`<instance>/.metistry/eval/complexity.generated.jsonl`, every row
+`source: generated`, apart from anything the owner wrote; `metistry-eval
+complexity` reads both files under `--instance` and holds the two sets to the
+bar **separately**, never blended. This is the one amendment to "the owner's,
+never the product's": generated items, labelled by two models that are not the
+bar and spot-checked by the owner, keep C11's intent — the bar still writes no
+label — and the shipped example stays empty.
+
 ### 7.3 Serve (T9-4)
 
 Merged only after T9-3's report clears the bar and the owner accepts it. It lifts

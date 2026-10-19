@@ -938,7 +938,7 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Devices | the devices: a passkey each — label, added, last seen, *This device*, its sessions and whether notifications are on | `GET /api/devices` (§2.22, X-76), refetched on `run.finished` events of kind `auth` |
 | Devices | Remove | `POST /api/devices/:id/revoke` with the route's default scope (`{}`): the passkey and every session under it, their push subscriptions dropped — **confirmed, naming the device** (C136); a removed phone is set up again as a new device |
 | Devices | Sign Out Everywhere | the same door with `{scope: "sessions"}` once per signed-in device, the caller's own last; passkeys kept — confirmed, listing the devices. Off, with its reason, when no device is signed in |
-| Devices | Add a Phone… | the sheet ("Add a Phone" below): `metistry enroll --json` (M19) through the management runner, the QR drawn here; `metistry enroll --cancel <code_id>` when the sheet closes or Make a New Code is pressed. **No console route mints a code** |
+| Devices | Add a Phone… | the sheet ("Add a Phone" below): `metistry enroll --json` (M19) through the management runner, the QR drawn here; `metistry enroll --status <code_id> --json` for *Opened on your phone* (X-114); `metistry enroll --cancel <code_id>` when the sheet closes or Make a New Code is pressed. **No console route mints a code** |
 | Connections | the list: status, name and type, Used By (*Nobody yet*), *Key expired*, the offer shield | `GET /api/connections` and `GET /api/secrets` — names, never a value ("The Connections pane" above) |
 | Connections | one connection: how it is reached, its secrets with *Sent only to*, *What it sends*, the tools by group, Used By | `GET /api/connections/:name` and `GET /api/secrets`; *What it sends* is worked out from them as core's egress door would, and nothing is dialled |
 | Connections | a tool's mode, the offer switch, Test | `metistry connections policy <name> <tool> allow\|ask\|never`, `policy <name> --offer on\|off`, `connections test <name>` (M13), each **confirmed with the exact command** |
@@ -1015,16 +1015,32 @@ console for one. The sheet's states, in order:
 3. **Ready** — the QR, the URL (selectable, **Copy Link**), *Your phone must
    be able to open <host>*, and *Expires in 9:41* counting down; **Make a New
    Code** cancels the old one first.
-4. **Expired** — the QR is replaced, not dimmed, by *This code expired*.
-5. **Added** — `GET /api/devices` shows a passkey that was not there when the
-   sheet opened: *“iPhone” was added*, with the label the phone chose. The
-   list is refetched on `run.finished` events of kind `auth` and polled while
-   the stream is down (§2.20). X-114 adds *Opened on your phone* between Ready
-   and Added.
+4. **Opened on your phone** (X-114) — `metistry enroll --status <code_id>
+   --json` says the console saw this code's `POST /auth/enroll/start` arrive
+   **through the proxy listener**: *Your phone reached this Mac through
+   <provider>*. Only `proxy` counts — a `main` stamp is the owner opening the
+   link on this Mac and never shows. The code is still live (it is not used
+   until the phone adds itself).
+5. **Expired** — the QR is replaced, not dimmed, by *This code expired*; if no
+   phone ever reached the proxy listener it adds *Your phone didn't reach
+   <origin>. Open it in Safari on your phone with Wi-Fi off to see what it
+   says.*
+6. **Added** — `GET /api/devices` shows a passkey that was not there when the
+   sheet opened: *“iPhone” was added*, with the label the phone chose.
+
+Both reads — the devices list and the code's status — are made on `run.finished`
+events of kind `auth` (the console audits the stamp as one) and by a fallback
+poll that wakes every 5 s, does nothing while the stream is live, and ends with
+the sheet (`close()` cancels it and waits for it). The poll's sleep and the
+stream's liveness are injectable, so its tests step it with no clock.
 
 **Closing the sheet in any state cancels a code that is still live**
 (`metistry enroll --cancel <code_id> --json` — the id, never the code), so a
 QR left on screen or in a screenshot is dead the moment the owner is done.
+That includes the Settings window or the wizard closing under the open sheet:
+the sheet's view going away asks the presenter to close it, as Done does. (A
+quit of the whole app with a sheet open is not covered; the code dies at its
+ten minutes.)
 The QR is CoreImage's `CIQRCodeGenerator` (error correction M), scaled by an
 integer factor with nearest-neighbour sampling so the modules stay sharp, a
 four-module quiet zone in the bitmap, dark on light in both appearances;

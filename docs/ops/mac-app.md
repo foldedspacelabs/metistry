@@ -28,11 +28,13 @@ path.
   have landed. So have Work ▸ Board, with the card detail and a task's room
   ("Work ▸ Board" below), Work ▸ Projects and Work ▸ Artifacts.
 - **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
-  Runs `metistry doctor --json` and renders the rows to the design
+  Runs `metistry doctor --check --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
   grey and labelled "not configured", a summary line first ("26 ok · 1 degraded
   · 1 not configured") so the panel answers before it is read. The remediation
-  replaces the probe on any row that is not `ok`.
+  replaces the probe on any row that is not `ok`. **Fix All** (X-125,
+  "Status: Fix All" below) repairs what doctor can fix; a your-hand row says so
+  and has no button.
 - **Settings**, in the `Settings` scene: ⌘, and the app menu, seven panes —
   Instance, Services, Connections, **Compute**, Secrets, Updates, Advanced.
   Every value on them is one of three things and the pane says which: a pointer
@@ -912,14 +914,14 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Instance | the assistant: name, mention, mark, instance ID | `metistry identity --json` |
 | Instance | Edit… (name, mention, mark) | `metistry identity set --name --mention --mark` (M10, T2-16), only the fields that changed, **confirmed with the exact command** — a protected write through the reconciler, shown in Activity as a `config_write` run |
 | Instance | this instance: path, Choose…, Open in Finder, Set Up Again… | the persisted pointers above; Set Up Again re-enters the wizard |
-| Instance | namespace and ports | `doctor --json` → the `deployment` row's `meta.namespace` (`state/ports.yaml`); none said is the default labels and ports, which the app does not copy |
+| Instance | namespace and ports | `doctor --check --json` → the `deployment` row's `meta.namespace` (`state/ports.yaml`); none said is the default labels and ports, which the app does not copy |
 | Instance | Recent (up to eight, Forget) | the persisted pointers above |
 | Instance | History: the sync policy in force, branch, ahead and behind, the last commit, the last push and pull, any conflict | `GET /api/vault/status` (T10-2), **read only** — the policy is `deployment.yaml`'s `vault:` block, changed with `metistry vault settings` (M18); the pane names the verb and offers no field |
 | Instance | History: Roll Back… (the last commit, one commit, or a day) | `POST /api/vault/rollback` (T10-6) — raises a Needs You request with the preview and changes nothing; the sheet names what Approve would undo. Reach `local`: drawn and sent only while `GET /api/whoami`'s `via` is `local_owner_token` (ruling 7) |
 | Instance | linked instances: name, origin, capabilities, last seen — *Not seen for 3 days* past a day | `GET /api/instances` |
 | Instance | Link an Instance…, Refresh / Check Now, Remove | `metistry instances add <origin>` / `refresh` / `remove <id>` (M11) — add and remove confirmed; `instances.yaml` is a protected path |
-| Services | Doctor: Run Doctor, each problem with its fix, checks passed | `doctor --json` — a failed or degraded row, or a not-configured one that carries an `action` (T4-21). The fix is the row's `action`: open Secrets, open System Settings, open a `logs` verb in the Log window, or run a §2.2 verb **after a confirmation naming it**; any other argv is shown with Copy |
-| Services | the supervisor (launchd or Docker Compose), Restart All, Stop All | `doctor --json` → the `supervisor` / `compose` row; `metistry restart\|stop --json` (M5), both confirmed |
+| Services | Doctor: Run Doctor, each problem with its fix, checks passed | `doctor --check --json` — a failed or degraded row, or a not-configured one that carries an `action` (T4-21). The fix is the row's `action`: open Secrets, open System Settings, open a `logs` verb in the Log window, or run a §2.2 verb **after a confirmation naming it**; any other argv is shown with Copy |
+| Services | the supervisor (launchd or Docker Compose), Restart All, Stop All | `doctor --check --json` → the `supervisor` / `compose` row; `metistry restart\|stop --json` (M5), both confirmed |
 | Services | one line per service: state, uptime or reason, port; Restart · Stop · Log | the `deployment` row's plan, matched to the `child:`, `compose:`, `launchd:…` and manifest rows by name — the worst state, `meta.uptime_sec`, the remediation verbatim; `metistry restart\|start <svc> --json` at once, `stop <svc>` confirmed, `logs <svc>` in the Log window |
 | Services | Start at Login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
 | Services | Run in the Background | `SMAppService.agent(plistName:)` on the plist sealed in this bundle — the install's ONE background item; macOS keeps this registration too (above) |
@@ -931,10 +933,10 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Compute | a provider's switch, gear, Remove | `metistry compute providers set\|remove <name> … --json` (M16), **confirmed with the exact command** |
 | Compute | Add Provider… (template, name, base URL, key) | `metistry compute providers add --from <t> [--name] [--base-url] --json`, **key on stdin** |
 | Compute | Install a Model…, Load, Unload (LM Studio only) | `metistry compute models install\|load\|unload <provider/model> --json` (M17), confirmed; disk and memory said first |
-| Compute | the local model servers and whether each is running | `doctor --json` → the `local:lmstudio\|ollama\|llamaserver\|applefm` rows |
+| Compute | the local model servers and whether each is running | `doctor --check --json` → the `local:lmstudio\|ollama\|llamaserver\|applefm` rows |
 | Compute | memory and disk | `ProcessInfo.physicalMemory` less a documented reserve, **labelled an estimate**; the home volume's own capacity figures |
 | Account | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
-| Account | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
+| Account | instance repo status, HEAD, queue depth | `doctor --check --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
 | Devices | the devices: a passkey each — label, added, last seen, *This device*, its sessions and whether notifications are on | `GET /api/devices` (§2.22, X-76), refetched on `run.finished` events of kind `auth` |
 | Devices | Remove | `POST /api/devices/:id/revoke` with the route's default scope (`{}`): the passkey and every session under it, their push subscriptions dropped — **confirmed, naming the device** (C136); a removed phone is set up again as a new device |
 | Devices | Sign Out Everywhere | the same door with `{scope: "sessions"}` once per signed-in device, the caller's own last; passkeys kept — confirmed, listing the devices. Off, with its reason, when no device is signed in |
@@ -1378,6 +1380,60 @@ the sheet's switches are drawn buttons that say their name and *on/off*
 widths — 270, 328, 360 — and grow longer at the largest text.
 `tests/kit/capture-bar-tests.swift`.
 
+## Status: Fix All
+
+*(X-125; the owner's ruling of 2026-10-04: "regardless of the problems found, the
+user only needs to run `metistry doctor` to fix it".)* The Status window's
+header gains **Fix All** beside Check again — the app half of `metistry doctor`'s
+repair contract (`docs/ops/cli.md`, X-123). It is the window's one mutating act,
+and a closed set of one (invariant 10): the CLI door `doctor --fix --yes --json`
+(§2.2 M6), nothing else.
+
+**What it is made of.** Only the rows doctor itself classified: `fix: "fixable"`
+with a `repair` (a closed-table id, what it does, whether it asks). The app never
+reads a remediation sentence to decide, never names a fix of its own and never
+maps a repair id to anything to run; it displays `repair.does` and the CLI's
+table runs its own function. A row doctor calls `hand` shows the remediation —
+which names the exact step — and the tag *your hand*, and runs nothing; an `info`
+row is a fact and says nothing. A CLI older than the contract sends no classes,
+and the window then offers no Fix All and draws no tag (P5: state is reported,
+never inferred).
+
+**The ask.** The button re-reads first (`doctor --check --json`), because the
+preview must be of what is wrong now. If no fix in the plan moves files or
+restarts a running service (`repair.confirm`) it runs at once. If any does, a
+`CostConfirmation` sheet names *every* fix — the ones that ask marked — and
+**Fix All** in it is the only thing that sends `--yes`; Cancel, Esc and
+dismissing the sheet send nothing, and Return is Cancel. `--yes` is never the
+default. The CLI re-reads inside the run, so a fix that began asking between the
+preview and the run would run unpreviewed: the app cannot prevent that without a
+flag the CLI does not have, and says so afterwards (*Ran without being in the
+preview you confirmed*) rather than staying quiet.
+
+**The door is pinned.** `ManagementRow.doctor` admits exactly two argvs, not a
+prefix — `["doctor", "--check", "--json"]` and `["doctor", "--fix", "--yes",
+"--json"]` — so the app cannot be made to pass `doctor` anything else
+(`ManagementRow.exactShapes`; misuse tests refuse a bare `doctor`, `--json`
+alone, `--fix` without `--yes` or `--json`, reordered flags, extra flags, a
+`--product-dir`, and the repair argv on any other row). `MetistryCLI.doctor()`
+— the read every surface shares — runs `--check` explicitly, so the read is
+read-only whether or not a terminal is attached.
+
+**The answer.** `--fix --json` prints the re-check's rows (each with `fixed`) and
+`fixes[]`; the window replaces its report with it and draws a card: one line
+(*2 fixed · 1 ran, still failing*), then each fix — what it did, its outcome,
+the statuses either side of the re-check (`child:reconciler failed → ok`), the
+error if it threw, and the CLI's own `$` ledger, selectable. Each row carries
+*fixed* or *still failing*. Exit 1 is not "the repair broke" (something is still
+failing, as with the read); a document with no `mode: "fix"` is a CLI that
+ignored `--fix`, and the window says so instead of "nothing needed fixing". While
+a repair runs, Check again and the menu bar's re-read both wait.
+
+**§2.18.** Fix All and Check again wrap rather than clip at the largest text; the
+button speaks *Fix All: have metistry doctor fix what it can*; every row speaks
+what Fix All will do for it; each fix in the card is one spoken sentence; the
+sheet is `CostConfirmView`. Tests: `tests/kit/fix-all-tests.swift`.
+
 ## The menu bar
 
 Grouped by doctor's own `kind`, so a new component kind appears without a change
@@ -1393,7 +1449,7 @@ count and the resolved shape are checks, not processes, and the menu does not
 invent a control the CLI has no verb for.
 
 **Refresh:** doctor is re-run when the menu opens and every 30s while it stays
-open — never continuously. `doctor --json` is a full sweep (every bridge over
+open — never continuously. `doctor --check --json` is a full sweep (every bridge over
 HTTP, `docker compose ps`), far too heavy to poll; the watchdog already keeps a
 liveness view of the same components, and its feed is the intended faster source
 once the app has a read path to it (a management-API query, not a database

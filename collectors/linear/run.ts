@@ -191,7 +191,8 @@ export async function run(db: Db, ctx: LinearCtx = {}): Promise<number> {
   // what this connection tracked and Linear no longer lists as the owner's
   const left = await db.query(
     `SELECT id, external_ref, meta->>'id' AS linear_id FROM work
-     WHERE external_ref LIKE 'linear:%' AND status <> 'closed' AND meta->>'connection' = $1 AND NOT (external_ref = ANY($2::text[]))`,
+     WHERE external_ref LIKE 'linear:%' AND status <> 'closed' AND meta->>'connection' = $1 AND NOT (external_ref = ANY($2::text[]))
+     ORDER BY external_ref`, // a key, not the heap's order: the ids sent to Linear and the order rows close in must not depend on where Postgres put them
     [sync.connection, refs],
   );
   const leaving = left.rows as { id: number | string; external_ref: string; linear_id: string | null }[];

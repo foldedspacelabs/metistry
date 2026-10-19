@@ -33,7 +33,7 @@ import { readInstanceId } from "../instance.js";
 import { checkOriginReachable } from "../origins.js";
 import { protectedRel, writeProtected } from "../protected-write.js";
 import { StepFailed, StepRunner } from "../steps.js";
-import { defaultUi, type Ui } from "../ui.js";
+import { defaultUi, statusName, type Ui } from "../ui.js";
 import type { AuthorizeOptions, Detection, ProviderOptions, RemoteChoice, RemoteContext, RemoteProvider, RemoteRow, Revoked } from "./provider.js";
 import { availableProviders, providerFor, remoteChoices, remoteContext, remoteRows, REMOTE_PROVIDERS_BUILT_IN, type RemoteRegistry } from "./rows.js";
 
@@ -230,7 +230,7 @@ export function renderRemoteStatus(s: RemoteStatus, ui: Ui = defaultUi()): strin
   for (const r of s.rows) {
     const info = typeof r.meta?.["info"] === "string" ? (r.meta["info"] as string) : "";
     const detail = r.status === "ok" ? info : (r.remediation ?? r.probe);
-    out.push(`  ${ui.statusIcon(r.status)} ${r.name}  ${ui.status(r.status)}`);
+    out.push(`  ${ui.statusIcon(r.status)} ${r.name}  ${ui.paint(statusName(r.status), r.status)}`);
     if (detail) out.push(ui.dim(`      ${ui.icon("arrow")} ${detail}`));
   }
   out.push("");
@@ -431,7 +431,7 @@ export function renderRemoteRows(rows: RemoteRow[], ui: Ui = defaultUi()): strin
   for (const r of rows) {
     const info = typeof r.meta?.["info"] === "string" ? (r.meta["info"] as string) : "";
     const detail = r.status === "ok" ? info : (r.remediation ?? r.probe);
-    out.push(`  ${ui.statusIcon(r.status)} ${r.name}  ${ui.status(r.status)}  ${ui.dim(`${r.latency_ms}ms`)}`.trimEnd());
+    out.push(`  ${ui.statusIcon(r.status)} ${r.name}  ${ui.paint(statusName(r.status), r.status)}  ${ui.dim(`${r.latency_ms}ms`)}`.trimEnd());
     if (detail) out.push(ui.dim(`      ${ui.icon("arrow")} ${detail}`));
   }
   return out.join("\n");

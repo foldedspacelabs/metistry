@@ -182,7 +182,12 @@ describe.skipIf(!hasDb)("devices — a device is a passkey; Remove revokes it (X
     // removed is removed: a second Remove finds no device, as an unknown session did before
     expect((await call("POST", `/api/devices/${phone.sessionIds[1]}/revoke`, { cookie: other.cookies[0] }, "{}")).status).toBe(404);
 
-    const { rows } = await pool.query(`SELECT kind, tool, ok, meta FROM runs WHERE id > $1 AND kind = 'auth' AND tool = 'revoke' ORDER BY id`, [since]);
+    // This device's rows only: CI runs the package's files in parallel, so
+    // another suite's revoke can land between these two.
+    const { rows } = await pool.query(
+      `SELECT kind, tool, ok, meta FROM runs WHERE id > $1 AND kind = 'auth' AND tool = 'revoke' AND meta ->> 'session' = ANY($2) ORDER BY id`,
+      [since, phone.sessionIds.map(String)],
+    );
     expect(rows.map((x) => [x.ok, x.meta.scope, x.meta.passkey_id, x.meta.sessions])).toEqual([
       [true, "device", phone.id, 2],
       [false, "device", undefined, undefined],

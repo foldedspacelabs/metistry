@@ -323,7 +323,9 @@ describe.skipIf(!hasDb)("Taskuary adopts (integration)", () => {
     expect(row.kind).toBe("capture");
     expect(row.group).toBe("capture");
     expect(rows.every((r: { kind: string }) => r.kind === "capture")).toBe(true); // the chip filters
-    expect(rows.some((r: { subject: string }) => r.subject === "call the dentist")).toBe(true);
+    // Q-c: the file name is the subject; a spoken line of the note is not served
+    expect(rows.some((r: { subject: string }) => r.subject === `${tag}.md`)).toBe(true);
+    expect(JSON.stringify(rows)).not.toMatch(/call the dentist|and the vet/);
     expect(rows.some((r: { detail: string }) => r.detail === "http · new")).toBe(true); // the "triaging" pill
   });
 });

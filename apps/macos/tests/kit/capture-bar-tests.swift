@@ -197,6 +197,56 @@ import AppKit
     #expect(LiveCaptureRoute.allCases.filter(\.isControl).map(\.path).sorted() == ["/recording/keep-going", "/recording/purge", "/recording/start", "/recording/stop"])
 }
 
+// MARK: - Ask: the session-turn marker (X-84)
+
+@MainActor
+@Test func anAskDuringARecordingCarriesTheSessionMarkerAndSaysItStaysOnThisMac() async throws {
+    let wire = FakeBridge(status: .recording(elapsed: 754, senses: LiveCaptureSenses(display: true, appAudio: true, microphone: true)))
+    let (bar, console) = barModel(client: wire.client(key: "k"))
+    await bar.refresh()
+    #expect(bar.askCaptureSession == "20260930-120000-00ab")
+    #expect(bar.askStaysOnThisMacLine == CaptureBarWords.stayingOnThisMac)
+
+    bar.open(.ask)
+    bar.askDraft = "what did they just decide about the budget?"
+    await bar.sendAsk()
+    let posted = try #require(console.calls.last { $0.path == "/message" })
+    #expect(posted.method == "POST")
+    #expect(posted.body?["text"]?.stringValue == "what did they just decide about the budget?")
+    #expect(posted.body?["capture_session"]?.stringValue == "20260930-120000-00ab", "the recorder's id, as the jot anchor carries it")
+    #expect(bar.askDraft.isEmpty, "the draft went into the turn")
+}
+
+@MainActor
+@Test func anAskAtRestCarriesNoMarkerAndTheLineIsNotDrawn() async throws {
+    let (bar, console) = barModel(client: FakeBridge(status: .idle).client(key: "k"))
+    await bar.refresh()
+    #expect(bar.askCaptureSession == nil)
+    #expect(bar.askStaysOnThisMacLine == nil)
+
+    bar.open(.ask)
+    bar.askDraft = "what is on today?"
+    await bar.sendAsk()
+    let posted = try #require(console.calls.last { $0.path == "/message" })
+    #expect(posted.body?["capture_session"] == nil, "no field at all — every other caller's turns are unchanged: \(String(describing: posted.body))")
+    #expect(posted.body?["text"]?.stringValue == "what is on today?")
+}
+
+@MainActor
+@Test func theStayingOnThisMacLineIsInTheAskPanelsTreeOnlyWhileRecording() async throws {
+    let wire = FakeBridge(status: .recording(elapsed: 10, senses: .none))
+    let (bar, _) = barModel(client: wire.client(key: "k"))
+    await bar.refresh()
+    bar.open(.ask)
+    var tree = try await AccessibilityProbe.snapshot(CaptureBarAskPanel(model: bar))
+    #expect(tree.texts.contains(CaptureBarWords.stayingOnThisMac), "texts: \(tree.texts)")
+
+    wire.status = .ended("owner")
+    await bar.refresh()
+    tree = try await AccessibilityProbe.snapshot(CaptureBarAskPanel(model: bar))
+    #expect(!tree.texts.contains(CaptureBarWords.stayingOnThisMac), "texts: \(tree.texts)")
+}
+
 // MARK: - Note and To-do
 
 @MainActor

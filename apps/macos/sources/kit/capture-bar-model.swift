@@ -237,6 +237,9 @@ public enum CaptureBarWords {
     public static let keepGoing = "Keep Going"
     public static let recordAgain = "Record Again"
     public static let openInChat = "Open in Chat"
+    /// The Ask panel's line while a recording runs (screen 11 §4): the turn
+    /// carries the session marker, so the console holds it to the private tier.
+    public static let stayingOnThisMac = "Staying on this Mac"
     public static let audioOnly = "Audio Only"
     public static let openSystemSettings = "Open System Settings"
     public static let screenNotAllowed = "Metistry can't see your screen yet."
@@ -484,6 +487,18 @@ public final class CaptureBarModel {
     public var askIsWorking: Bool { chat?.isWorking ?? false }
     public var askUnavailableBecause: String? { chat?.sendingUnavailableReason }
 
+    /// The session-turn marker an Ask carries (X-84): the running recording's
+    /// id, nil at rest. `POST /message` holds a marked turn to the private
+    /// tier — answered on this Mac or refused, never moved — which is what
+    /// lets the panel say *Staying on this Mac* and mean it.
+    public var askCaptureSession: String? {
+        guard let recorder, recorder.isRunning else { return nil }
+        return recorder.session?.sessionID
+    }
+
+    /// *Staying on this Mac* — while a recording runs, nil at rest.
+    public var askStaysOnThisMacLine: String? { askCaptureSession == nil ? nil : CaptureBarWords.stayingOnThisMac }
+
     /// *This session · 2 notes, 1 to-do* — nil before the first jot.
     public var sessionJotLine: String? {
         let (n, t) = sessionJots
@@ -706,7 +721,7 @@ public final class CaptureBarModel {
 
     public func sendAsk() async {
         guard let chat else { return }
-        await chat.send()
+        await chat.send(captureSession: askCaptureSession)
     }
 
     public func retryAsk(_ turnID: UUID) async {

@@ -1333,7 +1333,7 @@ uniform `403`, never a `404` that would hide the route's existence.
 
 ```
 GET  /api/agents                      200 {"agents":[{…, "scope":{…}, "permissions":[…]}],"access_requests":[…],"access_ceilings":[…]}
-POST /api/agents                      {id, display_name, kind?, remote?}   201 {"id","token","pending","proposal_id"?}   409 — the id is taken
+POST /api/agents                      {id, display_name, kind?, remote?}   201 {"id","token","pending","proposal_id"?}   409 — the id is taken (a live row, or a revoked internal/crew one)
 PUT  /api/agents/:id/grants           {tier, areas?, queries?, connections?}   200 {"ok":true,"grants":{…}}
 PUT  /api/agents/:id/projects         {projects: [slug, …]}      200 {"ok":true,"projects":[…]}
 PUT  /api/agents/:id/autonomy         {level?, actions?, may_dispatch_to?, accept_from?, max_open_bundles?}
@@ -1350,6 +1350,17 @@ the call that minted it. Registering and rotating mint a credential, which is a
 boundary change, so both are reach `local` (F-13): the local owner token from
 this Mac — the Mac app, `metistry connect` — and a passkey session is refused
 `403 local_only` ("The `local` gate" above).
+
+**A revoked `external` row is registered again by the same call** (HS-7,
+ruled 2026-10-04: an accidental revoke must be recoverable without a new
+install). The `201` is exactly a first mint's — a new token, shown once —
+and the row is revived in place: the id and `created_at` stay, so old
+proposals keep their provenance; the token is new; `grants`, `projects` and
+`autonomy` go back to a new row's defaults, because a credential the owner
+withdrew does not return holding what it held (revocation already cleared the
+areas approved from Needs You). `remote: true` makes it a fresh pending
+enrolment. A live row, or a revoked `internal` or `crew` row, is still `409`
+and is left untouched. The audit row is the mint's, with `revived: true`.
 
 **`POST /api/agents` mints `external` rows only** (T4-6). `kind` may be
 omitted or `external`; anything else is `400 invalid_request`, refused before

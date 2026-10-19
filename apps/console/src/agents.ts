@@ -583,11 +583,22 @@ export async function listAgents(db: Db, toolset?: (id: string) => { uses: reado
  * approves it. Only an `external` row is minted here (T4-6): the assistant's
  * token comes from the user's own environment, which IS the approval (§4.11),
  * and a crew's from its manifest.
+ *
+ * **A revoked external row can be registered again** (ruled 2026-10-04, HS-7:
+ * an accidental revoke must be recoverable without a new install). The row
+ * is revived in place, so its id and every old proposal's provenance stay
+ * attached; what it was is NOT restored — the token is new, and grants,
+ * projects and autonomy go back to a new row's defaults, because a credential
+ * the owner withdrew does not come back holding what the owner had given it
+ * (`revokeAgent` already cleared its approved areas). `created_at` and
+ * `last_seen_at` are history and stay. A row that is live is still a 409, and
+ * so is a revoked `internal` or `crew` row: those come back only by their
+ * configuration, never through this door.
  */
 export async function createAgent(
   db: Db,
   input: { id?: unknown; display_name?: unknown; kind?: unknown; remote?: unknown },
-): Promise<{ id: string; token: string; pending: boolean }> {
+): Promise<{ id: string; token: string; pending: boolean; revived: boolean }> {
   const id = typeof input.id === "string" ? input.id : "";
   if (!AGENT_ID_RE.test(id)) throw new AgentError("invalid_request", "id must be a slug ^[a-z][a-z0-9-]{0,39}$");
   const displayName = typeof input.display_name === "string" ? input.display_name.trim().slice(0, 120) : "";
@@ -599,15 +610,35 @@ export async function createAgent(
   if (input.remote !== undefined && typeof input.remote !== "boolean") throw new AgentError("invalid_request", "remote must be a boolean");
   const remote = input.remote === true;
   const token = mintToken(32);
+  let rows: { inserted?: boolean }[];
   try {
-    await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, remote, approved_at, grant_source) VALUES ($1, $2, 'external', $3, $4, $5, 'registry')`, [
-      id, displayName, tokenHash(token), remote, remote ? null : new Date().toISOString(),
-    ]);
+    // One statement: a fresh row is inserted; a REVOKED EXTERNAL row of the
+    // same id is revived by the conflict branch; any other conflict (a live
+    // row, or a revoked internal/crew row) fails the WHERE, updates nothing
+    // and returns no row — which is the 409 below.
+    ({ rows } = await db.query(
+      `INSERT INTO agents (id, display_name, kind, token_hash, remote, approved_at, grant_source)
+       VALUES ($1, $2, 'external', $3, $4, $5, 'registry')
+       ON CONFLICT (id) DO UPDATE SET
+         display_name = EXCLUDED.display_name,
+         token_hash   = EXCLUDED.token_hash,
+         remote       = EXCLUDED.remote,
+         approved_at  = EXCLUDED.approved_at,
+         revoked_at   = NULL,
+         grants       = '{"tier":"none","areas":[]}',
+         projects     = '{}',
+         autonomy     = '{}',
+         grant_source = 'registry'
+       WHERE agents.revoked_at IS NOT NULL AND agents.kind = 'external'
+       RETURNING (xmax = 0) AS inserted`,
+      [id, displayName, tokenHash(token), remote, remote ? null : new Date().toISOString()],
+    ));
   } catch (err) {
     if ((err as { code?: string }).code === "23505") throw new AgentError("conflict", "agent id already registered");
     throw err;
   }
-  return { id, token, pending: remote };
+  if (rows.length !== 1) throw new AgentError("conflict", "agent id already registered");
+  return { id, token, pending: remote, revived: rows[0]!.inserted !== true };
 }
 
 /**
@@ -1031,9 +1062,10 @@ export function autonomyTable(autonomy: Autonomy): Record<ActionKind, ActionMode
 }
 
 /**
- * Revocation is permanent: the row stays (provenance on old proposals), the
- * token dies — and the areas the owner approved for it from the queue die
- * with it (`clearGrantOverrides`). Otherwise an internal row that was turned
+ * Revocation ends the credential: the row stays (provenance on old proposals),
+ * the token dies — and the areas the owner approved for it from the queue die
+ * with it (`clearGrantOverrides`). An external row can be registered again
+ * (`createAgent`, HS-7) but only as a new credential holding nothing. Otherwise an internal row that was turned
  * off and on again would come back holding widenings the owner granted to a
  * credential they had since withdrawn.
  */

@@ -1,5 +1,13 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.17.2
+
+### Patch Changes
+
+- 422e340: the release workflow verifies zrok's banner-first version output and retries notarization on transport errors
+- @foldedspacelabs/metistry-connections@0.17.2
+  - @foldedspacelabs/metistry-core@0.17.2
+
 ## 0.17.1
 
 ### Patch Changes

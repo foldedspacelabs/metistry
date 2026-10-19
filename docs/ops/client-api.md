@@ -424,7 +424,10 @@ way to learn the contract version without signing in. The four ceremonies are
 compose shape — shell access is the root of trust for a first passkey, so no
 route mints one, and a test holds this table to that) starts a passkey registration, and a
 sign-in is the standard WebAuthn assertion. An origin mismatch is a `401` with
-the reason, never a `500`.
+the reason, never a `500`. `POST /auth/enroll/start` with a live code also
+stamps the code's row with the listener that answered (`proxy` or `main`;
+migration `0040`, X-114) — no new field in the `200`; the host reads it with
+`metistry enroll --status`, and stamping never spends the code.
 
 #### `GET /api/identity` — who this instance is, before sign-in
 

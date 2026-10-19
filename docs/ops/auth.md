@@ -657,6 +657,18 @@ setting. Every refusal at the door is the same uniform `401 unauthenticated`:
 an unknown code, a spent one, an expired one and a cancelled one are
 indistinguishable from outside.
 
+**`start` also stamps the row** (migration `0040`; plan §2.23 step 7, X-114):
+for a live code it writes `opened_at` and `opened_via` — `proxy` when the
+request came in on the proxy listener (so from outside), `main` when it came
+in on the loopback listener. A `proxy` stamp replaces a `main` one and nothing
+replaces a `proxy` stamp, so the owner opening the link on the Mac first
+cannot hide the phone arriving. **Stamping is not using:** `used_at` and
+`expires_at` are untouched, the code is still single-use and still dies in ten
+minutes, and an unknown, spent, expired or cancelled code stamps nothing. A
+stamp is one audit row (`auth` · `enroll_opened`, with the row's id and the
+listener — never the code). `metistry enroll --status <code_id>` reads it
+back; the Mac's sheet shows *Opened on your phone* only for `proxy`.
+
 **Only the Mac mints one.** Shell access to the host is the root of trust for
 a first credential (plan §4.2), so **no HTTP route mints a code** — not an
 unauthenticated one and not a `local` one — and two tests hold that: the

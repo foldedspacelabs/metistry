@@ -2150,6 +2150,7 @@ remote set <provider>`."* — and *answers from this Mac*, then its own rows.
 ```
 metistry enroll [--json] [--instance <dir>] [--env-file <path>]
 metistry enroll --cancel <code_id> [--json] [--instance <dir>] [--env-file <path>]
+metistry enroll --status <code_id> [--json] [--instance <dir>] [--env-file <path>]
 ```
 
 A phone gets its own passkey by opening a one-time **enrolment code** (plan
@@ -2212,8 +2213,26 @@ id, never the code. A code already used or expired is reported, exit 0
 (`already_used`, `already_expired`); an id nothing has is exit 1
 (`not_found`). `--json`: `{"code_id":42,"outcome":"cancelled","cancelled":true}`.
 
-Both acts land in `runs` (`auth` / `enroll`, `enroll_cancel`) with the id,
-never the code. The database comes from `METISTRY_DB_*` in the install's
+**`--status <code_id>`** (X-114, §2.23 step 7) is read-only: whether the
+phone's `POST /auth/enroll/start` has reached the console with this code, and
+through which listener — what the Mac's sheet polls to turn to **Opened on
+your phone**. It takes the id, never the code, and writes nothing (no `runs`
+row). `--json`:
+
+```json
+{"code_id":42,"state":"live","expires_at":"2026-10-18T14:52:10.123Z","opened_at":"2026-10-18T14:44:02.511Z","opened_via":"proxy","provider":"tailscale"}
+```
+
+`state` is `live`, `used` or `expired` (a cancelled code is `expired`);
+`opened_at` / `opened_via` are `null` until a start has arrived; `provider` is
+`remote.provider` from `deployment.yaml`, `null` with none. **Only `proxy` is
+the proof** — the start came through the listener a provider is pointed at.
+`main` means it arrived over loopback (the owner opened the link on this
+Mac), is recorded, and is never shown as the phone arriving. An id nothing has
+is exit 1.
+
+The mint and the cancel land in `runs` (`auth` / `enroll`, `enroll_cancel`)
+with the id, never the code. The database comes from `METISTRY_DB_*` in the install's
 environment (`--instance <dir>` picks up `<instance>/.metistry/state/.env`);
 without `METISTRY_DB_PASSWORD` the verb exits 2 and says so — it never
 guesses a database.

@@ -829,10 +829,14 @@ await pool.query(
    ON CONFLICT (id) DO NOTHING`,
 );
 
-// devices: two sessions on one passkey — one to list, one to revoke
+// devices (§2.22): a device is a passkey with its sessions under it — an
+// iPhone signed in twice, and an iPad once; Remove is posted at the iPad
+const iphone = `fixture-${mintToken(6)}`;
 const pkId = `fixture-${mintToken(6)}`;
-await authStore.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: ["internal"], origin: "http://127.0.0.1:8080", label: "iPhone" });
-await authStore.issueSession(pool, pkId, policy);
+await authStore.storePasskey(pool, { id: iphone, publicKey: new Uint8Array([1]), signCount: 0, transports: ["internal"], origin: "http://127.0.0.1:8080", label: "iPhone" });
+await authStore.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: ["internal"], origin: "http://127.0.0.1:8080", label: "iPad" });
+await authStore.issueSession(pool, iphone, policy);
+await authStore.issueSession(pool, iphone, policy);
 await authStore.issueSession(pool, pkId, policy);
 ids.session = Number((await one(`SELECT max(s.id) AS id FROM auth_sessions s WHERE s.passkey_id = $1`, [pkId])).id);
 

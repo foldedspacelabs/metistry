@@ -1833,7 +1833,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
       return sendJson(res, 200, { ok: true, feedback: rows[0] });
     }
 
-    if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db, rp.rpIDs[0]!) });
+    // A device per passkey, its sessions under it; each with its passkey's rpID
+    // resolved (§2.23), and the caller's own row saying `this_device` (§2.22).
+    // The local owner token has no device: every row false.
+    if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db, rp.rpIDs[0]!, auth.kind === "session" ? auth.sessionId : null) });
 
     // ----- external-agent registry (§4.2 management surface; owner session only) -----
     // The registry, plus what has been ASKED for (ruled 2026-09-19): the
@@ -1955,11 +1958,29 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
       }
     }
 
+    // Remove a device (§2.22), named by one of its session ids. The default
+    // scope — `{}` or no body, what the Mac and the PWA's Remove send — revokes
+    // the passkey, so the device never signs in again, and every session under
+    // it, each losing its push subscription. `{scope: "sessions"}` is Sign Out
+    // Everywhere's door: the sessions end, the passkey stays. Both land in
+    // `runs` (`auth`, `revoke`) with the scope on the record.
     const revoke = /^POST \/api\/devices\/(\d+)\/revoke$/.exec(key);
     if (revoke) {
-      const ok = await store.revokeSession(db, Number(revoke[1]));
-      await audit("auth", "revoke", ok, { session: revoke[1] });
-      return ok ? sendJson(res, 200, { revoked: true }) : sendError(res, "not_found");
+      const raw = (await readBody(req)).toString("utf8").trim();
+      let body: unknown = {};
+      if (raw !== "") {
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          return sendError(res, "invalid_request", "the body is not JSON");
+        }
+      }
+      if (body === null || typeof body !== "object" || Array.isArray(body)) return sendError(res, "invalid_request", "the body is a JSON object: `{}` or `{scope: \"device\" | \"sessions\"}`");
+      const scope = (body as { scope?: unknown }).scope ?? "device";
+      if (!(store.REVOKE_SCOPES as readonly unknown[]).includes(scope)) return sendError(res, "invalid_request", `scope is "device" (the default) or "sessions", not ${JSON.stringify(scope)}`);
+      const done = await store.revokeDevice(db, Number(revoke[1]), scope as store.RevokeScope);
+      await audit("auth", "revoke", done !== null, { session: revoke[1], scope, ...(done ?? {}) });
+      return done ? sendJson(res, 200, { revoked: true, scope, sessions: done.sessions }) : sendError(res, "not_found");
     }
 
     if (key === "POST /auth/logout") {

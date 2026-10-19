@@ -4,12 +4,14 @@
   "ticket": null,
   "request": {
     "method": "POST",
-    "path": "/api/devices/2/revoke",
+    "path": "/api/devices/3/revoke",
     "body": {},
     "idempotency_key": null
   },
   "status": 200,
   "body": {
-    "revoked": true
+    "revoked": true,
+    "scope": "device",
+    "sessions": 1
   }
 }

@@ -624,7 +624,18 @@ never the code.
   turning the local door *off* permanently means removing the variable from
   the console's environment (unset it in `docker-compose.yml` or the job's
   plist), not clearing the `.env` line.
-- **A passkey session:** the devices tab, or `POST /api/devices/<id>/revoke`.
+- **A device — its passkey and every session under it:** Remove in Devices,
+  or `POST /api/devices/<session id>/revoke` (`metistry console call POST
+  /api/devices/<id>/revoke`). The passkey's row keeps `revoked_at`
+  (migration 0038) and `getPasskey` never returns it again, so a login with
+  it is the same uniform 401 an unknown credential gets; its sessions are
+  revoked and their push subscriptions dropped in the same act (design-build-plan
+  §2.22). Irreversible: a removed phone enrols again as a new device.
+- **A device's sessions, passkey kept:** the same route with `{"scope":
+  "sessions"}` — what Sign Out Everywhere does to each device. `checkSession`
+  also refuses any session whose passkey is revoked, whatever the session's
+  own row says, so a session issued in the instant between a login's lookup
+  and a Remove dies with the device.
 - **A host-minted owner token** (the capture Shortcut,
   `docs/ops/capture-shortcut.md`): `UPDATE owner_tokens SET revoked_at =
   now() WHERE label = '…'`.

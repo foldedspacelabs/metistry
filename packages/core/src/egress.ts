@@ -456,10 +456,17 @@ export function planEgress(call: EgressCall, rules: SecretEgressRules): EgressPl
   return { destination, refs, names };
 }
 
-/** Where a socket goes (an IMAP server, T4-15), spelled as a *Sent only to* entry. `tls: false` to anything but loopback is cleartext. */
+/**
+ * Where a socket goes (an IMAP server, T4-15), spelled as a *Sent only to* entry.
+ * `tls: false` to anything but loopback is cleartext.
+ *
+ * The entry always carries its port. Dropping `:443` is an HTTPS convention (a
+ * bare allowlist entry means 443 over https); a socket on 443 that is not HTTPS
+ * must not read as the bare host, or it would match the entry that admits HTTPS.
+ */
 export function socketDestination(host: string, port: number, tls: boolean): EgressDestination {
   const h = host.toLowerCase();
-  return { entry: port === EGRESS_DEFAULT_PORT ? h : `${h}:${port}`, host: h, port, cleartext: !tls && !isLoopbackHost(h) };
+  return { entry: `${h}:${port}`, host: h, port, cleartext: !tls && !isLoopbackHost(h) };
 }
 
 /**

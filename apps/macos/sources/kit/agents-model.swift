@@ -37,22 +37,33 @@ import Observation
 
 // MARK: - core's autonomy arithmetic, carried over
 
-/// `packages/core/src/actions.ts`: the four kinds, three modes, three levels,
+/// `packages/core/src/actions.ts`: the five kinds, three modes, three levels,
 /// and the one function that names what a change widens. Pure, and held to
-/// core's own test cases (agents-view-tests.swift).
+/// core's own test cases (agents-view-tests.swift). Every kind core's
+/// `ACTION_KINDS` names is here — a kind this list lacks is one the editor
+/// cannot show, cannot confirm a widening of, and (the PUT replaces the whole
+/// record) would silently erase from the owner's record on an unrelated edit.
 public enum AgentAutonomy {
-    public static let kinds = ["dispatch", "task_update", "comment", "capture"]
+    public static let kinds = ["dispatch", "task_update", "comment", "capture", "connection_call"]
     public static let modes = ["deny", "propose", "allow"]
     public static let levels = ["observe", "propose", "act_within_scope"]
     public static let defaultLevel = "observe"
 
     /// `LEVEL_CEILING`: the most a level allows any kind.
     static let ceiling: [String: String] = ["observe": "deny", "propose": "propose", "act_within_scope": "allow"]
+    /// `ACTION_KIND_CEILING`: a kind whose ceiling is its own, whatever the
+    /// level. `connection_call` is `propose` everywhere (plan §1.1 Q5, ruled
+    /// 2026-10-04): an Ask First call waits for the owner, so even `observe`
+    /// may ask and no level can make one run unasked. The owner may still set
+    /// it to `deny` for one agent.
+    static let kindCeiling: [String: String] = ["connection_call": "propose"]
+    /// `ceilingFor`: the most one kind may be at one level — its own ceiling where it has one, else the level's.
+    static func ceilingFor(_ level: String, _ kind: String) -> String { kindCeiling[kind] ?? ceiling[level] ?? "deny" }
     /// `ACTION_DEFAULTS`: what a level means with no per-kind entry.
     static let defaults: [String: [String: String]] = [
-        "observe": ["dispatch": "deny", "task_update": "deny", "comment": "deny", "capture": "deny"],
-        "propose": ["dispatch": "propose", "task_update": "propose", "comment": "propose", "capture": "propose"],
-        "act_within_scope": ["dispatch": "propose", "task_update": "allow", "comment": "allow", "capture": "allow"],
+        "observe": ["dispatch": "deny", "task_update": "deny", "comment": "deny", "capture": "deny", "connection_call": "propose"],
+        "propose": ["dispatch": "propose", "task_update": "propose", "comment": "propose", "capture": "propose", "connection_call": "propose"],
+        "act_within_scope": ["dispatch": "propose", "task_update": "allow", "comment": "allow", "capture": "allow", "connection_call": "propose"],
     ]
 
     /// The two keys of `agents.autonomy` core's arithmetic reads.
@@ -65,15 +76,20 @@ public enum AgentAutonomy {
             self.actions = actions
         }
 
-        /// A stored record as the console coerces it: a key it does not know is
-        /// dropped — never widened, never guessed at.
+        /// A stored record as read. A level or a mode this build does not know
+        /// is dropped — never widened, never guessed at. A KIND it does not
+        /// know is kept as it was: the PUT replaces the whole record, so an
+        /// entry a newer core stored must ride back unchanged rather than be
+        /// erased by an edit that never touched it. `effective` and
+        /// `widenings` read only the kinds this build knows.
         public init(json: JSONValue?) {
             let level = json?["level"]?.stringValue
             self.level = level.flatMap { AgentAutonomy.levels.contains($0) ? $0 : nil }
             var actions: [String: String] = [:]
             if case .object(let raw)? = json?["actions"] {
                 for (kind, mode) in raw {
-                    if AgentAutonomy.kinds.contains(kind), let m = mode.stringValue, AgentAutonomy.modes.contains(m) { actions[kind] = m }
+                    guard let m = mode.stringValue else { continue }
+                    if !AgentAutonomy.kinds.contains(kind) || AgentAutonomy.modes.contains(m) { actions[kind] = m }
                 }
             }
             self.actions = actions
@@ -85,12 +101,20 @@ public enum AgentAutonomy {
     static func modeRank(_ mode: String) -> Int { modes.firstIndex(of: mode) ?? 0 }
     static func levelRank(_ level: String) -> Int { levels.firstIndex(of: level) ?? 0 }
 
-    /// `effectiveActions`: every kind, the lower of its entry and the level's ceiling.
+    /// The modes the editor offers for one kind: every mode, less any above
+    /// the kind's own ceiling — `connection_call` is never `allow`, so the
+    /// picker does not offer a choice the ceiling would swallow.
+    public static func offeredModes(_ kind: String) -> [String] {
+        guard let top = kindCeiling[kind] else { return modes }
+        return modes.filter { modeRank($0) <= modeRank(top) }
+    }
+
+    /// `effectiveActions`: every kind, the lower of its entry and its ceiling at the level.
     public static func effective(_ record: Record) -> [String: String] {
         let level = record.effectiveLevel
-        let top = ceiling[level] ?? "deny"
         var out: [String: String] = [:]
         for kind in kinds {
+            let top = ceilingFor(level, kind)
             let asked = record.actions[kind] ?? defaults[level]?[kind] ?? "deny"
             out[kind] = modeRank(asked) > modeRank(top) ? top : asked
         }
@@ -130,6 +154,7 @@ public enum AgentAutonomy {
         case "task_update": return "Update"
         case "comment": return "Comment"
         case "capture": return "Capture"
+        case "connection_call": return "Connection Call"
         default: return kind
         }
     }
@@ -532,8 +557,11 @@ public struct AccessDraft: Sendable, Equatable {
     public var changesAutonomy: Bool { autonomy != baseAutonomy }
     public var isChanged: Bool { changesGrants || changesProjects || changesAutonomy }
 
-    /// The PUT body: `level` and `actions` from the editor, every other key
-    /// as it was read.
+    /// The PUT body: `level` and `actions` from the editor — every kind the
+    /// record held, the ones this build does not draw included — and every
+    /// other key as it was read. The route REPLACES the record, so a kind
+    /// left out here is a kind erased: an owner's `connection_call: deny`
+    /// must survive an edit to a folder or a project.
     public var autonomyUpdate: AgentAutonomyUpdate {
         let old = baseAutonomyJSON
         return AgentAutonomyUpdate(

@@ -4,9 +4,10 @@
 // value the caller already set.
 
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { envNotices, envPaths, productEnvFile, resolveInstanceDir, type EnvPaths } from "./instance.js";
+import { CURRENT_LINK, RELEASES_DIRNAME } from "./release.js";
 
 /** Parse a dotenv-shaped file: KEY=value lines, `#` comments, optional `export `, matching outer quotes stripped. */
 export function parseDotEnv(text: string): Record<string, string> {
@@ -159,20 +160,51 @@ export function productVersion(): string {
 }
 
 /**
+ * The product dir of a RELEASE install that `from` sits inside: the directory
+ * holding `releases/` and `current` (docs/ops/releases.md), found from a path
+ * under `<root>/releases/<version>/…` or `<root>/current/…`. Undefined when
+ * `from` is in no such layout.
+ *
+ * A release's unpacked directory is itself shaped like a checkout (the pack
+ * carries `seed/` and a `package.json` named "metistry"), so the checkout
+ * walk alone stops at `releases/<version>` — a directory `up` and `update`
+ * cannot use — or walks past it to whatever development checkout encloses
+ * the install. The install is asked first.
+ */
+export function releaseRootAbove(from: string): string | undefined {
+  let dir = resolve(from);
+  for (;;) {
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    const viaVersion = basename(parent) === RELEASES_DIRNAME && isProductCheckout(dir) ? dirname(parent) : undefined;
+    const viaCurrent = basename(dir) === CURRENT_LINK && existsSync(join(parent, RELEASES_DIRNAME)) && isProductCheckout(dir) ? parent : undefined;
+    const root = viaVersion ?? viaCurrent;
+    if (root !== undefined && existsSync(join(root, CURRENT_LINK)) && existsSync(join(root, RELEASES_DIRNAME))) return root;
+    dir = parent;
+  }
+}
+
+/**
  * Resolution order (README.md): `--product-dir`, then `METISTRY_PRODUCT_DIR`,
- * then the checkout this package sits inside (a workspace install), then
- * the current directory's enclosing checkout. Undefined means "not in a
- * checkout" — init still works from the bundled seed; doctor cannot (there
- * are no manifests to walk).
+ * then the release install this package runs from (X-101: the directory
+ * holding `releases/` and `current`, even when a development checkout
+ * encloses it or the current directory sits in one), then the checkout this
+ * package sits inside (a workspace install), then the current directory's
+ * enclosing checkout. Undefined means "not in a checkout" — init still works
+ * from the bundled seed; doctor cannot (there are no manifests to walk).
+ *
+ * `from` is where the running package lives; it is a parameter so a test can
+ * stand an install and a checkout side by side without moving the real files.
  */
 export function resolveProductDir(
   explicit: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
   cwd = process.cwd(),
+  from = packageRoot(),
 ): string | undefined {
   if (explicit) return resolve(explicit);
   if (env.METISTRY_PRODUCT_DIR) return resolve(env.METISTRY_PRODUCT_DIR);
-  return findCheckoutAbove(packageRoot()) ?? findCheckoutAbove(cwd);
+  return releaseRootAbove(from) ?? findCheckoutAbove(from) ?? findCheckoutAbove(cwd);
 }
 
 /** The seed directory: the checkout's `seed/` when there is one, else the copy bundled into this package at build time. */

@@ -76,8 +76,11 @@ are no manifests to walk otherwise). Resolution order:
 
 1. `--product-dir <checkout>`
 2. `METISTRY_PRODUCT_DIR`
-3. the checkout this package is installed inside (a `pnpm` workspace)
-4. the current directory's enclosing checkout
+3. the release install this package runs from — the product dir holding
+   `releases/` and `current` — even when a development checkout encloses it
+   or the current directory is inside one
+4. the checkout this package is installed inside (a `pnpm` workspace)
+5. the current directory's enclosing checkout
 
 When none of those is a checkout, `init` falls back to the copy of `seed/`
 bundled into this package at build time (`files` in `package.json`), so
@@ -159,7 +162,9 @@ other than `<instance>/state/.env`.
 
 Generic over manifests (invariant 5). It walks `collectors/`, `routines/`,
 `packages/*/manifest.yaml`, `apps/*/manifest.yaml` and `targets/` in the
-checkout, validates each against `core`'s `validateManifest`, and:
+checkout (or, for a release install, in its `current`), validates each against
+`core`'s `validateManifest`, and says which of the two it read on the first line
+(`release 0.5.0 (read from …)` or `checkout`):
 
 | what | how it is probed |
 | --- | --- |

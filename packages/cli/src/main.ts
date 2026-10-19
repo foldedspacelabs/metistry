@@ -958,8 +958,9 @@ const USAGE = `metistry — Metistry command line
 
   --dry-run prints every command and runs nothing.
 
-Product checkout resolution: --product-dir, METISTRY_PRODUCT_DIR, the checkout
-this package is installed in, the current directory's enclosing checkout.
+Product checkout resolution: --product-dir, METISTRY_PRODUCT_DIR, the release
+install this package runs from, the checkout this package is installed in, the
+current directory's enclosing checkout.
 
 Environment resolution: <instance>/state/.env first (--instance, else
 METISTRY_INSTANCE_DIR), then the product checkout's .env — deprecated, still

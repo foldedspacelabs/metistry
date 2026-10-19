@@ -187,7 +187,7 @@ describe("doctor: everything healthy", () => {
     // the remediation wrapped underneath it (docs/ops/cli-style.md). The
     // icon spelling depends on the terminal's locale, so nothing here
     // asserts on the glyph itself.
-    expect(text.split("\n")[0]).toContain(`${productDir} — shape compose`);
+    expect(text.split("\n")[0]).toContain(`${productDir} — checkout, shape compose`);
     expect(text).toMatch(/20 checks: 10 ok, 0 degraded, 0 failed, 10 absent — .*healthy/);
     expect(text).toMatch(/^local-model$/m); // the kind is the heading, not a repeated column
     expect(text).toMatch(/^\s+\S+\s+local:llamaserver\s+absent\s+\d+ms$/m);

@@ -13,7 +13,7 @@
 // a `kind`; exit 0 when nothing is `failed`.
 
 import { readdir, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
@@ -87,7 +87,8 @@ import { MIGRATE_SCOPE_COMMAND, sharedScopeStatus } from "./secrets.js";
 import { appDmgAssetName, compareVersions, resolveAppPath } from "./mac-app.js";
 import { instanceLockPath, readLock } from "./lock.js";
 import { connectionDoctorRows } from "./connection-check.js";
-import { resolveSeedDir } from "./env.js";
+import { releaseRootAbove, resolveSeedDir } from "./env.js";
+import { CURRENT_LINK, RELEASES_DIRNAME } from "./release.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -120,9 +121,22 @@ const runVerb = (command: string[], label: string): DoctorAction => ({ kind: "ru
 const openSecrets = (label: string): DoctorAction => ({ kind: "open_secrets", label });
 const openSystemSettings = (label: string): DoctorAction => ({ kind: "open_system_settings", label });
 
+/** The product doctor walked: what it is, and where its manifests were read from. */
+export interface DoctorProduct {
+  kind: "release" | "checkout";
+  /** the version of the directory read (its own package.json; for a release, the version `current` names when that has none) */
+  version?: string;
+  /** a release install's product dir — the one holding `releases/` and `current` */
+  install_dir?: string;
+  /** the directory the manifests, seed and migrations were read from */
+  read_dir: string;
+}
+
 export interface DoctorReport {
   as_of: string;
   product_dir: string;
+  /** which product doctor read (X-101): a release's `current` or a checkout. Absent in a report written before it existed. */
+  product?: DoctorProduct;
   /** where this install's services run (deployment.yaml) — the shape every remediation below is written for */
   shape: DeploymentShape;
   ok: boolean;
@@ -1842,6 +1856,37 @@ export async function connectionRows(o: { instanceDir: string; productDir: strin
   }
 }
 
+/**
+ * Which product a `--product-dir` names, and the directory inside it to read
+ * (X-101). A release install's product dir holds `releases/` and `current`
+ * and no manifests of its own, so it is read through `current`; a
+ * `releases/<version>` or `current` directory given directly is the release
+ * read as it stands; anything else is a checkout, read as it stands.
+ */
+export function describeProduct(productDir: string): { product: DoctorProduct; readDir: string } {
+  const isInstallRoot = existsSync(join(productDir, RELEASES_DIRNAME)) && existsSync(join(productDir, CURRENT_LINK)) && !existsSync(join(productDir, "seed", "identity.yaml"));
+  const root = isInstallRoot ? productDir : releaseRootAbove(productDir);
+  if (root === undefined) return { product: { kind: "checkout", ...versionOf(productDir), read_dir: productDir }, readDir: productDir };
+  const readDir = isInstallRoot ? join(productDir, CURRENT_LINK) : productDir;
+  let named: string | undefined;
+  try {
+    named = basename(readlinkSync(join(root, CURRENT_LINK)).replace(/\/+$/, ""));
+  } catch {
+    /* `current` is not a symlink we can read — the package.json below still names a version */
+  }
+  const version = versionOf(readDir).version ?? named;
+  return { product: { kind: "release", ...(version ? { version } : {}), install_dir: root, read_dir: readDir }, readDir };
+}
+
+function versionOf(dir: string): { version?: string } {
+  try {
+    const v = (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { version?: unknown }).version;
+    return typeof v === "string" && v !== "" ? { version: v } : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // a COPY: doctor is read-only, and applying this instance's port block to
   // the real process environment would leak into whatever ran it
@@ -1851,7 +1896,11 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   const platform = deps.platform ?? process.platform;
   const uid = deps.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0);
   const timeoutMs = deps.timeoutMs ?? 5000;
-  const loaded = deps.deployment ? { deployment: deps.deployment, from: "caller" } : await loadDeployment(deps.productDir, env);
+  // what was asked for and what is read can differ: a release install's root
+  // holds `releases/` and `current`, and its manifests, seed and migrations
+  // are in `current` — the directory `up` has always handed doctor (X-101)
+  const { product, readDir: productDir } = describeProduct(deps.productDir);
+  const loaded = deps.deployment ? { deployment: deps.deployment, from: "caller" } : await loadDeployment(productDir, env);
   const shape = loaded.deployment.shape;
   // this instance's own labels and ports, when it has been given a namespace
   // (`metistry up --namespace`) — every probe and every remediation below is
@@ -1875,8 +1924,8 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   ];
   // Read once and shared: the `assistant` row and the local-server rows both
   // ask what compute.yaml says, and doctor must not answer twice differently.
-  const compute = (await computeForDoctor(env, deps.productDir)) ?? emptyCompute();
-  const instanceDir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || deps.productDir;
+  const compute = (await computeForDoctor(env, productDir)) ?? emptyCompute();
+  const instanceDir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || productDir;
 
   // Every group below is INDEPENDENT of every other — a bridge's HTTP probe
   // knows nothing about `launchctl print`, which knows nothing about the
@@ -1894,18 +1943,18 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // the launchd shape's supervisor, asked ONCE and shared: its own rows and
   // the assistant's row both read this answer
   const supervised = platform === "darwin" && shape === "launchd" ? supervisorSnapshot(instanceDir) : undefined;
-  const envFiles = envPaths({ instanceDir, productDir: deps.productDir })?.read ?? [];
+  const envFiles = envPaths({ instanceDir, productDir: productDir })?.read ?? [];
   const [componentRows, registries, layout, inbox, profile, vaultCase, cli, app, dbAndSchedules, launchd, keepAwake, supervisor, launchdEnv, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
-    (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute, supervisor: supervised }))))(),
+    (async () => Promise.all((await walkManifests(productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute, supervisor: supervised }))))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
-    registriesRow(deps.productDir, env),
+    registriesRow(productDir, env),
     layoutRow(instanceDir),
     inboxRow(instanceDir),
     profileRow(instanceDir),
-    vaultCaseRow(instanceDir, env.METISTRY_SEED_DIR?.trim() || join(deps.productDir, "seed")),
+    vaultCaseRow(instanceDir, env.METISTRY_SEED_DIR?.trim() || join(productDir, "seed")),
     // whether typing `metistry` finds this install's shim: a filesystem
     // look, so it costs nothing to start with everything else
-    cliRow(deps.productDir, env),
+    cliRow(productDir, env),
     // the Mac app against the lock: where the app is the install's front end
     platform === "darwin" && shape === "launchd" ? appRow({ env, exec, appPath: deps.appPath }) : Promise.resolve(undefined),
     (async (): Promise<DoctorRow[]> => {
@@ -1913,14 +1962,14 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
       try {
         // schedules after the db rows: they read `runs`, so they are only
         // meaningful once the db row above has said the database answers
-        return [...(await dbRows(db, deps.productDir, shape, labelSuffix)), ...(await scheduleRows(db, deps.productDir, env))];
+        return [...(await dbRows(db, productDir, shape, labelSuffix)), ...(await scheduleRows(db, productDir, env))];
       } finally {
         // every path, the throwing one included: a pool left open is a
         // handle that outlives the verb that made it
         if (deps.db === undefined && db?.end) await db.end().catch(() => {});
       }
     })(),
-    platform === "darwin" ? launchdRows(deps.productDir, exec, uid, shape, labelSuffix, env) : Promise.resolve([]),
+    platform === "darwin" ? launchdRows(productDir, exec, uid, shape, labelSuffix, env) : Promise.resolve([]),
     // keeping the Mac awake: one row, macOS only, and never `failed` — the
     // install is running and correct even when a promise about the MACHINE is
     // unmet (docs/ops/deployment-shapes.md, "Keeping the Mac awake")
@@ -1931,14 +1980,14 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     supervised ? launchdEnvRow({ stateRoot: instanceDir, home: env.HOME, labelSuffix, envFiles }) : Promise.resolve(undefined),
     // no container runtime is consulted when no service runs in one: a
     // launchd install must not report "docker not found" as a finding
-    usesCompose(loaded.deployment) ? composeRows(deps.productDir, exec) : Promise.resolve([]),
+    usesCompose(loaded.deployment) ? composeRows(productDir, exec) : Promise.resolve([]),
     // the local model servers. Absent is the common case and never a
     // failure, so these rows can only add information, never a red run.
     localServerRows({ compute, fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) }),
     // the retired shared scope: an instance with an id, on a Mac (or a probe
     // a test hands in) — presence only, so it can never prompt
     env.METISTRY_INSTANCE_DIR && (deps.keychainProbe || platform === "darwin")
-      ? sharedScopeRow({ instanceDir, productDir: deps.productDir, env, probe: deps.keychainProbe ?? securityPresence(exec) })
+      ? sharedScopeRow({ instanceDir, productDir: productDir, env, probe: deps.keychainProbe ?? securityPresence(exec) })
       : Promise.resolve(undefined),
     // the vault's sync: ahead, behind, last push, conflict (§2.21) — never
     // `failed`, since commits are safe locally whatever the remote does
@@ -1946,14 +1995,21 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // each connection's own check() (plan §2.6): dialled, listed, compared
     // with its file — never `failed` here either, since a connection is
     // someone else's server (docs/ops/connections.md)
-    env.METISTRY_INSTANCE_DIR ? connectionRows({ instanceDir, productDir: deps.productDir, env, platform, uid, exec, ...(deps.keychain ? { keychain: deps.keychain } : {}) }) : Promise.resolve([]),
+    env.METISTRY_INSTANCE_DIR ? connectionRows({ instanceDir, productDir: productDir, env, platform, uid, exec, ...(deps.keychain ? { keychain: deps.keychain } : {}) }) : Promise.resolve([]),
   ]);
   rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...(launchdEnv ? [launchdEnv] : []), ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync, ...connections);
 
-  return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
+  return { as_of: new Date().toISOString(), product_dir: deps.productDir, product, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }
 
 // ---- rendering ------------------------------------------------------------------
+
+/** "release 0.9.0 (read from <dir>), " / "checkout, " — which product the table is about, said before its rows (X-101). Empty for a report that carries none. */
+function describeRead(p: DoctorProduct | undefined): string {
+  if (!p) return "";
+  if (p.kind === "checkout") return "checkout, ";
+  return `release${p.version ? ` ${p.version}` : ""} (read from ${p.read_dir}), `;
+}
 
 /** The name column stops growing here: one 60-character launchd label must not indent every other row off the screen. */
 const NAME_WIDTH_CAP = 34; // limit: fixed — a display column, not a policy; a row wider than this simply runs on
@@ -1968,7 +2024,7 @@ const NAME_WIDTH_CAP = 34; // limit: fixed — a display column, not a policy; a
  */
 export function renderTable(report: DoctorReport, ui: Ui = defaultUi()): string {
   const statusWidth = Math.max(0, ...report.rows.map((r) => r.status.length));
-  const out: string[] = [ui.dim(`${report.product_dir} — shape ${report.shape}, ${report.as_of}`), ""];
+  const out: string[] = [ui.dim(`${report.product_dir} — ${describeRead(report.product)}shape ${report.shape}, ${report.as_of}`), ""];
 
   for (const kind of [...new Set(report.rows.map((r) => r.kind))]) {
     const group = report.rows.filter((x) => x.kind === kind);

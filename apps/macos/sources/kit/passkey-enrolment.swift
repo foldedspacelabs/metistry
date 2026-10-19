@@ -192,31 +192,18 @@ public final class PasskeyEnrolmentModel {
         case failed(String)
     }
 
-    /// Where the enrolment code comes from today. There is no HTTP route that
-    /// mints one — deliberately: the root of trust for a first passkey is shell
-    /// access to the host (metistry-build-plan.md §4.2, "Recovery") — and
-    /// `metistry enroll` is on the CLI's own "Not yet" list (docs/ops/cli.md).
-    /// So the app names the command instead of pretending to have a button for
-    /// it, and takes the code the user pastes back.
-    public nonisolated static func mintCommand(shape: String?) -> String {
-        shape == "compose"
-            ? "docker compose exec console node scripts/enroll.mjs"
-            : "node <product>/apps/console/scripts/enroll.mjs"
-    }
-
-    public nonisolated static let mintNote =
-        "The code is single-use and lasts ten minutes. Nothing mints one over HTTP on purpose: whoever can run that command "
-        + "already controls Postgres and the vault, so shell access to the host is the root of trust for a first passkey "
-        + "(plan §4.2). A `metistry enroll` verb would replace the command above; it is on the CLI's own \"not yet\" list."
-
-    /// What the fallback does with the code, and where a QR would go. There is
-    /// no QR renderer anywhere in this product yet — `apps/console/scripts/enroll.mjs`
-    /// says so itself ("QR rendering arrives with packages/cli") — so the app
-    /// shows the URL rather than shipping an encoder nobody asked for.
+    /// Where the enrolment code comes from: **Add a Phone…**, the sheet
+    /// (add-phone-model.swift, plan §2.22). It runs `metistry enroll` on this
+    /// Mac — M19, the same management verb Settings ▸ Devices runs — because
+    /// there is no HTTP route that mints one, deliberately: the root of trust
+    /// for a first passkey is shell access to the host (plan §4.2). The step
+    /// used to print the `enroll.mjs` command and take a pasted code; the
+    /// sheet draws the QR and the URL instead, and the owner pastes nothing.
     public nonisolated static let fallbackNote =
-        "Open the link here to enrol this Mac in a browser, or type it on the phone to enrol the phone. It is the console's own "
-        + "page — the same flow, the same `passkeys` row — and it works because a browser's relying party may be a loopback or "
-        + "a tailnet name, which a native ceremony's may not."
+        "A phone or a browser gets its own passkey by opening a one-time enrolment link. Add a Phone… mints one on this Mac "
+        + "and shows it as a QR code and a link — scan it with the phone, or copy the link to open it in a browser here. It "
+        + "is the console's own page: the same flow, the same `passkeys` row, and it works because a browser's relying party "
+        + "may be a name this Mac answers at, which a native ceremony's may not."
 
     private let registrar: (any PasskeyRegistrar)?
     private let transport: any ConsoleTransport

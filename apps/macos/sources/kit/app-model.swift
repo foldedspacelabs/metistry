@@ -184,6 +184,14 @@ public final class AppModel {
         let settings = SettingsModel(status: status, cli: cli, instanceDir: instances.active, consoleSignIn: consoleSignIn, session: console)
         self.settings = settings
         self.wizard = WizardModel(steps: firstRun)
+        // Step 6's Add a Phone sheet is Settings ▸ Devices' sheet: the same
+        // runner for `metistry enroll` and the same session, so *Added* is
+        // seen from the wizard too (plan §2.22). The pasteboard is Settings'.
+        firstRun.makeAddPhone = { [weak console, weak settings] in
+            let sheet = AddPhoneModel(management: console?.management, session: console)
+            sheet.copyText = { [weak settings] text in settings?.copyText(text) }
+            return sheet
+        }
         self.menu = MenuBarModel(status: status, cli: cli)
         self.logs = LogViewerModel(cli: cli)
         let shell = ShellModel(stores: console.stores, defaults: defaults)

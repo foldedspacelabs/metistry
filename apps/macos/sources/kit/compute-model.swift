@@ -31,9 +31,11 @@
 //     type cannot hold a verb §2.2 does not list.
 //
 // No console route is added (invariant 10). What the design draws and nothing
-// serves yet — a model's size, a download's cancel, a provider's headers and
+// serves yet — a provider's headers and
 // data policy, removing a model, *Add* on a cloud place — is said where it
-// would be, dimmed with its reason (C138), never invented here.
+// would be, dimmed with its reason (C138), never invented here. A download's
+// size and progress are read from the CLI's own progress lines and its cancel
+// ends that CLI process; neither is a figure the app computes.
 //
 // THE APP PERSISTS NOTHING ABOUT COMPUTE. `compute.yaml` is the record; the
 // console reads it and the CLI writes it. The pane re-reads when it opens and
@@ -131,6 +133,10 @@ public final class ComputeModel {
     public private(set) var running: ComputeConfirmation?
     /// The CLI's own lines from the running (or last) verb, as they arrive.
     public private(set) var output: [OutputLine] = []
+    /// *Cancel Download* was pressed and the CLI has not yet stopped.
+    public private(set) var cancelRequested = false
+    /// The running verb's work, so a cancel reaches the process it started.
+    @ObservationIgnored private var runTask: Task<CommandResult, any Error>?
     /// A provider's gear, open. `nil`: closed.
     public var gear: ProviderGearDraft?
     /// *Install a Model…*, open. `nil`: closed.
@@ -279,16 +285,7 @@ public final class ComputeModel {
                 }
             }
         }
-        let provider = String(ref.prefix { $0 != "/" })
-        let model = ref.count > provider.count ? String(ref.dropFirst(provider.count + 1)) : ref
-        return ComputeModelLine(
-            ref: ref,
-            name: model,
-            maker: nil,
-            provider: provider,
-            tag: report?.provider(named: provider)?.tag ?? .cloud,
-            price: nil
-        )
+        return ComputeModelLine.bare(ref: ref, tag: { report?.provider(named: $0)?.tag })
     }
 
     /// What a model dropdown offers: every place the catalogue serves on a
@@ -645,12 +642,13 @@ public final class ComputeModel {
         else { return }
         confirmation = ComputeConfirmation(
             title: "Install \(model)?",
-            cost: "Downloaded onto this Mac. \(diskNote) \(memoryNote) Its size is not known until the download starts; its progress shows here.",
+            cost: "Downloaded onto this Mac. \(diskNote) \(memoryNote) Its size is not known until the download starts; then it shows here with the progress, and Cancel Download stops it.",
             actionTitle: "Install",
             command: command,
             waiting: "Downloading \(model)…",
             done: "\(model) installed",
-            refreshesDoctor: true
+            refreshesDoctor: true,
+            downloads: true
         )
     }
 
@@ -683,16 +681,21 @@ public final class ComputeModel {
         guard running == nil else { return }
         running = pending
         output = []
+        cancelRequested = false
         let sink = OutputSink()
         let collect: @Sendable (OutputLine) -> Void = { [weak self] line in
             sink.append(line)
             Task { @MainActor in self?.output = sink.drain() }
         }
         let verb = pending.command.arguments.prefix(3).joined(separator: " ")
+        let work = Task { try await runner.run(pending.command, onOutput: collect) }
+        runTask = work
         do {
-            let result = try await runner.run(pending.command, onOutput: collect)
+            let result = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
             output = sink.drain()
-            if CLIDegradation.isUnknownVerb(result) {
+            if cancelRequested {
+                lastOutcome = Outcome(verb: pending.said, ok: false, message: Self.cancelledWords(pending))
+            } else if CLIDegradation.isUnknownVerb(result) {
                 lastOutcome = Outcome(verb: pending.said, ok: false, message: CLIDegradation.message(verb: verb))
             } else {
                 let json = JSONValue.parseTrailing(in: result.stdout)
@@ -701,11 +704,43 @@ public final class ComputeModel {
                 lastOutcome = Outcome(verb: pending.said, ok: ok, message: ok ? (detail ?? pending.done) : CLIDegradation.refusalMessage(result, verb: verb))
             }
         } catch {
-            lastOutcome = Outcome(verb: pending.said, ok: false, message: error.localizedDescription)
+            lastOutcome = Outcome(verb: pending.said, ok: false, message: cancelRequested ? Self.cancelledWords(pending) : error.localizedDescription)
         }
+        runTask = nil
+        cancelRequested = false
         running = nil
         await refresh()
         if pending.refreshesDoctor { await status.refresh() }
+    }
+
+    // MARK: - A download, its size, and its cancel
+
+    /// What the running download has said about itself — its size and how far
+    /// it is — read from the CLI's own progress lines. Nil while it has said
+    /// nothing, and nil for a verb that is not a download: the pane never
+    /// shows a size or a percentage nobody reported.
+    public var downloadProgress: DownloadProgress? {
+        guard running?.downloads == true else { return nil }
+        return DownloadProgress.read(output)
+    }
+
+    /// Whether *Cancel Download* is offered: a download is running and no
+    /// cancel is already on its way.
+    public var canCancelDownload: Bool {
+        running?.downloads == true && !cancelRequested
+    }
+
+    /// *Cancel Download*: stop the CLI process the install started. What it
+    /// had already fetched is the server's or the file system's to keep; the
+    /// outcome says nothing was installed.
+    public func cancelDownload() {
+        guard canCancelDownload else { return }
+        cancelRequested = true
+        runTask?.cancel()
+    }
+
+    nonisolated static func cancelledWords(_: ComputeConfirmation) -> String {
+        "Download cancelled before it finished, so the model was not installed. Install a Model starts it again."
     }
 
     // MARK: - The engine banner
@@ -778,6 +813,17 @@ public struct ComputeModelLine: Sendable, Equatable, Identifiable {
         self.provider = provider
         self.tag = tag
         self.price = price
+    }
+
+    /// A model the catalogue does not hold, written the same shape: the
+    /// model id as its name, its provider, the provider's own tag (Cloud when
+    /// the provider is not known — the cautious reading of an unknown place).
+    /// The Compute pane's fallback and the agents' model dropdown both ask
+    /// this, so a model reads the same wherever the catalogue is absent.
+    public static func bare(ref: String, tag providerTag: (String) -> ComputeTag?) -> ComputeModelLine {
+        let provider = String(ref.prefix { $0 != "/" })
+        let model = ref.count > provider.count ? String(ref.dropFirst(provider.count + 1)) : ref
+        return ComputeModelLine(ref: ref, name: model, maker: nil, provider: provider, tag: providerTag(provider) ?? .cloud, price: nil)
     }
 
     public init(row: ComputeCatalogueReply.Row, place: ComputeCatalogueReply.Place) {
@@ -977,11 +1023,16 @@ public struct ComputeConfirmation: Identifiable, Equatable, Sendable {
     public let done: String
     /// A model changed on this Mac: doctor's local-server rows re-read.
     public let refreshesDoctor: Bool
+    /// A model download: the pane shows its size and offers *Cancel
+    /// Download* while it runs. Load and unload are over in a moment and
+    /// offer neither.
+    public let downloads: Bool
 
     public init(
         title: String, cost: String, actionTitle: String, command: ManagementCommand, destructive: Bool = false,
-        waiting: String, done: String, refreshesDoctor: Bool = false
+        waiting: String, done: String, refreshesDoctor: Bool = false, downloads: Bool = false
     ) {
+        self.downloads = downloads
         self.title = title
         self.cost = cost
         self.actionTitle = actionTitle
@@ -1084,5 +1135,35 @@ public struct DiskCapacity: Sendable, Equatable {
 
     public static func gigabytes(_ bytes: UInt64) -> String {
         String(format: "%.0f", Double(bytes) / 1_000_000_000)
+    }
+}
+
+/// A download's size and progress as the CLI printed them, e.g.
+/// `gemma.gguf: 40% (1638.4 MiB of 4096.0 MiB)` or `12% · 600 MB of 5.0 GB`.
+/// Only what a line says is read: no total is computed, and a line with
+/// neither figure yields nothing.
+public struct DownloadProgress: Sendable, Equatable {
+    /// The total, in the CLI's own units: *4096.0 MiB*, *5.0 GB*.
+    public let size: String?
+    /// The last percentage printed, 0-100.
+    public let percent: Int?
+
+    public init(size: String?, percent: Int?) {
+        self.size = size
+        self.percent = percent
+    }
+
+    /// The newest figures in `lines`, each from the newest line that has it.
+    public static func read(_ lines: [OutputLine]) -> DownloadProgress? {
+        let total = #/\bof\s+(?<n>\d+(?:\.\d+)?)\s?(?<unit>[KMGT]i?B)\b/#
+        let percent = #/(?<p>\d{1,3})%/#
+        var size: String?
+        var pct: Int?
+        for line in lines.reversed() {
+            if size == nil, let m = line.text.firstMatch(of: total) { size = "\(m.n) \(m.unit)" }
+            if pct == nil, let m = line.text.firstMatch(of: percent), let p = Int(m.p), p <= 100 { pct = p }
+            if size != nil, pct != nil { break }
+        }
+        return size == nil && pct == nil ? nil : DownloadProgress(size: size, percent: pct)
     }
 }

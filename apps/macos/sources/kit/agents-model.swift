@@ -438,16 +438,24 @@ public struct AgentModelChoice: Sendable, Equatable, Identifiable, Hashable {
     public static func options(compute: ConsoleCompute?, current: String?, assistantName: String?) -> [AgentModelChoice] {
         var out = [sameAsDefault(assistantName)]
         var seen: Set<String> = [sameAsDefaultWire]
+        // the label is the Compute pane's one line (T6-12: a model is written
+        // the same way in every place it appears), never a second spelling
+        let tags = Dictionary(
+            (compute?.facts.providers ?? []).map { ($0.name, $0.tag) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        func line(_ ref: String) -> String {
+            ComputeModelLine.bare(ref: ref, tag: { tags[$0] }).text
+        }
         func add(_ provider: String, _ model: String) {
             let value = "\(provider)/\(model)"
             guard seen.insert(value).inserted else { return }
-            out.append(AgentModelChoice(value: value, label: "\(model) — \(provider)"))
+            out.append(AgentModelChoice(value: value, label: line(value)))
         }
         for a in compute?.facts.assignments ?? [] { add(a.provider, a.model) }
         for p in compute?.facts.providers ?? [] { for m in p.modelsAssigned { add(p.name, m) } }
         if let current, !seen.contains(current) {
-            let parts = current.split(separator: "/", maxSplits: 1).map(String.init)
-            out.append(AgentModelChoice(value: current, label: parts.count == 2 ? "\(parts[1]) — \(parts[0])" : current))
+            out.append(AgentModelChoice(value: current, label: line(current)))
         }
         return out
     }

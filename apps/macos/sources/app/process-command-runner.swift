@@ -73,8 +73,15 @@ struct ProcessCommandRunner: CommandRunner {
         }
         try? stdin.fileHandleForWriting.close()
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            process.terminationHandler = { _ in continuation.resume() }
+        // A cancelled caller (the Compute pane's Cancel Download) stops the
+        // child it started rather than leaving it running unseen: SIGTERM,
+        // then the same exit path as any other termination.
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                process.terminationHandler = { _ in continuation.resume() }
+            }
+        } onCancel: {
+            if process.isRunning { process.terminate() }
         }
 
         out.fileHandleForReading.readabilityHandler = nil

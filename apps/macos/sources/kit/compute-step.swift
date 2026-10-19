@@ -320,8 +320,8 @@ public final class ComputeStepModel {
 
     public nonisolated static let keyNote =
         "The key goes to the command's standard input — never onto a command line, never into a file this app writes, never into a log. "
-        + "`metistry compute providers add` puts it in the login Keychain under your user account, where every instance on this Mac shares it, "
-        + "and everything the app knows about it afterwards is whether it is there."
+        + "`metistry compute providers add` stores it as one of this instance\u{2019}s own secrets in the login Keychain, granted to this provider (Settings → Secrets lists it); "
+        + "compute.yaml holds only a reference to it, and everything the app knows about it afterwards is whether it is there."
 
     private nonisolated static func reason(_ result: CommandResult, verb: String) -> String {
         "`metistry \(verb)` exited \(result.exitCode): \(CLIDegradation.refusalMessage(result, verb: verb))"

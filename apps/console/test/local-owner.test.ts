@@ -72,6 +72,39 @@ describe("local owner token", () => {
     expect(checkLocalOwner(req("192.168.112.9", bearer(TOKEN)), compose).verdict).toBe("remote");
     expect(checkLocalOwner(req("192.168.113.1", bearer(TOKEN)), compose).verdict).toBe("remote");
   });
+
+  // ----- the proxy listener (plan §2.23, X-103) -----
+  // A remote-access provider dials the console from 127.0.0.1, so on the
+  // proxy listener a loopback peer proves only that a tunnel carried the
+  // request. There the token is `remote` from EVERY peer — the same verdict,
+  // so the same uniform 401 and the same audit row a remote address gets.
+  it("**on the proxy listener THE token is refused from every loopback address, exactly as a remote one is**", () => {
+    for (const addr of LOOPBACK_ADDRESSES) {
+      const r = checkLocalOwner(req(addr, bearer(TOKEN)), cfg, "proxy");
+      expect(r.verdict).toBe("remote");
+      expect(r.peer).toBe(addr); // the audit line still names the peer the proxy dialled from
+    }
+    // …and from a Unix socket, which has no peer address at all
+    expect(checkLocalOwner(req(undefined, bearer(TOKEN)), cfg, "proxy")).toEqual({ verdict: "remote", peer: "" });
+  });
+
+  it("on the proxy listener a trusted gateway opens nothing either — there is no configuration that admits the token there", () => {
+    const compose = { token: TOKEN, trusted: ["192.168.112.1", "0.0.0.0/0", "127.0.0.1"] };
+    for (const addr of ["192.168.112.1", "127.0.0.1", "::1", "203.0.113.7"]) {
+      expect(checkLocalOwner(req(addr, bearer(TOKEN)), compose, "proxy").verdict).toBe("remote");
+    }
+  });
+
+  it("the proxy listener changes nothing about the other verdicts: a wrong token is a mismatch, no token is absent", () => {
+    expect(checkLocalOwner(req("127.0.0.1", bearer(mintToken())), cfg, "proxy").verdict).toBe("mismatch");
+    expect(checkLocalOwner(req("127.0.0.1", {}), cfg, "proxy").verdict).toBe("absent");
+    expect(checkLocalOwner(req("127.0.0.1", bearer(TOKEN)), undefined, "proxy").verdict).toBe("absent");
+  });
+
+  it("the listener is the third argument and defaults to main — the main listener's rule is what it always was", () => {
+    expect(checkLocalOwner(req("127.0.0.1", bearer(TOKEN)), cfg).verdict).toBe("ok");
+    expect(checkLocalOwner(req("127.0.0.1", bearer(TOKEN)), cfg, "main").verdict).toBe("ok");
+  });
 });
 
 describe("address matching", () => {

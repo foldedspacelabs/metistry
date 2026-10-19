@@ -7,16 +7,21 @@
 import { chmodSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   agentTokenVar,
   backupFile,
+  claudeAddLine,
+  claudeConfigFile,
+  claudeServerEntry,
+  CONNECT_TOOLS,
   connect,
   connectList,
   connectRemove,
   cursorConfigFile,
   DEFAULT_GRANTS,
+  HARNESSES,
   opencodeConfigFile,
   opencodeServerEntry,
   parseTool,
@@ -24,6 +29,7 @@ import {
   renderConnectList,
   renderRemove,
   serverKey,
+  TOOL_SPECS,
   writeCursorConfig,
   writeOpencodeConfig,
 } from "../src/connect.js";
@@ -59,6 +65,45 @@ function fakeSecurity(seed: Record<string, string> = {}, behaviour: { lockedDele
     return { code: 1, stdout: "", stderr: `unexpected ${args[0]}` };
   };
   return { exec, store, calls };
+}
+
+/**
+ * `fakeSecurity` plus a stand-in for `claude mcp add|remove --scope user`: it
+ * edits `<home>/.claude.json` the way Claude Code does (read, change
+ * `mcpServers`, write back with the rest of the document intact, no trailing
+ * newline) and refuses an add over an existing name, as the real one does.
+ * Every `claude` argv is kept; `absent` makes the binary not exist (exit 127,
+ * exec.ts's ENOENT), `refuseAdd` makes it fail.
+ */
+function fakeClaude(sec: ReturnType<typeof fakeSecurity>, home: string, behaviour: { absent?: boolean; refuseAdd?: boolean } = {}) {
+  const claudeCalls: string[][] = [];
+  const calls: Array<{ cmd: string; argv: string[] }> = [];
+  const exec: Exec = async (cmd, argv, opts = {}) => {
+    calls.push({ cmd, argv });
+    if (cmd === "security") return sec.exec(cmd, argv, opts);
+    if (!/(^|\/)claude$/.test(cmd) || behaviour.absent) return { code: 127, stdout: "", stderr: `${cmd}: not found` };
+    claudeCalls.push(argv);
+    const dir = opts.env?.CLAUDE_CONFIG_DIR?.trim();
+    const file = dir ? join(dir, ".claude.json") : join(opts.env?.HOME ?? home, ".claude.json");
+    const doc = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown> & { mcpServers?: Record<string, unknown> }) : {};
+    const servers = doc.mcpServers ?? {};
+    if (argv[0] !== "mcp") return { code: 1, stdout: "", stderr: "unexpected" };
+    if (argv[1] === "add") {
+      if (behaviour.refuseAdd) return { code: 1, stdout: "", stderr: "Error: MCP config is locked\n" };
+      const [key, url] = argv.slice(argv.indexOf("http") + 1);
+      const header = argv[argv.indexOf("--header") + 1] ?? "";
+      if (key! in servers) return { code: 1, stdout: "", stderr: `Error: MCP server ${key} already exists in user config\n` };
+      servers[key!] = { type: "http", url, headers: { [header.split(": ")[0]!]: header.split(": ").slice(1).join(": ") } };
+    } else if (argv[1] === "remove") {
+      const key = argv[argv.length - 1]!;
+      if (!(key in servers)) return { code: 1, stdout: "", stderr: `No MCP server found with name: ${key}\n` };
+      delete servers[key];
+    }
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify({ ...doc, mcpServers: servers }, null, 2), { mode: 0o600 });
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  return { exec, claudeCalls, calls, sec };
 }
 
 interface Row {
@@ -516,20 +561,189 @@ describe("connect devin: the three fields to paste", () => {
 });
 
 describe("connect claude-code", () => {
-  it("mints the token the plugin docs mint by hand and prints the plugin's own variables", async () => {
+  it("with no `claude` on this machine: mints the token, writes nothing, and prints the add line and the plugin's variables", async () => {
     const { home, instanceDir } = await scratch();
-    const kc = fakeSecurity();
+    const kc = fakeSecurity(); // answers 127 (not found) to anything but `security`
     const c = fakeConsole();
     const r = await connect({ tool: "claude-code", ...base(home, instanceDir, kc.exec, c.fetchFn) });
-    expect(r).toMatchObject({ display_name: "Claude Code", token: "keychain", token_var: "METISTRY_AGENT_TOKEN_CLAUDE_CODE" });
-    expect(r.config_file).toBeUndefined();
+    expect(r).toMatchObject({ display_name: "Claude Code", token: "keychain", token_var: "METISTRY_AGENT_TOKEN_CLAUDE_CODE", config_file: claudeConfigFile(home), config_key: "metistry", config_state: "manual" });
+    expect(r.config_manual).toBe(claudeAddLine("metistry", "http://127.0.0.1:8080/mcp", "METISTRY_AGENT_TOKEN_CLAUDE_CODE"));
+    expect(tree(home)).toEqual({});
     const text = renderConnect(r);
+    expect(text).toContain("NOT changed");
+    expect(text).toContain("--header 'Authorization: Bearer ${METISTRY_AGENT_TOKEN_CLAUDE_CODE}'");
     expect(text).toContain("METISTRY_URL=http://127.0.0.1:8080");
-    expect(text).toContain("METISTRY_OWNER_TOKEN=");
+    expect(text).toContain('export METISTRY_AGENT_TOKEN_CLAUDE_CODE="$(security find-generic-password');
+    expect(text).toContain('METISTRY_OWNER_TOKEN="$METISTRY_AGENT_TOKEN_CLAUDE_CODE"');
     expect(text).toContain("METISTRY_CAPTURE_ON_STOP=1");
     expect(text).toContain("/plugin install metistry@metistry");
     expect(text).not.toContain("minted-1");
   });
+
+  it("with `claude`: registers the console's /mcp at user scope, header names the variable, every other server and setting survives, the bearer is nowhere", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = claudeConfigFile(home);
+    await writeFile(file, JSON.stringify({ numStartups: 7, mcpServers: { linear: { type: "http", url: "https://mcp.linear.app/mcp" } }, projects: { "/x": { history: [] } } }, null, 2));
+    const cl = fakeClaude(fakeSecurity(), home);
+    const c = fakeConsole();
+    const r = await connect({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    expect(r).toMatchObject({ config_file: file, config_key: "metistry", config_state: "written", token: "keychain" });
+    expect(r.config_manual).toBeUndefined();
+
+    const text = readFileSync(file, "utf8");
+    const doc = JSON.parse(text) as { numStartups: number; mcpServers: Record<string, unknown>; projects: unknown };
+    expect(doc.mcpServers.metistry).toEqual(claudeServerEntry("http://127.0.0.1:8080/mcp", "METISTRY_AGENT_TOKEN_CLAUDE_CODE"));
+    expect(doc.mcpServers.metistry).toEqual({ type: "http", url: "http://127.0.0.1:8080/mcp", headers: { Authorization: "Bearer ${METISTRY_AGENT_TOKEN_CLAUDE_CODE}" } });
+    expect(doc.mcpServers.linear).toEqual({ type: "http", url: "https://mcp.linear.app/mcp" });
+    expect(doc.numStartups).toBe(7);
+    expect(doc.projects).toEqual({ "/x": { history: [] } });
+    expect(text).not.toContain("minted-1");
+    // the one command, and the tool's own: user scope, a header that is a reference
+    expect(cl.claudeCalls).toEqual([["mcp", "add", "--scope", "user", "--transport", "http", "metistry", "http://127.0.0.1:8080/mcp", "--header", "Authorization: Bearer ${METISTRY_AGENT_TOKEN_CLAUDE_CODE}"]]);
+    expect(JSON.stringify(cl.calls)).not.toContain("minted-1");
+    const out = renderConnect(r);
+    expect(out).toContain("mcpServers.metistry (written, by `claude mcp add --scope user`");
+    expect(out).toContain("METISTRY_OWNER_TOKEN=");
+    expect(out).not.toContain("minted-1");
+    expect(out).not.toContain("NOT changed");
+  });
+
+  it("a re-run changes nothing: the entry is recognised and `claude` is not asked again", async () => {
+    const { home, instanceDir } = await scratch();
+    const cl = fakeClaude(fakeSecurity(), home);
+    const c = fakeConsole();
+    await connect({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    const before = readFileSync(claudeConfigFile(home), "utf8");
+    cl.claudeCalls.length = 0;
+    const again = await connect({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    expect(again.config_state).toBe("unchanged");
+    expect(cl.claudeCalls).toEqual([]);
+    expect(readFileSync(claudeConfigFile(home), "utf8")).toBe(before);
+  });
+
+  it("an older hand-made entry under the same name (a literal bearer) is replaced, and neither printed nor kept", async () => {
+    const { home, instanceDir } = await scratch();
+    const old = "literal-bearer-from-the-old-docs";
+    await writeFile(claudeConfigFile(home), JSON.stringify({ mcpServers: { metistry: { type: "http", url: "http://127.0.0.1:8080/mcp", headers: { Authorization: `Bearer ${old}` } } } }));
+    const cl = fakeClaude(fakeSecurity(), home);
+    const c = fakeConsole();
+    const r = await connect({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    expect(r.config_state).toBe("written");
+    expect(cl.claudeCalls.map((a) => a.slice(0, 2).join(" "))).toEqual(["mcp remove", "mcp add"]);
+    expect(readFileSync(claudeConfigFile(home), "utf8")).not.toContain(old);
+    expect(JSON.stringify(r) + renderConnect(r)).not.toContain(old);
+  });
+
+  it("follows CLAUDE_CONFIG_DIR, which is where Claude Code keeps the file when it is set", async () => {
+    const { home, instanceDir } = await scratch();
+    const dir = join(home, "elsewhere");
+    await mkdir(dir, { recursive: true });
+    const cl = fakeClaude(fakeSecurity(), home);
+    const c = fakeConsole();
+    const b = base(home, instanceDir, cl.exec, c.fetchFn);
+    const r = await connect({ tool: "claude-code", ...b, env: { ...b.env, CLAUDE_CONFIG_DIR: dir } });
+    expect(r).toMatchObject({ config_file: join(dir, ".claude.json"), config_state: "written" });
+    expect(existsSync(join(home, ".claude.json"))).toBe(false);
+  });
+
+  it("when `claude` refuses, the run still succeeds — the token is minted and stored — and says what to run", async () => {
+    const { home, instanceDir } = await scratch();
+    const cl = fakeClaude(fakeSecurity(), home, { refuseAdd: true });
+    const c = fakeConsole();
+    const r = await connect({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    expect(r).toMatchObject({ token: "keychain", config_state: "manual" });
+    expect(r.config_note).toContain("claude mcp add failed: Error: MCP config is locked");
+    expect(renderConnect(r)).toContain("NOT changed — claude mcp add failed");
+    expect(cl.sec.store.size).toBe(1);
+  });
+
+  it("a `claude` that times out (no output at all) is named as a timeout, not as an empty refusal", async () => {
+    const { home, instanceDir } = await scratch();
+    const sec = fakeSecurity();
+    const exec: Exec = async (cmd, argv, opts) => (cmd === "security" ? sec.exec(cmd, argv, opts) : { code: 1, stdout: "", stderr: "" });
+    const r = await connect({ tool: "claude-code", ...base(home, instanceDir, exec, fakeConsole().fetchFn) });
+    expect(r.config_state).toBe("manual");
+    expect(r.config_note).toBe("claude mcp add failed: no output — it probably timed out");
+  });
+
+  it("a namespaced second instance gets its own server name and variable", async () => {
+    const { home, instanceDir } = await scratch();
+    await writeFile(join(instanceDir, ".metistry", "state", "ports.yaml"), ["schema: 1", `instance_id: "${INSTANCE_ID}"`, 'label_suffix: "deadbeef"', "base: 8304", "ports:", "  console: 8304", "  db: 8305", "  reconciler: 8306", "  eventkit: 8307", "  apple-fm: 8308", ""].join("\n"));
+    const cl = fakeClaude(fakeSecurity(), home);
+    const c = fakeConsole();
+    const r = await connect({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    expect(r).toMatchObject({ mcp_url: "http://127.0.0.1:8304/mcp", config_key: "metistry-deadbeef", token_var: "METISTRY_AGENT_TOKEN_CLAUDE_CODE_DEADBEEF" });
+    expect(JSON.parse(readFileSync(claudeConfigFile(home), "utf8")).mcpServers["metistry-deadbeef"].headers.Authorization).toBe("Bearer ${METISTRY_AGENT_TOKEN_CLAUDE_CODE_DEADBEEF}");
+  });
+});
+
+describe("the harness registry (Hindsight Q2): every entry passes the same conformance test", () => {
+  // One entry per tool. A new harness is one entry in HARNESSES and ONE ROW
+  // HERE if it needs a stand-in for its own CLI; the rules below are not
+  // negotiable per tool, which is the point of a registry.
+  it("the registry and the spec table list the same tools, and each entry's page exists", () => {
+    expect(Object.keys(HARNESSES).sort()).toEqual([...CONNECT_TOOLS].sort());
+    for (const tool of CONNECT_TOOLS) {
+      expect(HARNESSES[tool].spec).toBe(TOOL_SPECS[tool]);
+      expect(TOOL_SPECS[tool].id).toBe(tool);
+      expect(existsSync(join(__dirname, "..", "..", "..", TOOL_SPECS[tool].doc)), `${TOOL_SPECS[tool].doc} must exist`).toBe(true);
+    }
+  });
+
+  for (const tool of CONNECT_TOOLS) {
+    const cfg = HARNESSES[tool].config;
+    it(`${tool}: no file connect writes holds the bearer's value — config, backup or anything else — and no argv carries it`, async () => {
+      const { home, instanceDir } = await scratch();
+      const cl = fakeClaude(fakeSecurity(), home);
+      const c = fakeConsole();
+      const first = await connect({ tool, ...base(home, instanceDir, cl.exec, c.fetchFn) });
+      // a second run takes the tool's backup path (an existing file) and the rotate path (a second bearer)
+      const second = await connect({ tool, rotate: true, ...base(home, instanceDir, cl.exec, c.fetchFn) });
+      const bearers = [...cl.sec.store.values(), first.paste?.bearer, second.paste?.bearer].filter((v): v is string => typeof v === "string" && v !== "");
+      expect(bearers.length).toBeGreaterThan(0);
+      const files = { ...tree(home), ...tree(instanceDir, "instance/") };
+      for (const bearer of bearers) {
+        const raw = bearer.replace(/^Bearer /, "");
+        for (const [name, body] of Object.entries(files)) expect(body, `${name} must not hold the bearer`).not.toContain(raw);
+        expect(JSON.stringify(cl.calls.map((x) => x.argv)), "argv is what ps shows").not.toContain(raw);
+        // what is printed: only a paste tool's (Devin's) bearer, on the run that minted it, is ever shown
+        if (!first.paste) for (const r of [first, second]) expect(renderConnect(r) + JSON.stringify(r)).not.toContain(raw);
+      }
+      // a config names the bearer by variable, so a reader of the file learns where the secret is, never what it is
+      if (cfg) expect(Object.values(files).some((t) => t.includes(first.token_var!))).toBe(true);
+    });
+
+    if (!cfg) continue;
+    it(`${tool}: writes the entry its registry row describes, again changes nothing, is read back by --list, and remove takes away only that entry`, async () => {
+      const { home, instanceDir } = await scratch();
+      const file = cfg.file({ home, env: {} });
+      await mkdir(dirname(file), { recursive: true });
+      const other = { type: "http", url: "https://mcp.example/mcp" };
+      await writeFile(file, JSON.stringify({ [cfg.container]: { other } }, null, 2));
+      const cl = fakeClaude(fakeSecurity(), home);
+      const c = fakeConsole();
+
+      const r = await connect({ tool, ...base(home, instanceDir, cl.exec, c.fetchFn) });
+      expect(r.config_state).toBe("written");
+      const doc = JSON.parse(readFileSync(file, "utf8")) as Record<string, Record<string, unknown>>;
+      expect(doc[cfg.container]!.metistry).toEqual(cfg.entry(r.mcp_url, r.token_var!));
+      expect(JSON.stringify(doc[cfg.container]!.metistry)).toContain(r.token_var!);
+      expect(doc[cfg.container]!.other).toEqual(other);
+
+      expect((await connect({ tool, ...base(home, instanceDir, cl.exec, c.fetchFn) })).config_state).toBe("unchanged");
+
+      const listed = await connectList({ ...base(home, instanceDir, cl.exec, c.fetchFn) });
+      expect(listed.tools.find((t) => t.tool === tool)!.config).toContain(`${file} → ${cfg.container}.metistry`);
+
+      const gone = await connectRemove({ tool, ...base(home, instanceDir, cl.exec, c.fetchFn) });
+      expect(gone.problems).toEqual([]);
+      const after = JSON.parse(readFileSync(file, "utf8")) as Record<string, Record<string, unknown>>;
+      expect(after[cfg.container]).toEqual({ other });
+      const again = await connectRemove({ tool, ...base(home, instanceDir, cl.exec, c.fetchFn) });
+      expect(again).toMatchObject({ agent: "already-revoked", config: "no-entry", token: "absent", problems: [] });
+      expect(JSON.parse(readFileSync(file, "utf8"))[cfg.container]).toEqual({ other });
+    });
+  }
 });
 
 describe("connect: what reaches disk survives a layout migration", () => {
@@ -570,13 +784,33 @@ describe("connect --list", () => {
     expect(listed.console_url).toBe("http://127.0.0.1:8080");
     expect(listed.tools.map((t) => t.tool)).toEqual(["claude-code", "cursor", "devin", "opencode"]);
     expect(listed.tools.find((t) => t.tool === "cursor")).toMatchObject({ agent: "registered", token: "keychain", config: `${cursorConfigFile(home)} → mcpServers.metistry` });
-    expect(listed.tools.find((t) => t.tool === "claude-code")).toMatchObject({ agent: "absent", token: "absent" });
+    expect(listed.tools.find((t) => t.tool === "claude-code")).toMatchObject({
+      agent: "absent",
+      token: "absent",
+      config: `mcp: ${claudeConfigFile(home)}: no metistry entry; capture: environment (METISTRY_URL + METISTRY_OWNER_TOKEN)`,
+    });
     expect(listed.tools.find((t) => t.tool === "devin")).toMatchObject({ agent: "absent", token: "n/a" });
 
     const table = renderConnectList(listed);
     expect(table).toContain("console  http://127.0.0.1:8080");
     expect(table).toContain("cursor");
     expect(table).not.toContain("minted-1");
+  });
+
+  it("shows Claude Code's two halves: the /mcp entry and the plugin's environment", async () => {
+    const { home, instanceDir } = await scratch();
+    const cl = fakeClaude(fakeSecurity(), home);
+    const c = fakeConsole();
+    await connect({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    const listed = await connectList({ ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    expect(listed.tools.find((t) => t.tool === "claude-code")).toMatchObject({
+      agent: "registered",
+      token: "keychain",
+      config: `mcp: ${claudeConfigFile(home)} → mcpServers.metistry; capture: environment (METISTRY_URL + METISTRY_OWNER_TOKEN)`,
+    });
+    const table = renderConnectList(listed);
+    expect(table).toContain("mcpServers.metistry");
+    expect(table).toContain("METISTRY_OWNER_TOKEN");
   });
 
   it("shows a revoked row as revoked, not as absent", async () => {
@@ -829,16 +1063,69 @@ describe("connect --remove: the way back (HS-7)", () => {
     expect(kc.store.has(`${KC_CURSOR}_A1B2C3D4`)).toBe(false);
   });
 
-  it("claude-code: revokes and deletes the Keychain item; there is no file, and it says where the export lines live", async () => {
+  it("claude-code with no `claude` and no file: revokes and deletes the Keychain item, and says where the export lines live", async () => {
     const { home, instanceDir } = await scratch();
     const kc = fakeSecurity();
     const c = fakeConsole();
     await connect({ tool: "claude-code", ...base(home, instanceDir, kc.exec, c.fetchFn) });
     const r = await connectRemove({ tool: "claude-code", ...base(home, instanceDir, kc.exec, c.fetchFn) });
-    expect(r).toMatchObject({ agent: "revoked", token: "removed", config: "n/a" });
+    expect(r).toMatchObject({ agent: "revoked", token: "removed", config: "no-file", problems: [] });
     expect(kc.store.size).toBe(0);
     expect(renderRemove(r)).toMatch(/METISTRY_OWNER_TOKEN.*profile/);
     expect(tree(home)).toEqual({});
+  });
+
+  it("claude-code: takes its /mcp entry out with `claude mcp remove`, leaves the owner's other servers and the rest of Claude Code's file, and a second run changes nothing", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = claudeConfigFile(home);
+    await writeFile(file, JSON.stringify({ numStartups: 7, mcpServers: { linear: { type: "http", url: "https://mcp.linear.app/mcp" } } }, null, 2));
+    const cl = fakeClaude(fakeSecurity(), home);
+    const c = fakeConsole();
+    await connect({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    cl.claudeCalls.length = 0;
+
+    const r = await connectRemove({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    expect(r).toMatchObject({ agent: "revoked", token: "removed", config: "removed-by-tool", config_file: file, problems: [] });
+    expect(cl.claudeCalls).toEqual([["mcp", "remove", "--scope", "user", "metistry"]]);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ numStartups: 7, mcpServers: { linear: { type: "http", url: "https://mcp.linear.app/mcp" } } });
+    expect(renderRemove(r)).toContain("claude mcp remove");
+    expect(existsSync(backupFile(file, "metistry"))).toBe(false); // the file is Claude Code's: no copy of it is ever taken
+
+    const bytes = readFileSync(file, "utf8");
+    cl.claudeCalls.length = 0;
+    const again = await connectRemove({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    expect(again).toMatchObject({ agent: "already-revoked", token: "absent", config: "no-entry", problems: [] });
+    expect(cl.claudeCalls).toEqual([]);
+    expect(readFileSync(file, "utf8")).toBe(bytes);
+  });
+
+  it("claude-code: a server under the same name that connect did not write is the owner's — left alone, and reported", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = claudeConfigFile(home);
+    const theirs = { type: "http", url: "http://127.0.0.1:8080/mcp", headers: { Authorization: "Bearer theirs-not-ours" } };
+    await writeFile(file, JSON.stringify({ mcpServers: { metistry: theirs } }));
+    const cl = fakeClaude(fakeSecurity(), home);
+    const c = fakeConsole([{ id: "claude-code" }]);
+    const r = await connectRemove({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    expect(cl.claudeCalls).toEqual([]);
+    expect(JSON.parse(readFileSync(file, "utf8")).mcpServers.metistry).toEqual(theirs);
+    expect(r.problems).toHaveLength(1);
+    expect(r.problems[0]).toContain("not the one connect wrote");
+    expect(JSON.stringify(r) + renderRemove(r)).not.toContain("theirs-not-ours");
+  });
+
+  it("claude-code: no `claude` on the PATH is a problem with the line to run, and the Keychain item still goes", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = claudeConfigFile(home);
+    const cl = fakeClaude(fakeSecurity(), home);
+    const c = fakeConsole();
+    await connect({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
+    const noClaude = fakeClaude(cl.sec, home, { absent: true });
+    const r = await connectRemove({ tool: "claude-code", ...base(home, instanceDir, noClaude.exec, c.fetchFn) });
+    expect(r.token).toBe("removed");
+    expect(r.problems).toHaveLength(1);
+    expect(r.problems[0]).toContain("claude mcp remove --scope user metistry");
+    expect(JSON.parse(readFileSync(file, "utf8")).mcpServers.metistry).toBeDefined(); // untouched
   });
 
   it("devin: revokes the row and touches neither the Keychain nor any file", async () => {

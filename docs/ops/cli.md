@@ -822,7 +822,7 @@ a token and running one command, and dropping one is revoking its row.
 metistry connect cursor                     # ~/.cursor/mcp.json + the Keychain
 metistry connect opencode                   # ~/.config/opencode/opencode.json + the Keychain
 metistry connect devin                      # prints the fields to paste (no API to write them)
-metistry connect claude-code                # mints the plugin's token, prints its env lines
+metistry connect claude-code                # registers /mcp with Claude Code (reads) + prints the plugin's env lines (capture)
 metistry connect cursor --rotate            # a replacement bearer; the old one dies at once
 metistry connect cursor --areas Areas/Engineering --project second-instance
 metistry connect devin --remote             # enrols PENDING: its token works once you let it in
@@ -842,8 +842,36 @@ One delivery per tool, chosen by what the tool can read:
 | --- | --- | --- |
 | `cursor` | `~/.cursor/mcp.json` → `mcpServers.metistry` (`url` + `headers`, 0600, other servers preserved) | the login Keychain; the file names it as `Bearer ${env:METISTRY_AGENT_TOKEN_CURSOR}` |
 | `opencode` | `~/.config/opencode/opencode.json` → `mcp.metistry` (`type: "remote"` + `headers`, 0600, other servers preserved; an existing `opencode.jsonc` is the file written, since OpenCode loads it last) | the login Keychain; the file names it as `Bearer {env:METISTRY_AGENT_TOKEN_OPENCODE}` |
-| `claude-code` | nothing — the plugin reads its environment | the login Keychain, with the `export` lines printed |
+| `claude-code` | the user-scope server `metistry` in Claude Code's own file (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`) — added by Claude Code's own `claude mcp add --scope user --transport http`, never by rewriting the file — and, for the plugin's capture, nothing: it reads its environment | the login Keychain; the entry names it as `Bearer ${METISTRY_AGENT_TOKEN_CLAUDE_CODE}`, which Claude Code expands when it starts, and the `export` lines are printed |
 | `devin` | nothing — MCP servers are registered in a web form | printed once, for pasting |
+
+**Claude Code has two halves, and `connect claude-code` does both** (X-133,
+HS-1). The *read* half is the console's `/mcp`: `claude mcp add --scope user
+--transport http metistry <console>/mcp --header 'Authorization: Bearer
+${METISTRY_AGENT_TOKEN_CLAUDE_CODE}'`. Claude Code expands `${VAR}` in a
+user-scope MCP header (the live test `connect.claude-code.live.test.ts` asks the
+real tool on any machine that has one, so a release that stops doing so fails
+a build), so the bearer reaches neither the file nor `ps`. The *write* half is
+the plugin's capture, which reads `METISTRY_URL` and `METISTRY_OWNER_TOKEN`
+from the environment; the printed `export` lines set both from the one Keychain
+item. The file is Claude Code's — every session rewrites it — so `connect` asks
+the tool rather than editing it, takes no backup of it, and reads it only to
+see what is there. An entry named `metistry` that is not the one `connect`
+writes (an older hand-made one with a literal bearer) is replaced; a re-run
+with the right entry already there runs nothing. If `claude` is not on the
+PATH (nor `~/.local/bin/claude`) or refuses, the run still succeeds — the
+token is minted and stored — and prints the add line for you to run
+(`config_state: "manual"` in `--json`). `connect --list` shows both halves
+(`mcp: <file> → mcpServers.metistry; capture: environment …`).
+
+**The harness registry.** Every tool is one entry in `HARNESSES`
+(`packages/cli/src/connect.ts`): how its config is written, read back for
+`--list` and taken away for `--remove`. `connect`, `--list` and `--remove` hold
+no per-tool branches for a config, so adding a harness is one entry, and the
+registry's conformance test (`connect.test.ts`, "the harness registry") holds
+every entry to the same rules: no file `connect` writes, and no argv it runs,
+contains a bearer's value; a second write changes nothing; `--list` reads the
+entry back; `--remove` takes away that entry and nothing else.
 
 ### `--remove`: the way back, and coming back (HS-7)
 
@@ -855,7 +883,11 @@ run twice (the second run says there is nothing left). In this order:
    else (a Keychain item deleted while its token still authenticates would
    leave a live bearer nobody holds); start the console and run it again. A
    tool that was never registered, or is already revoked, passes this step;
-2. **the config is put back** — for `cursor` and `opencode`. The first time
+2. **the config is put back** — for `cursor` and `opencode`. (`claude-code`'s
+   entry is taken out with `claude mcp remove --scope user`, and only if its
+   header is the one `connect` wrote; Claude Code's file is not copied or
+   restored, since it changes under you all day. Without `claude` on the PATH
+   that is a `PROBLEM` line with the command to run.) The first time
    `connect` writes a tool's config it copies the file as it was (bytes and
    mode) to `<file>.<key>.bak` beside it (`mcp.json.metistry.bak`; a namespaced
    instance's key keeps its own), and never replaces that copy. Removal takes
@@ -870,9 +902,9 @@ run twice (the second run says there is nothing left). In this order:
    `METISTRY_AGENT_TOKEN_<TOOL>` under this instance's account, and nothing
    else. A host with no Keychain never held one.
 
-`claude-code` has no file (the plugin reads its environment) and `devin` has
-neither file nor Keychain item, so for those the output says what to delete by
-hand: the `export` lines in your profile, or the server at Customize → MCPs.
+The `export` lines in your profile, and Devin's server at Customize → MCPs,
+are yours to delete — the output says so — and `devin` has neither file nor
+Keychain item.
 Steps 2 and 3 are independent: one failing is reported as a `PROBLEM` line and
 exits 1, the other still runs, and re-running finishes the job. `--remove`
 refuses `--rotate`, `--remote`, `--areas` and `--project` (exit 2), and

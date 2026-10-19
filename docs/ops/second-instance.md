@@ -134,7 +134,7 @@ node plugins/cursor/install.mjs           # the sessionEnd hook, for dev-session
 export METISTRY_CAPTURE_ON_STOP=1
 node packages/cli/dist/main.js connect opencode
 node plugins/opencode/install.mjs
-node packages/cli/dist/main.js connect claude-code   # mints the token, prints its export lines — does NOT install the plugin; which dev tool this instance settles on stays open (§4b)
+node packages/cli/dist/main.js connect claude-code   # registers /mcp with Claude Code (`claude mcp add --scope user`) and prints the plugin's export lines — does NOT install the plugin; which dev tool this instance settles on stays open (§4b)
 node packages/cli/dist/main.js connect devin         # prints name/url/Authorization to paste at Devin → Customize → MCPs
 node packages/cli/dist/main.js connect --list
 ```

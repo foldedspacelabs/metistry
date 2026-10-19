@@ -2149,7 +2149,7 @@ App Attest at registration if R-8 shows it works.
 | **W2** The day | Needs You, Today, Chat, Activity; Scheduled routes and the day's routines; connections P1; Linear; file history and rollback | 128.5 | week 5 |
 | **W3** Work and agents | Knowledge, Agents, Scheduled, Board, Projects, Artifacts, Run detail, the Settings window; connections P2; ICS and CalDAV; sessions; PR reviews; the recorder | 105 | week 6½ |
 | **W4** Reach | CI stability (X-24, X-29, X-31, X-32, X-41); connections P3, Google Calendar, IMAP, the remaining panes, the capture bar, the router wiring | 73 | week 7½ |
-| **W5** Acceptance | the owner's walkthrough, the doc sweep, the 1.0 decision | 1 | week 8 |
+| **W5** Acceptance | remote access's fixes, None and Tailscale; Add a Phone; the W4 follow-ups; doctor's grace, the complexity fixtures, the terminal readers; the owner's walkthrough, the doc sweep, the 1.0 decision | 69 | week 8 |
 
 **Waves are checkpoints, not start gates.** A ticket starts the moment its
 dependencies have merged; the wave says which release it lands in. The
@@ -2212,8 +2212,8 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W2 | T1-10, T1-13 · T2-3, T2-7, T2-8, T2-9, T2-10, T2-11, T2-14 · T3-3, T3-5 → T3-6, T3-7, T3-12 · T4-7, T4-8a → T4-8b, T4-24; T4-18 · T5-4a, T5-4b, T5-5, T5-6, T5-7 · T6-1a, T6-1b, T6-2, T6-3 · T7-3a, T7-3b, T7-7 · T9-2 · T10-4 → T10-5, T10-6 |
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
 | W4 | X-24, X-29, X-31, X-32, X-41 (CI stability, dispatched first — owner 2026-09-30) · T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
-| W5 | X-1 |
-| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-80…X-102 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30; X-80…X-102 added at W4 housekeeping) · X-75…X-79 — Add a Phone (§2.22), ruled 2026-09-28, not yet scheduled · X-103…X-120 — Remote access (§2.23, §2.24), ruled 2026-09-30, not yet scheduled |
+| W5 | tranche 1 — X-103, X-104, X-111, X-88, X-80, X-85, X-102, X-101, X-87, X-75, X-76, X-78 · tranche 2 — X-105, X-112, X-106, X-77, X-79, X-114, X-107 · the W4 follow-ups — X-82, X-86, X-90, X-91, X-92, X-93, X-94, X-95, X-96, X-97, X-98, X-99, X-100; X-83, X-84 · ruled 2026-10-04 — X-121, X-122, X-126, X-127 · X-1 (the owner's go, 2026-10-18; not in W5: the routing work — the composer keeps its eval gate, and nothing from the Routr review is scheduled — nor the Relay, Cloudflare Tunnel, zrok, ngrok and port-forwarding adapters) |
+| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-81, X-89 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 and W4 housekeeping; five CI-stability candidates went to W4 on 2026-09-30, the other W4 follow-ups to W5 on 2026-10-18) · X-108…X-110, X-113, X-115…X-120 — remote access (§2.23, §2.24), ruled 2026-09-30; the fixes, None, Tailscale and the guided flow went to W5 with Add a Phone · X-123…X-125, X-128…X-134 — ruled 2026-10-04: doctor's repair contract, the derived `.env`, the briefing, connection folds and `connect` |
 
 ### 3.3 The tickets
 
@@ -4283,13 +4283,13 @@ refused**.
 #### X — Follow-ups found in W4
 
 What the W4 builders and reviewers reported outside their tickets (PRs
-#460–#482; `docs/product/decisions-log.md`, *W4*). None is in a wave: §3.2's
-*Candidates* row holds them until the owner schedules them at a checkpoint. A
-ticket that waits on one of the owner's W4 questions names it by letter
-(Q-a…Q-i). Each is its own PR, outside any track's files. X-75…X-79 are the
-owner's, in #456.
+#460–#482; `docs/product/decisions-log.md`, *W4*). Most went to W5 on
+2026-10-18 (§3.2); the rest stay in §3.2's *Candidates* row until the owner
+schedules them at a checkpoint. A ticket that waits on one of the owner's W4
+questions names it by letter (Q-a…Q-i; ruled 2026-10-04). Each is its own PR,
+outside any track's files. X-75…X-79 are the owner's, in #456.
 
-**X-80 · `metistry up` mints the recorder's control token** · S · deps T8-5 —
+**X-80 · `metistry up` mints the recorder's control token** · S · W5 · deps T8-5 —
 *Spec:* an install that configures the recorder still mints
 `METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` by hand (`metistry secrets mint`), the
 one owner-hand step the 0.16.0 morning report could not remove. `up` mints it
@@ -4317,7 +4317,7 @@ the kept recordings with their retention state, and the Mac reads that.
 *Tests:* U2; **a hundred and one kept recordings list in one call**.
 *Accept:* F-7's fixture recorded, and the Mac store method in the same PR.
 
-**X-82 · The Mac's meeting group decodes `group_id`** · S · deps T8-7 —
+**X-82 · The Mac's meeting group decodes `group_id`** · S · W5 · deps T8-7 —
 *Spec:* T8-7 serves `group_id` on `GET /api/proposals`, but
 `apps/macos/sources/kit/request-bodies/meeting-group.swift` still groups a
 meeting's rows by what the list says; it decodes `group_id` and Needs You shows
@@ -4328,7 +4328,7 @@ a recording's rows as one card.
 card each**.
 *Accept:* —
 
-**X-83 · The activity feed's capture subject reads the title only** · S · deps T8-6 —
+**X-83 · The activity feed's capture subject reads the title only** · S · W5 · deps T8-6 —
 *Spec:* waits on the owner's W4 question Q-c. `seed/queries/activity_feed.yaml`'s
 capture branch derives `subject` from the note body's first line, so a
 transcript's first spoken line is servable through `queries_run` on any tier,
@@ -4342,7 +4342,7 @@ as the subject, and no line of the note reaches the feed**.
 
 *Ruling 2026-10-04 (Q-c):* the subject comes from the title alone; no tier gate.
 
-**X-84 · `POST /message` carries a session-turn marker** · M · deps T8-6, T6-15 —
+**X-84 · `POST /message` carries a session-turn marker** · M · W5 · deps T8-6, T6-15 —
 *Spec:* waits on the owner's W4 question Q-b. Screen 11 §4 ("staying on this
 Mac") wants an Ask-panel turn inside a capture session held to the private
 tier, but `POST /message` has no field that says the turn belongs to a
@@ -4360,7 +4360,7 @@ naming a session that is not open is refused**.
 
 *Ruling 2026-10-04 (Q-b):* add the field, as specified.
 
-**X-85 · The targets shim comes out** · S · deps T4-11 —
+**X-85 · The targets shim comes out** · S · W5 · deps T4-11 —
 *Spec:* T4-11 kept `METISTRY_GITHUB_TOKEN`, `METISTRY_DEVIN_API_KEY` and the
 `targets/` manifests loading for one release, only where no connection of the
 name exists (`apps/console/src/dispatch.ts`, `apps/console/src/main.ts`,
@@ -4373,7 +4373,7 @@ the env keys are ignored with a doctor row naming `connections add`, and a
 `local-crew` still loads**.
 *Accept:* the 0.17.0 release notes name the removal.
 
-**X-86 · The Mac's Secrets pane hides Grant for an owner-door secret** · S · deps X-41, T6-14 —
+**X-86 · The Mac's Secrets pane hides Grant for an owner-door secret** · S · W5 · deps X-41, T6-14 —
 *Spec:* X-41 makes the server refuse a connection or agent grant on an
 owner-door secret (`github_write`), but `secrets-view.swift` still draws the
 Grant row for it, so the owner is offered a control that can only fail. The
@@ -4384,7 +4384,7 @@ pane reads the secret's kind and shows the owner-door sentence instead.
 secret keeps its rows**.
 *Accept:* —
 
-**X-87 · The calendar collectors export `check()`** · S · deps T4-14 —
+**X-87 · The calendar collectors export `check()`** · M · W5 · deps T4-14 —
 *Spec:* CLAUDE.md says every collector exports `check()` so `metistry doctor`
 is generic; `collectors/google-calendar`, `ics-calendar`, `caldav-calendar`
 and `eventkit-calendar` export none (the Devin collectors do). Each reports
@@ -4399,7 +4399,7 @@ check**.
 
 *Coordinator call 2026-10-18:* widened to M — every collector (not only the four calendar ones) gains a cheap, local-first `check()`; doctor's `walkManifests` calls it and merges the result into the existing per-collector row; one strict CI check with no allowlist. Reason: CLAUDE.md's convention was never wired, and doctor cannot repair what it cannot check.
 
-**X-88 · The workspace test script isolates each package's database** · M —
+**X-88 · The workspace test script isolates each package's database** · M · W5 —
 *Spec:* the root `pnpm test` runs `pnpm -r --workspace-concurrency=1 run test`
 against one scratch database; a `--no-file-parallelism` passed to it never
 reaches vitest, so every package's DB-backed suites share rows — the root
@@ -4428,7 +4428,7 @@ once.
 not the second; a row stamped before the restart does not push again**.
 *Accept:* U4's rollback note.
 
-**X-90 · The hot-key and accessibility audits see what they miss** · S · deps T6-16 —
+**X-90 · The hot-key and accessibility audits see what they miss** · S · W5 · deps T6-16 —
 *Spec:* T6-16's hot-key audit (`apps/macos/tests/kit/hotkeys-tests.swift`,
 `bindingCalls`) matches the SwiftUI binding calls and misses a raw
 `keyDown(with:)` override, so an AppKit view can bind a key the audit never
@@ -4442,7 +4442,7 @@ fixture of each shape fails them.
 audited**.
 *Accept:* —
 
-**X-91 · The three-pointers test tolerates the device-local keys** · S · deps T6-16, T6-15 —
+**X-91 · The three-pointers test tolerates the device-local keys** · S · W5 · deps T6-16, T6-15 —
 *Spec:* waits on the owner's W4 question Q-f. `theAppPersistsThreePointersAndNothingElse`
 (`settings-model-tests.swift`) enumerates the exact `UserDefaults` keys, so
 T6-16's `anyAppShortcuts` and T6-15's `captureBar` had to be listed by hand;
@@ -4456,7 +4456,7 @@ enumeration rather than to a literal list.
 
 *Ruling 2026-10-04 (Q-f):* `UserDefaults` is the store; build as specified.
 
-**X-92 · Dispatch's `REPO_RE` has a misuse test** · S · deps T4-11 —
+**X-92 · Dispatch's `REPO_RE` has a misuse test** · S · W5 · deps T4-11 —
 *Spec:* `apps/console/src/dispatch.ts`'s `REPO_RE` refuses `../x` and `x/..`
 for a connection's `config.repo`, but no test holds it, so a loosened pattern
 would pass CI. The misuse test names each shape it refuses (`../x`, `x/..`,
@@ -4465,7 +4465,7 @@ would pass CI. The misuse test names each shape it refuses (`../x`, `x/..`,
 *Tests:* as spec, **bold: `../x` is refused**.
 *Accept:* —
 
-**X-93 · `socketDestination` keeps IMAP's port** · S · deps T4-15 —
+**X-93 · `socketDestination` keeps IMAP's port** · S · W5 · deps T4-15 —
 *Spec:* `packages/core/src/egress.ts`'s `socketDestination` collapses port 443
 to the bare host, an HTTPS convention; `packages/connections/src/describe.ts`
 calls it for an IMAP host too, so an IMAP server on 443 would be described as
@@ -4476,7 +4476,7 @@ to HTTPS only; a socket destination always carries its port.
 collapses**.
 *Accept:* —
 
-**X-94 · The wizard's copy templates the configured name** · S · deps T6-12 —
+**X-94 · The wizard's copy templates the configured name** · S · W5 · deps T6-12 —
 *Spec:* `apps/macos/sources/kit/wizard-step-views.swift` and
 `wizard-model.swift` say "the assistant" in copy the owner reads, where the
 rest of the app says the configured name (`identity.yaml`). The wizard reads
@@ -4486,7 +4486,7 @@ the name once it is known and uses the generic word only before it is.
 *Tests:* **with a name configured, no wizard string contains "the assistant"**.
 *Accept:* —
 
-**X-95 · The Mac's loopback set matches core's** · S · deps T6-13a —
+**X-95 · The Mac's loopback set matches core's** · S · W5 · deps T6-13a —
 *Spec:* `apps/macos/sources/kit/connections-model.swift:314` hand-lists the
 loopback hosts (`localhost`, `127.0.0.1`, `::1`, `[::1]`, …) that core's
 `isLoopbackHost` (`packages/core/src/egress.ts`) decides; the two can drift.
@@ -4497,7 +4497,7 @@ The Swift set is held to core's by a test that reads core's cases, as the
 *Tests:* **every host core calls loopback the Mac calls loopback, and no other**.
 *Accept:* —
 
-**X-96 · A connection's detail says who uses it and when it was checked** · S · deps T6-13a —
+**X-96 · A connection's detail says who uses it and when it was checked** · S · W5 · deps T6-13a —
 *Spec:* `GET /api/connections`' `used_by` (`packages/connections/src/describe.ts`,
 `usersOf`) lists syncs only, so an agent or routine granted the connection is
 not shown; `last checked` is not served; and a connection with a header per
@@ -4509,7 +4509,7 @@ verdict, and each header's secret name.
 `last_checked`; two headers list two secret names**.
 *Accept:* F-7's fixture re-recorded, and the Mac reads the new fields.
 
-**X-97 · Variables: when it was set, the preview an agent sees, and a key's expiry** · S · deps T6-14 —
+**X-97 · Variables: when it was set, the preview an agent sees, and a key's expiry** · S · W5 · deps T6-14 —
 *Spec:* T6-14's leftovers. The Variables pane shows no *set* time; there is no
 preview of a value as an agent sees it after templating; and a provider key's
 expiry, where the provider says one, is not surfaced in Secrets. Each is a
@@ -4521,7 +4521,7 @@ served field or a read of one — no new route.
 a key with an expiry shows it**.
 *Accept:* —
 
-**X-98 · Agents and Compute: the model line, the key note and the download** · S · deps T6-12, T6-5 —
+**X-98 · Agents and Compute: the model line, the key note and the download** · S · W5 · deps T6-12, T6-5 —
 *Spec:* three small gaps. `agents-model.swift`'s dropdown labels a model
 `model — provider` while Compute writes `provider/model` everywhere else
 (T6-12's one-way rule); the wizard's `keyNote` (`compute-step.swift`) still
@@ -4534,7 +4534,7 @@ no cancel while a model downloads.
 its size and can be cancelled**.
 *Accept:* —
 
-**X-99 · The phone's writable rows have controls** · S · deps T7-6 —
+**X-99 · The phone's writable rows have controls** · S · W5 · deps T7-6 —
 *Spec:* T7-6 leaves rows the phone may change without a control: the
 assistant's model and effort, and Scheduled's pause. Each goes through the
 console route the Mac already uses; nothing that widens the boundary is
@@ -4544,7 +4544,7 @@ offered (§2.3).
 existing routes; no Secrets or provider control is drawn**.
 *Accept:* —
 
-**X-100 · The "held to core" Swift tests cannot drift** · S · deps T6-14, T6-5 —
+**X-100 · The "held to core" Swift tests cannot drift** · S · W5 · deps T6-14, T6-5 —
 *Spec:* `autonomyWideningsSaysWhatCoreSays` (`agents-view-tests.swift`) and
 `theKeyShapeCheckIsCoresPatternForPattern` (`secrets-variables-tests.swift`)
 hold Swift to core by hand-copied cases, so a change in core passes until
@@ -4555,7 +4555,7 @@ the Swift tests read, or pinned by a CI check that diffs the two.
 *Tests:* **a changed core case fails CI before the Swift copy is updated**.
 *Accept:* —
 
-**X-101 · Bare `metistry doctor` resolves the product directory it runs from** · S —
+**X-101 · Bare `metistry doctor` resolves the product directory it runs from** · S · W5 —
 *Spec:* `resolveProductDir` (`packages/cli/src/env.ts`) falls back to the
 checkout above the package, so a bare `metistry doctor` from an installed CLI
 beside a development checkout reads that checkout's manifests, not the
@@ -4567,7 +4567,7 @@ the release the instance runs and says which it read.
 checkout's**.
 *Accept:* —
 
-**X-102 · The recorder leaves no fixed-id rows behind** · S · deps X-31 —
+**X-102 · The recorder leaves no fixed-id rows behind** · S · W5 · deps X-31 —
 *Spec:* `apps/console/scripts/record-client-fixtures.mjs` inserts rows with
 fixed ids (`work` 41 and 42, `external_ref` `linear:ENG-42`), so a second run
 on the same scratch database — `--check` after a record — collides on them.
@@ -4582,11 +4582,11 @@ before it seeds.
 The metistry.ai Download page promises Settings ▸ Devices ▸ Add a Phone, a QR code,
 and a passkey the owner can remove; the owner ruled to build it rather than cut it
 from the site. **Every ticket here builds §2.22** — read it whole; it holds the
-refusal wording, the sheet's states and the acceptance. None is in a wave: §3.2's
-*Candidates* row holds them until the owner schedules them. Reaching the Mac from
+refusal wording, the sheet's states and the acceptance. All five are in W5
+(§3.2, 2026-10-18). Reaching the Mac from
 outside the home is **not** here: it is §2.23–§2.24 and X-103…X-120, below.
 
-**X-75 · `metistry enroll` — an enrolment code minted on this Mac** · M —
+**X-75 · `metistry enroll` — an enrolment code minted on this Mac** · M · W5 —
 *Spec:* §2.22 *Minting* and *When `METISTRY_ORIGIN` is not reachable*: the M19
 verb in `packages/cli`, calling `auth-store`'s `mintEnrollmentCode` exactly as
 `apps/console/scripts/enroll.mjs` does; `--json` (`{url, code_id, origin,
@@ -4603,7 +4603,7 @@ a code**; `--json` writes exactly one document.
 *Accept:* `metistry enroll` on the owner's second instance prints a URL that enrols
 a real iPhone.
 
-**X-76 · Removing a device revokes its passkey** · M —
+**X-76 · Removing a device revokes its passkey** · M · W5 —
 *Spec:* §2.22 *Devices*: migration `0038` (`passkeys.revoked_at`, §2.9);
 `getPasskey` refuses a revoked passkey with the uniform 401; `POST
 /api/devices/:id/revoke` revokes the session's passkey and every session under it,
@@ -4617,7 +4617,7 @@ subscription is gone; a revoked passkey's login is indistinguishable from an
 unknown one's; Sign Out Everywhere leaves passkeys valid**.
 *Accept:* F-7's devices fixture re-recorded.
 
-**X-77 · Settings ▸ Devices and the Add a Phone sheet** · L · deps X-75, X-76 —
+**X-77 · Settings ▸ Devices and the Add a Phone sheet** · L · W5 · deps X-75, X-76 —
 *Spec:* §2.22 *Entry point*, *The QR code* and *The sheet*: a **Devices** pane in
 ACCESS (the list, Remove with its confirm, Sign Out Everywhere moved from Account);
 **Add a Phone…** opens the sheet — Checking, Refused, Ready, Expired, Added — driving
@@ -4636,7 +4636,7 @@ countdown reaches Expired on an injected clock.
 *Accept:* U9 — VoiceOver reads the QR's label and the URL; the pane at the
 largest text size.
 
-**X-78 · The phone's half: enrol, install, sign in** · M —
+**X-78 · The phone's half: enrol, install, sign in** · M · W5 —
 *Spec:* §2.22 *The phone, in order*: the PWA removes `#enroll=` from the URL once
 read; after a successful enrolment in a browser that is not standalone, the wall
 hands on to T7-5's install sheet, whose last line says notifications are asked the
@@ -4648,7 +4648,7 @@ existing passkey. No new wording beyond the install sheet's line; refusals keep
 a standalone launch shows sign-in, never the enrolment wall.
 *Accept:* on a real iPhone: scan, Face ID, Add to Home Screen, open, Face ID.
 
-**X-79 · The phone guide, and the website's copy re-checked** · S · deps X-75, X-76, X-77, X-78 —
+**X-79 · The phone guide, and the website's copy re-checked** · S · W5 · deps X-75, X-76, X-77, X-78 —
 *Spec:* write `docs/ops/phone.md` — the owner's guide to Add a Phone, each Mac
 refusal and its fix, removal, and a pointer to
 `docs/ops/remote-access.md` (X-105) for reaching the Mac from
@@ -4670,11 +4670,12 @@ install provider tools; and one opt-in, capped FSL relay on AWS follows Funnel.
 — read it whole; it holds the guided flow's wording, the doctor rows, the
 refusals and the acceptance per provider. X-103 and X-104 are bugs whatever the
 owner picks and **block every provider**; X-111 blocks every internet-facing one,
-Funnel included. None is in a wave: §3.2's *Candidates* row holds them until the
-owner schedules them. §2.23's recommended order is X-103, X-104, X-111 → X-105,
-X-112, X-106, X-107, X-114 → X-115, X-116, X-117, X-119 (with X-118, X-120) → X-108 → X-113 → X-109 → X-110.
+Funnel included. The fixes, None, Tailscale and the guided flow (X-103…X-107,
+X-111, X-112, X-114) are in W5 (§3.2, 2026-10-18); the rest stay in §3.2's
+*Candidates* row until the owner schedules them. §2.23's recommended order is
+X-103, X-104, X-111 → X-105, X-112, X-106, X-107, X-114 → X-115, X-116, X-117, X-119 (with X-118, X-120) → X-108 → X-113 → X-109 → X-110.
 
-**X-103 · The console's proxy listener — the local owner token never crosses a tunnel** · M —
+**X-103 · The console's proxy listener — the local owner token never crosses a tunnel** · M · W5 —
 *Spec:* §2.23 *Two fixes*, 1: a second console listener for proxies only — a
 Unix socket at `.metistry/state/console-proxy.sock` (0600) and a loopback TCP
 port `METISTRY_CONSOLE_PROXY_PORT` (default the console port + 1). A request on
@@ -4694,7 +4695,7 @@ main listener's local door still works.
 *Accept:* `tailscale serve` pointed at the proxy port on the owner's second
 instance: the Mac's owner token sent from a tailnet device is refused.
 
-**X-104 · Passkeys per origin — the rpID follows the request** · M —
+**X-104 · Passkeys per origin — the rpID follows the request** · M · W5 —
 *Spec:* §2.23 *Two fixes*, 2: `rpFromOrigin` stops taking the rpID from the
 first `METISTRY_ORIGIN` entry; registration and authentication options use the
 host of the configured origin the request came from (an unconfigured origin is
@@ -4711,7 +4712,7 @@ refused at the first; an origin outside the list is refused; an existing
 passkey with a null `rp_id` still signs in at the first origin**.
 *Accept:* U4's rollback note; F-7's devices fixture re-recorded.
 
-**X-105 · `metistry remote` — the record, the adapter interface, and None** · M · deps X-103, X-104 —
+**X-105 · `metistry remote` — the record, the adapter interface, and None** · M · W5 · deps X-103, X-104 —
 *Spec:* §2.23 *Where the choice lives*, *How the origin flows*, *The provider
 adapter*, *CLI parity* and *Doctor rows*: the M20 verbs (`remote [status]`,
 `set`, `authorize`, `test`, `off`) over the six providers with `--json`, `--dry-run`, `--instance`;
@@ -4734,7 +4735,7 @@ one is revoked only after the new origin answers).
 *Accept:* a fresh install's `metistry remote --json` says `none` and doctor's
 row is `ok`.
 
-**X-106 · The Tailscale adapter — Funnel by default, tailnet as the alternative** · L · deps X-105, X-111, X-112 —
+**X-106 · The Tailscale adapter — Funnel by default, tailnet as the alternative** · L · W5 · deps X-105, X-111, X-112 —
 *Spec:* §2.23 *Tailscale*: two modes, `funnel` (the default) and `tailnet`. The
 node is the bundled userspace `tailscaled` from X-112 — `--tun=userspace-networking`,
 state and socket under `.metistry/state/tailscale/` (0700), hostname
@@ -4756,7 +4757,7 @@ directory is 0700**; the fixtures pin the JSON fields read.
 Tailscale app** reaches *Opened on your phone* through Funnel; tailnet mode with
 the app does the same.
 
-**X-107 · Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access** · L · deps X-105, X-106, X-112, X-77 —
+**X-107 · Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access** · L · W5 · deps X-105, X-106, X-112, X-77 —
 *Spec:* §2.23 *Set Up Remote Access* and *Settings ▸ Remote Access*: the
 **Remote Access** wizard step between *Services* and *Door* (`FirstRunStep`) and
 the pane in ACCESS before Devices run one flow — choose (None preselected,
@@ -4780,7 +4781,7 @@ revoke undoes**; each step's failure shows its doctor sentence.
 *Accept:* U9; on a fresh install with no Tailscale anywhere, the wizard's flow
 ends with Add a Phone ready, through Funnel.
 
-**X-111 · A console on the internet — rate limits and headers on the proxy listener** · M · deps X-103 —
+**X-111 · A console on the internet — rate limits and headers on the proxy listener** · M · W5 · deps X-103 —
 *Spec:* §2.23 *A console on the internet*: per-client rate limits on every
 unauthenticated route, keyed on the provider's client-address header read
 **only** on the proxy listener and only for limiting; a global ceiling; HSTS
@@ -4842,7 +4843,7 @@ origin's port; revoke sends lifetime 0; the outside-reachability row is never
 *Accept:* §2.23's port-forwarding acceptance on a NAT-PMP or UPnP router and one
 CGNAT line.
 
-**X-112 · Provider tool packs — pinned, signed, fetched on choice** · M · deps X-105 —
+**X-112 · Provider tool packs — pinned, signed, fetched on choice** · M · W5 · deps X-105 —
 *Spec:* §2.23 *How each is set up*: `ops/release/build-runtime-deps.sh` (or a
 sibling) builds one pack per tool — `tailscaled` + `tailscale` from a pinned
 upstream tag (BSD-3), the official `cloudflared` release binary, and the zrok
@@ -4879,7 +4880,7 @@ is refused; an upstream other than the proxy listener fails doctor; revoke
 leaves no environment**.
 *Accept:* §2.23's zrok acceptance with a free zrok.io account, after R-5.
 
-**X-114 · Add a Phone sees the phone arrive — *Opened on your phone*** · S · deps X-75, X-77, X-103 —
+**X-114 · Add a Phone sees the phone arrive — *Opened on your phone*** · S · W5 · deps X-75, X-77, X-103 —
 *Spec:* §2.23 *Set Up Remote Access*, step 7: migration `0040`
 (`auth_enrollment_codes.opened_at timestamptz`, `opened_via text`) — `POST
 /auth/enroll/start` with a live code stamps them, `opened_via` naming the
@@ -5276,7 +5277,7 @@ the designer.
 | W2 | answers the *Tidy Me/profile.md* proposal; re-grants Calendar if the eventkit helper's signature changed; creates a **Linear personal API key** and stores it (`metistry secrets set linear_api_key`) on the second instance |
 | W3 | mints a fine-grained GitHub PAT with pull-request write and stores it as `github_write`; creates an **iCloud or Fastmail app password** for CalDAV; reviews the session-fold prompt |
 | W4 | grants Screen Recording, Microphone and Audio Capture on each Mac; records one real meeting; creates a **Gmail app password** (2-Step Verification on) for IMAP; connects Google Calendar through the shipped client |
-| W5 | the acceptance walkthrough; decides 1.0 |
+| W5 | provides an OpenRouter key at run time and spot-checks X-121's generated fixtures, then runs the eval and accepts or holds T9-4 (Q-g); confirms the self-managing-instance design note (M7 reversed, doctor repairs); the acceptance walkthrough; decides 1.0 |
 | when the first confidential-only provider is scheduled (after this program) | deploys the token broker to `auth.metistry.app` and publishes its build hash (§2.6, §5) |
 
 ### 3.5 Effort

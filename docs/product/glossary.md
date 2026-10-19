@@ -1,11 +1,12 @@
 # Glossary
 
-The one page to read before using Metistry. Eight nouns, one set of verbs.
+The one page to read before using Metistry. One list of nouns, one set of verbs.
 Everything on every screen, in every notification, and in every brief is named
 from this list — so a word means the same thing in the morning brief, in the
 tool an agent calls, and on the button you tap.
 
-Ratified 2026-09-09; updated 2026-09-23 for the design rulings C88–C98.
+Ratified 2026-09-09; updated 2026-09-23 for the design rulings C88–C98, and
+swept 2026-10-19 against what shipped.
 `metistry-build-plan.md` §0 carries the same table with the old→new map;
 `design/design-system-amendments.md` §8 governs the casing.
 
@@ -13,12 +14,12 @@ Ratified 2026-09-09; updated 2026-09-23 for the design rulings C88–C98.
 
 ## The nouns
 
-**Metis** — the assistant: this instance's own, the one that holds your reach
-and delegates to agents. **Metis** is the default name; you can rename it, and
-every screen uses the name you chose. It is not an agent and is not listed on
-Agents.
+**The assistant** — this instance's own, the one that holds your reach and
+delegates to agents. It has a name you choose (`identity.yaml` is the one place
+it is written), and every screen uses that name. It is not an agent and is not
+listed on Agents.
 
-**Knowledge** — everything Metis keeps for you, in plain Markdown in
+**Knowledge** — everything the assistant keeps for you, in plain Markdown in
 git. One file is a **page**. Areas are **folders**. You can open all of it in
 Obsidian, or any text editor, forever; nothing is locked in a database.
 
@@ -28,7 +29,7 @@ an agent's `capture` call: all the same door, all under five seconds.
 
 **Request** — anything that needs *you*. **Needs You** appears at the top of the
 sidebar while something is waiting (the bell, on a phone), and
-lists requests — everything that needs you, whether Metis, an agent, or a
+lists requests — everything that needs you, whether the assistant, an agent, or a
 source Metistry reads (GitHub, Calendar, Mail, Linear) is asking. A request
 from a source clears itself when you answer at the source. A request has one of
 twelve types:
@@ -43,13 +44,15 @@ twelve types:
 | **meeting** | settle a recorded meeting's notes and to-dos |
 | **invitation** | accept, tentatively accept or decline a calendar invitation |
 | **task** | take on a task a tracker assigned to you |
-| **message** | reply to a message Metis thinks is waiting on you — drafted, never sent |
+| **message** | reply to a message the assistant thinks is waiting on you — drafted, never sent |
 | **access** | grant an agent more than it has — including when the agent asked for a named folder itself |
 | **improvement** | change how the system itself behaves |
 | **action** | do one thing on your behalf — dispatch a brief, move a card, comment, capture |
 
-Every request takes the same three answers, in this order
-(`docs/ops/reply-feedback.md`):
+Every request takes the same three answers, in this order, each in its own
+type's words and only the ones that make sense for it — a report is
+*Acknowledged* or *Dismissed* and never approved, a question is *answered*
+(`docs/ops/reply-feedback.md` has the table):
 
 - **Approve** — yes, do it / keep it. Where the request suggests work, Approve
   also puts it on the board (`accept_as_work`) — one button, not a second
@@ -83,11 +86,11 @@ is either:
   back. This is the kill switch, and it takes one tap. A project that reaches
   its budget is put in Review for you, and says so.
 
-**Agent** — a worker with a job and a scope, which Metis delegates to. Its
+**Agent** — a worker with a job and a scope, which the assistant delegates to. Its
 role shows as a chip:
 
-- **helper** — one you defined, with its own model, tools and read scope. Metis
-  hands it briefs.
+- **helper** — one you defined, with its own model, tools and read scope. The
+  assistant hands it briefs.
 - **external** — someone else's agent, working with your instance through a
   token you minted and can revoke.
 
@@ -98,7 +101,7 @@ knowledge, reading is by **Titles** (page titles and one-line descriptions) or
 
 **Planned** — the day you mean to work on a task (typed `do friday`), as distinct from **Due**, the day it is owed.
 
-**Routine** — work Metis runs for you on a schedule: an agent, a task and a
+**Routine** — work the assistant runs for you on a schedule: an agent, a task and a
 time. The **Morning Brief** is one, **Standup** another; the nightly **fold**,
 which reads the day and writes what it learned into knowledge, is a third. The
 ones Metistry ships with are tagged **default** and can be changed or reset.

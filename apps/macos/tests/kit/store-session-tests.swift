@@ -62,8 +62,15 @@ import Testing
     #expect(!ConsoleError.transport("connect ECONNREFUSED").wasHeldForReachability)
 }
 
+// The time limits below are two minutes for the reason live-events-tests.swift
+// gives at length: each test is milliseconds alone, but every return to the
+// main actor queues behind the ~480 other main-actor tests `swift test`
+// dispatches at the same moment, and on CI's runner these reached 40–46 s in
+// a passing 65 s run. The limit exists to fail a held answer that is never
+// released, not to time the test.
+
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func anOlderRequestsLateAnswerNeverOverridesANewerOne() async throws {
     let board = Switchboard()
     let session = ConsoleSession(transport: board, management: nil)
@@ -102,7 +109,7 @@ func anOlderRequestsLateAnswerNeverOverridesANewerOne() async throws {
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func everyStoreAndTheEventStreamShareOneSessionChild() async throws {
     let spawner = EchoSpawner()
     let session = ConsoleSession(cli: sessionCLI(RecordingRunner()), spawner: spawner)
@@ -141,7 +148,7 @@ func everyStoreAndTheEventStreamShareOneSessionChild() async throws {
 // MARK: - Switching instance
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func adoptingAnotherInstanceDropsEverySectionAndTheAnswerStillInFlight() async throws {
     let first = Switchboard()
     await first.answer("GET /api/needs-you/count", .success(Data(#"{"waiting":3,"oldest_ts":"2026-09-26T08:00:00Z"}"#.utf8)))
@@ -184,7 +191,7 @@ func adoptingAnotherInstanceDropsEverySectionAndTheAnswerStillInFlight() async t
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func adoptingEndsTheOldChildAndTheNextRequestStartsOneForTheNewInstance() async throws {
     let spawner = EchoSpawner()
     let session = ConsoleSession(cli: sessionCLI(RecordingRunner()), spawner: spawner)

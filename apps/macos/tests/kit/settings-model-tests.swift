@@ -5,8 +5,9 @@
 // CLI-owned file, never app-private state" is a rule that decays silently — one
 // `defaults.set` in a view and the app has its own copy of something. So the
 // test asserts a whole defaults domain rather than a list of properties: drive
-// the models through a fresh suite, then check what reached disk. If a fourth
-// key appears, this fails and somebody has to say why.
+// the models through a fresh suite, then check what reached disk. If a key
+// appears that `AppPreference` lists as neither a pointer nor device-local,
+// this fails and somebody has to say why.
 //
 // A running app's real domain also holds keys its FRAMEWORKS wrote —
 // Sparkle's `SUEnableAutomaticChecks`/`SULastCheckTime`, AppKit's window
@@ -38,12 +39,36 @@ private func suite(_ name: String) -> (UserDefaults, () -> Void) {
     model.firstRun.assistantName = "Ada"
     model.wizard.present()
 
+    // The pointers this run exercised are all there, and nothing outside the
+    // two enumerated sets (pointers, device-local) is. The test holds the store
+    // to `AppPreference`'s sets, not to a literal list, so a new device-local
+    // key is one line there rather than an edit here.
     let domain = UserDefaults.standard.persistentDomain(forName: id) ?? [:]
-    #expect(Set(domain.keys) == Set([
+    #expect(Set(domain.keys).subtracting(AppPreference.deviceLocal.map(\.rawValue)) == Set([
         AppPreference.activeInstance.rawValue,
         AppPreference.recentInstances.rawValue,
         AppPreference.developerProductDirectory.rawValue,
     ]))
+    #expect(AppPreference.unlisted(in: domain.keys).isEmpty, "\(domain.keys)")
+}
+
+@Test func everyPreferenceIsExactlyOnePointerOrOneDeviceLocalKey() {
+    for key in AppPreference.allCases {
+        let kinds = [AppPreference.pointers, AppPreference.deviceLocal].filter { $0.contains(key) }
+        #expect(kinds.count == 1, "\(key) must be in exactly one of pointers and deviceLocal")
+    }
+}
+
+@Test func aDeviceLocalKeyPassesAndAKeyOutsideBothSetsFails() {
+    // Device-local keys, and a pinned list for one instance, are listed.
+    let listed = AppPreference.deviceLocal.map(\.rawValue) + ["pinnedItems.i-1"]
+    #expect(AppPreference.unlisted(in: listed).isEmpty)
+    #expect(AppPreference.unlisted(in: AppPreference.pointers.filter { $0 != .pinnedItemsPrefix }.map(\.rawValue)).isEmpty)
+
+    // A key in neither set fails — including the bare prefix and a near miss.
+    #expect(AppPreference.unlisted(in: ["somethingNew"]) == ["somethingNew"])
+    #expect(AppPreference.unlisted(in: ["pinnedItems", "pinnedItemsX"]) == ["pinnedItems", "pinnedItemsX"])
+    #expect(AppPreference.unlisted(in: ["captureBar", "extra"]) == ["extra"])
 }
 
 @MainActor

@@ -2213,7 +2213,7 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
 | W4 | X-24, X-29, X-31, X-32, X-41 (CI stability, dispatched first — owner 2026-09-30) · T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | tranche 1 — X-103, X-104, X-111, X-88, X-80, X-85, X-102, X-101, X-87, X-75, X-76, X-78 · tranche 2 — X-105, X-112, X-106, X-77, X-79, X-114, X-107 · the W4 follow-ups — X-82, X-86, X-90, X-91, X-92, X-93, X-94, X-95, X-96, X-97, X-98, X-99, X-100; X-83, X-84 · ruled 2026-10-04 — X-121, X-122, X-126, X-127 · X-1 (the owner's go, 2026-10-18; not in W5: the routing work — the composer keeps its eval gate, and nothing from the Routr review is scheduled — nor the Relay, Cloudflare Tunnel, zrok, ngrok and port-forwarding adapters) |
-| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-81, X-89 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 and W4 housekeeping; five CI-stability candidates went to W4 on 2026-09-30, the other W4 follow-ups to W5 on 2026-10-18) · X-108…X-110, X-113, X-115…X-120 — remote access (§2.23, §2.24), ruled 2026-09-30; the fixes, None, Tailscale and the guided flow went to W5 with Add a Phone · X-123…X-125, X-128…X-134 — ruled 2026-10-04: doctor's repair contract, the derived `.env`, the briefing, connection folds and `connect` · X-135…X-161 — follow-ups found in W5 (2026-10-19): the Mac suite on macOS 27 and under load, a fresh install's migrations, the shared-database suites, the briefing's edges, doctor's unbuilt rules, and the stamps |
+| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-81, X-89 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 and W4 housekeeping; five CI-stability candidates went to W4 on 2026-09-30, the other W4 follow-ups to W5 on 2026-10-18) · X-108…X-110, X-113, X-115…X-120 — remote access (§2.23, §2.24), ruled 2026-09-30; the fixes, None, Tailscale and the guided flow went to W5 with Add a Phone · X-123…X-125, X-128…X-134 — ruled 2026-10-04: doctor's repair contract, the derived `.env`, the briefing, connection folds and `connect` · X-135…X-162 — follow-ups found in W5 (2026-10-19): the Mac suite on macOS 27 and under load, a fresh install's migrations and a namespaced instance's ports, the shared-database suites, the briefing's edges, doctor's unbuilt rules, and the stamps |
 
 ### 3.3 The tickets
 
@@ -5304,12 +5304,15 @@ test enforces it); the five named tests pass ten runs in a row with a second
 `swift test` running beside them**.
 *Accept:* —
 
-**X-137 · A fresh install's `up` applies the pending migrations** · S · deps X-123 —
+**X-137 · A fresh install's `up` applies the pending migrations** · M · deps X-123 —
 *Spec:* `metistry up` (`packages/cli/src/up.ts`) never runs the migration
-runner: a fresh launchd install's console starts against an empty schema and
-crash-loops until the owner's first `update` — or, since X-123, a `doctor` that
-offers the `migrate` repair. The release's own first step should not need a
-repair. Once the database answers (the bundled Postgres on the launchd shape;
+runner: on a fresh launchd install (the W5 checkpoint's scratch instance on
+`main` at `a715ddc9`, section 4) `up` **exits 1** — the console starts against
+an empty schema and crash-loops until the owner's first `update` — or, since
+X-123, a `doctor` that offers the `migrate` repair. The release's own first
+step must not need a repair: either `up` migrates itself, or it runs doctor's
+fixable set once the database answers (the same closed table, no new code
+path), and in both cases it exits 0 on a fresh instance. Once the database answers (the bundled Postgres on the launchd shape;
 compose's container), `up` applies `db/migrations/*.sql` not yet in
 `schema_migrations` through `runMigrations` under the same advisory lock
 `update` and doctor's fixer take, before the console is started, and says what
@@ -5660,6 +5663,27 @@ pins.
 *Files:* `apps/watchdog/test/watchdog.integration.test.ts`,
 `apps/watchdog/src/probes.ts` only if the race is there.
 *Tests:* **the test passes 50 runs in a row**.
+*Accept:* —
+
+**X-162 · A namespaced instance's doctor names only its own ports** · S —
+*Spec:* doctor on a namespaced scratch instance (its own ports, `metistry up
+--namespace`; the W5 checkpoint on `main` at `a715ddc9`, section 4) names the
+default install's live URLs in its rows — `127.0.0.1:1234`, `:11434`,
+`:7810`, `:7811`, `:7813`, `:7815` — so a second instance's owner reads
+another instance's bridges and model servers as their own. Doctor does apply
+the namespace (`applyPorts`, `packages/cli/src/doctor.ts`), but only into
+variables nothing has set, and the bridge and local-model derivations do not
+all read it: a `.env` `init` wrote before the namespace existed (X-138) carries
+the defaults, and the local-model discovery scan of X-123 is skipped only when
+`compute.yaml` names an on-machine provider, which a fresh instance does not.
+Prove which path names each port first; then every probe URL and every
+remediation on a namespaced instance derives from the namespace, and the
+default-port discovery scan runs only on an instance that has no namespace.
+*Files:* `packages/cli/src/doctor.ts`, `packages/cli/src/local-models.ts`,
+`packages/cli/src/namespace.ts`, `docs/ops/deployment-shapes.md`.
+*Tests:* **a namespaced instance's doctor never names another instance's
+ports — no row, URL or remediation carries a port outside its block; an
+un-namespaced instance's rows are unchanged**.
 *Accept:* —
 
 #### W5 — Acceptance

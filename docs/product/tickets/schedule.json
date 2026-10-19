@@ -4053,9 +4053,9 @@
       "title": "A fresh install's `up` applies the pending migrations",
       "track": "X",
       "wave": "candidate",
-      "size": "S",
-      "days": 1,
-      "model": "sonnet",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
       "effort": "default",
       "deps": [
         "X-123"
@@ -4386,6 +4386,18 @@
       "file": "docs/product/tickets/x/x-161.md",
       "status": "todo"
     },
+    "X-162": {
+      "title": "A namespaced instance's doctor names only its own ports",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-162.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -4403,7 +4415,7 @@
     "tickets": 205,
     "agent_days": 555.5,
     "waves": 6,
-    "candidates": 95
+    "candidates": 96
   },
   "critical_path": {
     "days": 37.5,
@@ -4515,9 +4527,10 @@
       "X-158",
       "X-159",
       "X-160",
-      "X-161"
+      "X-161",
+      "X-162"
     ],
-    "count": 95,
-    "agent_days": 155
+    "count": 96,
+    "agent_days": 157.5
   }
 }

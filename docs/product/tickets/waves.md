@@ -239,7 +239,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W4 candidates — 95 tickets, 155 agent-days, no wave yet
+## W4 candidates — 96 tickets, 157.5 agent-days, no wave yet
 
 Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
 
@@ -313,7 +313,7 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-134](x/x-134.md) · `connect --remove`, and a reconnect after a revoke · M · opus · after X-133 · **blocked**
 - [ ] [X-135](x/x-135.md) · The Mac's accessibility text probes read macOS 27 · S · sonnet
 - [ ] [X-136](x/x-136.md) · The Mac tests wait on state, never on a count · M · opus · after X-28
-- [ ] [X-137](x/x-137.md) · A fresh install's `up` applies the pending migrations · S · sonnet · after X-123
+- [ ] [X-137](x/x-137.md) · A fresh install's `up` applies the pending migrations · M · opus · after X-123
 - [ ] [X-138](x/x-138.md) · `init --shape launchd` prints a second instance's own ports · S · sonnet
 - [ ] [X-139](x/x-139.md) · The fixture recorder's fixed work ids advance the sequence · S · sonnet
 - [ ] [X-140](x/x-140.md) · Two DB-backed suites leave their siblings' rows alone · S · sonnet · after X-25
@@ -338,3 +338,4 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-159](x/x-159.md) · The Add a Phone sheet cancels its code when its window closes · S · sonnet · after X-77
 - [ ] [X-160](x/x-160.md) · The recorder's refusal of a non-scratch database has a test · S · sonnet
 - [ ] [X-161](x/x-161.md) · The watchdog's all-ok test is deterministic · S · sonnet
+- [ ] [X-162](x/x-162.md) · A namespaced instance's doctor names only its own ports · S · sonnet

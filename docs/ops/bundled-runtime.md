@@ -295,7 +295,7 @@ runtime/remote/<tool>/
 
 | tool | pinned as | how it is obtained |
 | --- | --- | --- |
-| Tailscale | `TAILSCALE_VERSION` / `TAILSCALE_SHA256` | `tailscaled` and `tailscale` built with `go build` from the pinned tag's source archive (BSD-3); the version stamped in with the two `-X tailscale.com/version.*Stamp` flags `build_dist.sh` uses, `-w -s` as its `--strip`. The archive's `VERSION.txt` must equal the pin. Its `go.mod` names the Go toolchain; `GOTOOLCHAIN=auto` fetches it through the Go checksum database. |
+| Tailscale | `TAILSCALE_VERSION` / `TAILSCALE_SHA256`, and `TAILSCALE_GO_TOOLCHAIN` | `tailscaled` and `tailscale` built with `go build` from the pinned tag's source archive (BSD-3); the version stamped in with the two `-X tailscale.com/version.*Stamp` flags `build_dist.sh` uses, `-w -s` as its `--strip`. The archive's `VERSION.txt` must equal the pin. The Go toolchain is **pinned** (`GOTOOLCHAIN=$TAILSCALE_GO_TOOLCHAIN`): the go command fetches exactly that release, verified against the Go checksum database, so the build does not float with the runner image. Bumping Tailscale means re-reading its `go.mod` and moving this pin. |
 | cloudflared | `CLOUDFLARED_VERSION` / `CLOUDFLARED_SHA256` (+ `_LICENSE_SHA256`) | the official `cloudflared-darwin-arm64.tgz` (Apache-2.0), **cross-checked against the digest GitHub publishes for that release asset**, then **re-signed** — the upstream macOS binary is not reliably notarized. Upstream tags are `YYYY.M.N`. |
 | zrok | `ZROK_VERSION` / `ZROK_SHA256` (+ `_LICENSE_SHA256`) | `zrok_<version>_darwin_arm64.tar.gz` (Apache-2.0), cross-checked against the release's own `checksums.sha256.txt`, re-signed. Whatever name the tarball uses (`zrok`, or `zrok2`) is kept; an adapter reads the manifest's `binaries`. |
 
@@ -315,10 +315,12 @@ top-level `remote/<tool>/` — and `publish` is gated on it like
 
 1. **`metistry remote set <provider>`** — the adapter's `configure` calls
    `ensureRemotePack(ctx, tool)`. Resolve the release, download
-   `checksums.txt` and the one asset, verify the sha256; unpack **beside**
-   the tree; then verify the pack's **own** manifest — it names this tool,
-   and every Mach-O it lists hashes to what it records; only then swap it
-   into `runtime/remote/<tool>/` and write `.release`. A checksum mismatch or
+   `checksums.txt` and the one asset, verify the sha256; list the tarball
+   (`tar -tzf`) and refuse any entry that is absolute, has a `..` segment or
+   lies outside `remote/<tool>/` — decided here, not left to tar's defaults;
+   unpack **beside** the tree; then verify the pack's **own** manifest — it
+   names this tool, and every Mach-O it lists hashes to what it records;
+   only then swap it into `runtime/remote/<tool>/` and write `.release`. A checksum mismatch or
    a tampered pack throws, `configure` fails, the record is not written and
    `runtime/remote/` is byte-for-byte as it was. A pack from an **older**
    release than the one installed is refused (an old release could carry a
@@ -326,7 +328,10 @@ top-level `remote/<tool>/` — and `publish` is gated on it like
 2. **`metistry update`** moves forward every pack that is **already** under
    `runtime/remote/` to the release it installed, through the same code —
    and fetches none that is not there. A deps-pack unpack and a seed copy
-   (`metistry runtime install`) both carry `runtime/remote/` across.
+   (`metistry runtime install`) both carry `runtime/remote/` across —
+   stepped aside into `.runtime-remote-keep`, brought back after, and
+   **restored first** on the next run if an earlier one crashed between the
+   two renames (a tool fetched since is not clobbered).
 3. **`METISTRY_RUNTIME_DEPS=0`** keeps this off the network too: the pack
    API reports it and the adapter names the manual install instead.
 

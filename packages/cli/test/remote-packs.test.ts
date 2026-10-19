@@ -22,11 +22,14 @@ import {
   installedRemotePacks,
   installRemotePack,
   installRuntimeDeps,
+  keptRemoteDir,
   readRemotePackManifest,
+  refuseTarEntries,
   REMOTE_DIRNAME,
   REMOTE_TOOLS,
   remotePackAssetName,
   remoteToolDir,
+  restoreKeptRemote,
   RUNTIME_DIRNAME,
   runtimeDepsAssetName,
   updateRemotePacks,
@@ -58,18 +61,26 @@ function packTree(tool: RemoteTool, opts: { version?: string; binaries?: Record<
   return tree;
 }
 
-/** A tar-shaped fake: `tar -xzf <file> -C <dir>` writes the tree registered for that asset file name. */
-function tarExec(trees: Record<string, Record<string, string>>) {
+/**
+ * A tar-shaped fake: `tar -tzf <file>` lists the tree registered for that asset
+ * file name (or the `entries` override — what a hostile tarball would list),
+ * and `tar -xzf <file> -C <dir>` writes the tree.
+ */
+function tarExec(trees: Record<string, Record<string, string>>, entries: Record<string, string[]> = {}) {
   return fakeExec({
     tar: async (args) => {
-      const file = args[args.indexOf("-xzf") + 1]!;
-      const dir = args[args.indexOf("-C") + 1]!;
-      const tree = Object.entries(trees).find(([asset]) => file.endsWith(asset))?.[1];
+      const listing = args.includes("-tzf");
+      const file = args[args.indexOf(listing ? "-tzf" : "-xzf") + 1]!;
+      const asset = Object.keys(trees).find((a) => file.endsWith(a));
+      const tree = asset ? trees[asset] : undefined;
       if (!tree) throw new Error(`no fake tree for ${file}`);
+      if (listing) return { stdout: `${(entries[asset!] ?? Object.keys(tree)).join("\n")}\n` };
+      const dir = args[args.indexOf("-C") + 1]!;
       for (const [rel, body] of Object.entries(tree)) {
         await mkdir(join(dir, rel, ".."), { recursive: true });
         await writeFile(join(dir, rel), body);
       }
+      return undefined;
     },
   });
 }
@@ -189,6 +200,12 @@ describe("one asset name per tool, three files; the pins", () => {
     // and what upstream publishes is cross-checked, the way nodejs.org's SHASUMS256.txt is
     expect(script).toContain("github_asset_digest cloudflare/cloudflared");
     expect(script).toContain("checksums.sha256.txt");
+    // the Go toolchain is pinned too — the go command fetches exactly it, verified by the checksum database — never the runner image's
+    expect(/^TAILSCALE_GO_TOOLCHAIN=go\d+\.\d+(\.\d+)?$/m.test(versions), "TAILSCALE_GO_TOOLCHAIN must name one Go release").toBe(true);
+    expect(script).toContain('export GOTOOLCHAIN="$TAILSCALE_GO_TOOLCHAIN"');
+    expect(script).not.toContain("GOTOOLCHAIN=auto");
+    // no Python anywhere in the product (CLAUDE.md) — the JSON pick is node's
+    expect(script).not.toMatch(/python/);
     // the version stamped into tailscale is the pin, not whatever git the work dir sits in
     expect(script).toContain("-X tailscale.com/version.longStamp=$TAILSCALE_VERSION");
     expect(script).toContain("-X tailscale.com/version.shortStamp=$TAILSCALE_VERSION");
@@ -278,6 +295,34 @@ describe("installRemotePack: verify twice, then swap", () => {
     await expect(installRemotePack(r, { productDir: P, tool: "cloudflared", fetchFn: srv.fn, env: {}, target: TARGET })).rejects.toThrow(/tampered with .* runtime\/remote\/ is unchanged/);
     expect(await snapshot(P)).toEqual(before);
     expect(existsSync(join(P, ".remote-download-cloudflared"))).toBe(false);
+  });
+
+  it("a tarball with a `..` or an absolute entry, or one outside remote/<tool>/, is refused before anything is unpacked and leaves the tree byte-identical", async () => {
+    const P = await product();
+    await preinstall(P, "tailscale", "0.2.0");
+    const before = await snapshot(P);
+    const asset = remotePackAssetName("tailscale", "0.3.0", TARGET);
+    const srv = releaseServer({ version: "0.3.0", packs: [{ tool: "tailscale" }] });
+    const hostile: Record<string, RegExp> = {
+      "remote/tailscale/../../etc/passwd": /path with \.\./,
+      "/usr/local/bin/tailscaled": /absolute path/,
+      "remote/zrok/bin/zrok": /outside remote\/tailscale\//,
+      "remote/tailscale/bin/../../cloudflared/bin/cloudflared": /path with \.\./,
+    };
+    for (const [entry, why] of Object.entries(hostile)) {
+      const exec = tarExec({ [asset]: packTree("tailscale") }, { [asset]: [...Object.keys(packTree("tailscale")), entry] });
+      const { r } = runner(exec);
+      await expect(installRemotePack(r, { productDir: P, tool: "tailscale", fetchFn: srv.fn, env: {}, target: TARGET })).rejects.toThrow(why);
+      // listed, never extracted
+      expect(r.commands.some((c) => c.startsWith("tar -tzf"))).toBe(true);
+      expect(r.commands.some((c) => c.startsWith("tar -xzf"))).toBe(false);
+      expect(await snapshot(P)).toEqual(before);
+      expect(existsSync(join(P, ".remote-download-tailscale"))).toBe(false);
+    }
+    // the decision is this module's, not the tar implementation's
+    expect(refuseTarEntries(["remote/", "remote/zrok/", "remote/zrok/manifest.json", "./remote/zrok/bin/zrok"], "zrok")).toBeUndefined();
+    expect(refuseTarEntries([], "zrok")).toMatch(/no entries/);
+    expect(refuseTarEntries(["C:\\\\x"], "zrok")).toMatch(/absolute/);
   });
 
   it("verifyUnpackedRemotePack names each way a pack can lie: the wrong tool, a stray top level, a missing or escaping binary, no manifest", async () => {
@@ -509,6 +554,30 @@ describe("`metistry update` moves a fetched pack forward with the release, and f
     expect(existsSync(join(P, ".runtime-remote-keep"))).toBe(false);
   });
 
+  it("a run that crashed between the two renames loses nothing: the kept packs come back first, and a pack fetched since is not clobbered", async () => {
+    const P = await product();
+    // the state after `rename(runtime/remote → .runtime-remote-keep)` and a crash: no runtime/remote/, the packs in the kept dir
+    await preinstall(P, "tailscale", "0.2.0");
+    await preinstall(P, "cloudflared", "0.2.0");
+    const before = await snapshot(P);
+    const { rename } = await import("node:fs/promises");
+    await rename(join(P, RUNTIME_DIRNAME, REMOTE_DIRNAME), keptRemoteDir(P));
+    expect(existsSync(join(P, RUNTIME_DIRNAME, REMOTE_DIRNAME))).toBe(false);
+    // …and a `remote set` since fetched a NEWER cloudflared
+    await preinstall(P, "cloudflared", "0.3.0", "2026.10.1");
+    const deps = runtimeDepsAssetName("0.3.0", TARGET);
+    const srv = releaseServer({ version: "0.3.0", packs: [], depsPack: true });
+    const { r } = runner(tarExec({ [deps]: { [`${RUNTIME_DIRNAME}/manifest.json`]: JSON.stringify({ components: { node: { version: "22.23.2" } } }) } }));
+    expect((await installRuntimeDeps(r, { productDir: P, fetchFn: srv.fn, env: {}, target: TARGET })).installed).toBe(true);
+    const after = await snapshot(P);
+    // tailscale is back as it was; cloudflared is the newer one, not the kept copy
+    for (const [rel, body] of Object.entries(before)) if (rel.startsWith("tailscale/")) expect(after[rel]).toBe(body);
+    expect(await installedRemotePackRelease(P, "cloudflared")).toBe("0.3.0");
+    expect(existsSync(keptRemoteDir(P))).toBe(false);
+    // restoreKeptRemote on its own: a no-op when nothing was kept
+    expect(await restoreKeptRemote(P)).toEqual([]);
+  });
+
   it("through `update --channel release`: the pack already here moves to the release; the dry run says so", async () => {
     const { checkout, okDoctor } = await import("./fixtures.js");
     const { update } = await import("../src/update.js");
@@ -538,7 +607,9 @@ describe("`metistry update` moves a fetched pack forward with the release, and f
     }) as unknown as typeof fetch;
     const exec = fakeExec({
       tar: async (args) => {
-        const file = args[args.indexOf("-xzf") + 1]!;
+        const listing = args.includes("-tzf");
+        const file = args[args.indexOf(listing ? "-tzf" : "-xzf") + 1]!;
+        if (listing) return { stdout: `${Object.keys(packTree("zrok")).join("\n")}\n` };
         const dest = args[args.indexOf("-C") + 1]!;
         const tree = file.endsWith(remotePackAssetName("zrok", "0.3.0", TARGET))
           ? packTree("zrok", { version: "2.0.8" })

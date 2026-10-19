@@ -83,11 +83,15 @@ TARGET="darwin-arm64"
 mkdir -p "$dl" "$cache" "$build"
 
 # Go's module and toolchain cache under the work dir, so CI's cache of
-# .runtime-build/cache carries the tailscale modules AND the toolchain its
-# go.mod asks for — a later run compiles, it does not download.
+# .runtime-build/cache carries the tailscale modules AND the toolchain — a
+# later run compiles, it does not download. The toolchain is PINNED
+# (TAILSCALE_GO_TOOLCHAIN in runtime-versions.env), not whatever `go` the
+# runner image ships: the go command fetches exactly that release and
+# verifies it against the Go checksum database, so the build is the same on
+# any image. Bumping Tailscale means re-reading its go.mod and bumping it.
 export GOMODCACHE="$cache/go/mod"
 export GOCACHE="$cache/go/build"
-export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
+export GOTOOLCHAIN="$TAILSCALE_GO_TOOLCHAIN"
 export GOFLAGS="-mod=readonly"
 
 # A small text file fetched beside a binary (a LICENSE), pinned like the rest.
@@ -102,14 +106,14 @@ fetch_text() { # <url> <file> <sha256>
 
 github_asset_digest() { # <owner/repo> <tag> <asset> → the sha256 GitHub records for that release asset, or ""
   curl -fsSL --retry 3 -H 'accept: application/vnd.github+json' "https://api.github.com/repos/$1/releases/tags/$2" 2>/dev/null \
-    | python3 -I -c 'import json,sys
-want=sys.argv[1]
-try:
-    for a in json.load(sys.stdin).get("assets",[]):
-        if a.get("name")==want and str(a.get("digest","")).startswith("sha256:"):
-            print(a["digest"][7:]); break
-except Exception:
-    pass' "$3" 2>/dev/null || true
+    | node -e '
+      let d = "";
+      process.stdin.on("data", (c) => (d += c)).on("end", () => {
+        try {
+          const a = (JSON.parse(d).assets || []).find((a) => a.name === process.argv[1] && String(a.digest || "").startsWith("sha256:"));
+          if (a) console.log(a.digest.slice(7));
+        } catch {}
+      });' "$3" 2>/dev/null || true
 }
 
 # ---- Tailscale ---------------------------------------------------------------------
@@ -117,15 +121,15 @@ except Exception:
 # upstream burns the version in with -X flags read from git; a tarball has no
 # git, so the pinned version is stamped directly (the same two variables).
 # `-w -s` is what build_dist.sh --strip does, so strip_tree is not needed.
-# The go.mod names the toolchain; GOTOOLCHAIN=auto fetches it through the Go
-# checksum database when the runner's `go` is older.
+# The toolchain is the pinned one (GOTOOLCHAIN above), fetched through the
+# Go checksum database; the archive's go.mod must not ask for a newer one.
 
 build_tailscale() {
   local prefix="$cache/tailscale-$TAILSCALE_VERSION" src="$build/tailscale" tarball="tailscale-$TAILSCALE_VERSION.tar.gz" t0 ldflags
   t0="$(date -u +%s)"
   if [ -f "$prefix/.done" ]; then say "tailscale $TAILSCALE_VERSION: cached"; return 0; fi
   log "tailscale $TAILSCALE_VERSION (tailscaled + tailscale, from source)"
-  command -v go >/dev/null || die "no go — tailscaled is built from source (the macos-14 runner ships Go; locally: go.dev/dl)"
+  command -v go >/dev/null || die "no go — tailscaled is built from source (the macos-14 runner ships Go; locally: go.dev/dl). The build itself uses GOTOOLCHAIN=$TAILSCALE_GO_TOOLCHAIN, fetched and verified by the go command"
   fetch "https://github.com/tailscale/tailscale/archive/refs/tags/v$TAILSCALE_VERSION.tar.gz" "$tarball" "$TAILSCALE_SHA256"
 
   rm -rf "$prefix" "$src"

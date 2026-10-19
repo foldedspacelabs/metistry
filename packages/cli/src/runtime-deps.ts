@@ -202,26 +202,22 @@ export async function installRuntimeDeps(r: StepRunner, opts: InstallRuntimeDeps
 
   // only now is the existing runtime replaced — the pack's single top-level
   // `runtime/` lands as <product>/runtime/. The provider tool packs under
-  // runtime/remote/ are NOT part of this asset and are carried across.
-  const remote = join(dir, REMOTE_DIRNAME);
-  const keep = join(productDir, ".runtime-remote-keep");
-  await rm(keep, { recursive: true, force: true });
+  // runtime/remote/ are NOT part of this asset and are carried across:
+  // stepped aside before the tree goes, brought back after (restoreKeptRemote
+  // first, in case an earlier run crashed between the two renames).
+  await restoreKeptRemote(productDir);
+  const remote = remoteDir(productDir);
+  const keep = keptRemoteDir(productDir);
   if (existsSync(remote)) await rename(remote, keep);
   await rm(dir, { recursive: true, force: true });
   await mkdir(productDir, { recursive: true });
   await r.run("tar", ["-xzf", got.path, "-C", productDir], { timeoutMs: 10 * 60_000 });
   await rm(staging, { recursive: true, force: true });
   if (!existsSync(runtimeManifestPath(productDir))) {
-    if (existsSync(keep)) {
-      await mkdir(dir, { recursive: true });
-      await rename(keep, remote);
-    }
+    await restoreKeptRemote(productDir);
     throw new StepFailed(`${asset} unpacked without a ${RUNTIME_DIRNAME}/${RUNTIME_MANIFEST_FILE} — it is not a runtime deps pack`);
   }
-  if (existsSync(keep)) {
-    await rm(remote, { recursive: true, force: true });
-    await rename(keep, remote);
-  }
+  await restoreKeptRemote(productDir);
   await writeFile(join(dir, RUNTIME_RELEASE_FILE), `${rel.version}\n`);
   r.note(`${RUNTIME_DIRNAME}/: ${describeRuntime(await readRuntimeManifest(productDir))}`);
   return { version: rel.version, dir, installed: true };
@@ -272,6 +268,62 @@ export function remoteToolDir(productDir: string, tool: RemoteTool): string {
 }
 export function remotePackManifestPath(productDir: string, tool: RemoteTool): string {
   return join(remoteToolDir(productDir, tool), RUNTIME_MANIFEST_FILE);
+}
+
+/** Where runtime/remote/ waits while the bundled runtime around it is replaced (installRuntimeDeps, `runtime install`). */
+export function keptRemoteDir(productDir: string): string {
+  return join(productDir, ".runtime-remote-keep");
+}
+
+/**
+ * Bring back every tool pack an earlier replacement of `runtime/` set aside —
+ * BEFORE anything else touches the tree, so a run that crashed between its
+ * two renames loses nothing on the next one. A tool already back under
+ * runtime/remote/ (a `remote set` since) wins over the kept copy; what is
+ * left in the kept dir is then removed. Returns the tools restored.
+ */
+export async function restoreKeptRemote(productDir: string): Promise<string[]> {
+  const keep = keptRemoteDir(productDir);
+  if (!existsSync(keep)) return [];
+  const remote = remoteDir(productDir);
+  const restored: string[] = [];
+  for (const name of await readdir(keep)) {
+    const dest = join(remote, name);
+    if (existsSync(dest)) continue;
+    await mkdir(remote, { recursive: true });
+    await rename(join(keep, name), dest);
+    restored.push(name);
+  }
+  await rm(keep, { recursive: true, force: true });
+  return restored;
+}
+
+/**
+ * The entries a tool pack's tarball may hold: every one under `remote/<tool>/`
+ * (or that directory itself), none absolute, none with a `..` segment. Decided
+ * HERE, from `tar -tzf`, before anything is unpacked — not left to the tar
+ * implementation's defaults. Returns the refusal, or undefined.
+ */
+export function refuseTarEntries(entries: readonly string[], tool: RemoteTool): string | undefined {
+  if (entries.length === 0) return "the tarball lists no entries";
+  const want = `${REMOTE_DIRNAME}/${tool}`;
+  for (const raw of entries) {
+    const e = raw.replace(/^\.\//, "");
+    if (e.startsWith("/") || /^[A-Za-z]:[\\/]/.test(e)) return `the tarball holds an absolute path (${raw})`;
+    if (e.split("/").includes("..")) return `the tarball holds a path with .. (${raw})`;
+    const trimmed = e.replace(/\/$/, "");
+    if (trimmed !== REMOTE_DIRNAME && trimmed !== want && !trimmed.startsWith(`${want}/`)) return `the tarball holds ${raw}, outside ${want}/`;
+  }
+  return undefined;
+}
+
+/** `tar -tzf <file>` → its entries, one per line. */
+export async function listTarEntries(r: StepRunner, file: string): Promise<string[]> {
+  const res = await r.run("tar", ["-tzf", file], { timeoutMs: 5 * 60_000, quiet: true });
+  return res.stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
 }
 
 /** The one asset name the build script, the release workflow and this module must agree on (a test asserts all three). */
@@ -429,8 +481,14 @@ export async function installRemotePack(r: StepRunner, opts: InstallRemotePackOp
   await rm(staging, { recursive: true, force: true });
   const got = await downloadVerifiedAsset(r, { fetchFn, env, rel, asset, staging, unchangedWhat: `${RUNTIME_DIRNAME}/${REMOTE_DIRNAME}/` });
 
-  // unpack BESIDE the tree, then prove the pack is what it claims before
-  // anything that was there is touched
+  // the entries first — nothing absolute, no `..`, nothing outside
+  // remote/<tool>/ — then unpack BESIDE the tree, then prove the pack is what
+  // it claims; only after all three is anything that was there touched
+  const entries = refuseTarEntries(await listTarEntries(r, got.path), tool);
+  if (entries) {
+    await rm(staging, { recursive: true, force: true });
+    throw new StepFailed(`${asset} was discarded: ${entries} — ${RUNTIME_DIRNAME}/${REMOTE_DIRNAME}/ is unchanged`);
+  }
   const unpacked = join(staging, "unpacked");
   await mkdir(unpacked, { recursive: true });
   await r.run("tar", ["-xzf", got.path, "-C", unpacked], { timeoutMs: 10 * 60_000 });

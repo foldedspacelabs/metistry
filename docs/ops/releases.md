@@ -184,7 +184,15 @@ same versions file, signed with the same rule (`ops/release/pack-lib.sh`)
 and checked for the release identity on every Mach-O. Each tree is its own
 asset so `metistry remote set <provider>` fetches one tool and not three,
 and `publish` is gated on the job like `runtime-deps`. Nothing from them
-goes in the DMG. Full account: `docs/ops/bundled-runtime.md`.
+goes in the DMG. The Tailscale build uses a **pinned Go toolchain**
+(`TAILSCALE_GO_TOOLCHAIN` in `runtime-versions.env`, fetched and verified
+by the go command against the Go checksum database — never the runner
+image's `go`): **bumping `TAILSCALE_VERSION` means reading the new tag's
+`go.mod` and moving that pin with it.** The gate puts a third-party Go build
+on the release's critical path; if the job fails, the release stays a draft
+— fix and *Re-run failed jobs*, or ship without the packs with `gh release
+edit v<version> --draft=false` (then `remote set` names the missing asset
+until the next release). Full account: `docs/ops/bundled-runtime.md`.
 
 The **DMG** (`ops/release/build-app.sh`, the `macos-app` job) is the Mac
 app with both packs above unpacked inside it as

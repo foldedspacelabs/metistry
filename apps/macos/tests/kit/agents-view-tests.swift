@@ -249,7 +249,13 @@ private let kindsCoreHasThatTheAppCarriesNot = ["connection_call"]
     #expect(choices.first == AgentModelChoice(value: AgentModelChoice.sameAsDefaultWire, label: "Same as Aide"))
     #expect(choices.map(\.value).contains("lmstudio/gemma"))
     #expect(choices.map(\.value).contains("lmstudio/qwen"))
-    #expect(choices.last?.label == "anthropic/claude-sonnet-5 — openrouter", "the definition's own model, when compute does not name it")
+    // T6-12: a model is written one way. The dropdown's label is the Compute
+    // pane's line (name, provider, the provider's tag), never `model — provider`.
+    #expect(choices.last?.label == "anthropic/claude-sonnet-5 openrouter \u{00B7} Cloud", "the definition's own model, when compute does not name it")
+    #expect(choices.last?.label == ComputeModelLine.bare(ref: "openrouter/anthropic/claude-sonnet-5", tag: { _ in nil }).text)
+    #expect(choices.dropFirst().allSatisfy { !$0.label.contains(" — ") }, "the retired spelling is gone: \(choices.map(\.label))")
+    let local = try #require(choices.first { $0.value == "lmstudio/gemma" })
+    #expect(local.label == "gemma lmstudio \u{00B7} Local", "the provider's own tag, as Compute writes it")
     #expect(AgentModelChoice.sameAsDefault(nil).label == "Same as the default model", "never a default name")
 }
 

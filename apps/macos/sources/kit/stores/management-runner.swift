@@ -100,6 +100,17 @@ public struct ManagementCommand: Sendable, Equatable {
     public let row: ManagementRow
     public let arguments: [String]
     public let standardInput: String?
+    /// Whether cancelling the task that runs this command ends its process.
+    /// False for every command unless the caller says so with
+    /// `terminatingOnCancel()`: a download is cancellable, a read is not.
+    public private(set) var terminateOnCancel = false
+
+    /// This command, ended with its process when its task is cancelled.
+    public func terminatingOnCancel() -> ManagementCommand {
+        var copy = self
+        copy.terminateOnCancel = true
+        return copy
+    }
 
     /// Nil unless `arguments` begin with one of the row's verbs — and nil for
     /// a `--product-dir` among them: which product runs a verb is the runtime
@@ -148,6 +159,6 @@ public struct CLIManagementRunner: ManagementRunner {
     /// in the CLI's own words (§3.16), and a CLI older than the verb is
     /// `CLIDegradation.isUnknownVerb(result)`, said once, in cli-facts.swift.
     public func run(_ command: ManagementCommand, onOutput: @escaping @Sendable (OutputLine) -> Void) async throws -> CommandResult {
-        try await cli.run(command.arguments, standardInput: command.standardInput, onOutput: onOutput)
+        try await cli.run(command.arguments, standardInput: command.standardInput, terminateOnCancel: command.terminateOnCancel, onOutput: onOutput)
     }
 }

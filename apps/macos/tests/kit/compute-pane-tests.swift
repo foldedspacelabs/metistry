@@ -287,6 +287,130 @@ import Testing
     #expect(model.lastOutcome?.ok == true)
 }
 
+@Test func aDownloadsSizeAndProgressAreReadFromTheCLIsOwnLines() {
+    func read(_ lines: [String]) -> DownloadProgress? {
+        DownloadProgress.read(lines.map { OutputLine(stream: .standardOutput, text: $0) })
+    }
+    // llama-server's GGUF download, MiB
+    #expect(read(["downloading https://huggingface.co/x/y/resolve/main/m.gguf", "  m.gguf: 40% (1638.4 MiB of 4096.0 MiB)"]) == DownloadProgress(size: "4096.0 MiB", percent: 40))
+    // the newest figure wins, and a later line without a size keeps the size
+    #expect(read(["  m.gguf: 10% (409.6 MiB of 4096.0 MiB)", "  m.gguf: 50% (2048.0 MiB of 4096.0 MiB)", "  status pulling 80%"]) == DownloadProgress(size: "4096.0 MiB", percent: 80))
+    // another server's wording
+    #expect(read(["  12% · 600 MB of 5.0 GB"]) == DownloadProgress(size: "5.0 GB", percent: 12))
+    // Ollama's lines carry a percentage and no size: no size is invented
+    #expect(read(["  pulling manifest", "  pulling 4a1b 33%"]) == DownloadProgress(size: nil, percent: 33))
+    // a number with more digits than a percentage is not one
+    #expect(read(["  m.gguf: 1234%"]) == nil)
+    #expect(read(["100%", "1234%"]) == DownloadProgress(size: nil, percent: 100))
+    // nothing reported, nothing shown
+    #expect(read(["downloading qwen3:8b"]) == nil)
+    #expect(read([]) == nil)
+    #expect(ComputePaneView.downloadWords(nil, cancelling: false) == "Size not reported yet")
+    #expect(ComputePaneView.downloadWords(DownloadProgress(size: "4096.0 MiB", percent: 40), cancelling: false) == "Size 4096.0 MiB \u{00B7} 40%")
+    #expect(ComputePaneView.downloadWords(DownloadProgress(size: nil, percent: 33), cancelling: false) == "Size not reported yet \u{00B7} 33%")
+    #expect(ComputePaneView.downloadWords(DownloadProgress(size: "5.0 GB", percent: nil), cancelling: true) == "Cancelling…")
+}
+
+@MainActor
+@Test func aDownloadShowsItsSizeAndCanBeCancelledButALoadCannot() async throws {
+    let runner = ComputeBlockingRunner()
+    runner.lines = ["downloading m.gguf", "  m.gguf: 20% (819.2 MiB of 4096.0 MiB)"]
+    let session = ConsoleSession(transport: try FixtureConsole.recorded(), management: runner)
+    let model = ComputeModel(status: await doctoredStatus(), cli: nil, session: session)
+    pin(model)
+    await model.refresh()
+    #expect(!model.canCancelDownload, "nothing is running")
+
+    model.beginInstall()
+    model.install?.provider = "llamaserver"
+    model.install?.model = "x/y/m.gguf"
+    model.proposeInstall()
+    let pending = try #require(model.confirmation)
+    #expect(pending.downloads)
+    let running = Task { await model.confirm(pending) }
+    await runner.started()
+    // let the progress lines land on the main actor
+    for _ in 0..<50 where model.downloadProgress == nil { try await Task.sleep(for: .milliseconds(20)) }
+
+    #expect(model.running?.downloads == true)
+    #expect(model.downloadProgress == DownloadProgress(size: "4096.0 MiB", percent: 20), "its size, as the CLI said it")
+    #expect(model.canCancelDownload)
+
+    model.cancelDownload()
+    #expect(model.cancelRequested)
+    #expect(!model.canCancelDownload, "one cancel is already on its way")
+    await running.value
+    #expect(runner.cancelled, "the cancel reached the process the install started")
+    #expect(model.running == nil)
+    #expect(model.lastOutcome?.ok == false)
+    #expect(model.lastOutcome?.message == "Download cancelled before it finished, so the model was not installed. Install a Model starts it again.")
+    #expect(!model.cancelRequested, "ready for the next one")
+
+    // a load is over in a moment: no size line, no cancel
+    let blockingLoad = ComputeBlockingRunner()
+    let loadSession = ConsoleSession(transport: try FixtureConsole.recorded(), management: blockingLoad)
+    let loader = ComputeModel(status: await doctoredStatus(), cli: nil, session: loadSession)
+    pin(loader)
+    await loader.refresh()
+    loader.proposeLoad(loader.line(for: "lmstudio/google/gemma-3-4b"), unload: false)
+    let load = try #require(loader.confirmation)
+    #expect(!load.downloads)
+    let loading = Task { await loader.confirm(load) }
+    await blockingLoad.started()
+    #expect(loader.running != nil)
+    #expect(!loader.canCancelDownload)
+    #expect(loader.downloadProgress == nil)
+    loader.cancelDownload()
+    #expect(!loader.cancelRequested, "cancelling with nothing downloading does nothing")
+    loading.cancel()
+    await loading.value
+}
+
+@MainActor
+@Test func onlyTheDownloadsCommandEndsItsProcessWhenCancelledAndADoctorRefreshIsNeverCut() async throws {
+    // the install is the one command that opts in; nothing else can
+    let install = try #require(ManagementCommand(.localModels, ["compute", "models", "install", "ollama/qwen3:8b"]))
+    #expect(!install.terminateOnCancel)
+    #expect(install.terminatingOnCancel().terminateOnCancel)
+    let load = try #require(ManagementCommand(.localModels, ["compute", "models", "load", "lmstudio/qwen"]))
+    #expect(!load.terminateOnCancel)
+    let (model, _, _) = try await fixtureModel()
+    model.beginInstall()
+    model.install?.model = "qwen/qwen3-8b"
+    model.proposeInstall()
+    #expect(model.confirmation?.command.terminateOnCancel == true)
+    model.proposeLoad(model.line(for: "lmstudio/google/gemma-3-4b"), unload: false)
+    #expect(model.confirmation?.command.terminateOnCancel == false)
+
+    // a status refresh whose task is cancelled (the menu closing, a view
+    // going away) asks for no termination, so doctor finishes and the
+    // panel is answered rather than flipped to unavailable
+    let runner = FakeRunner(results: [CommandResult(exitCode: 0, stdout: localModelDoctorJSON(), stderr: "")])
+    let status = StatusModel(cli: fakeCLI(runner))
+    let refresh = Task { await status.refresh() }
+    refresh.cancel()
+    await refresh.value
+    #expect(runner.terminateOnCancelFlags == [false], "doctor never opts in")
+    #expect(status.phase == .answered)
+    #expect(status.report != nil)
+}
+
+@MainActor
+@Test func aDownloadThatFinishesIsNotReportedCancelled() async throws {
+    let runner = ComputeRecordingRunner()
+    runner.lines = ["  m.gguf: 100% (4096.0 MiB of 4096.0 MiB)"]
+    runner.result = CommandResult(exitCode: 0, stdout: #"{"ok":true,"detail":"4096.0 MiB"}"#, stderr: "")
+    let (model, _, _) = try await fixtureModel(runner: runner)
+    model.beginInstall()
+    model.install?.provider = "llamaserver"
+    model.install?.model = "x/y/m.gguf"
+    model.proposeInstall()
+    await model.confirm(try #require(model.confirmation))
+    #expect(model.lastOutcome?.ok == true)
+    #expect(model.lastOutcome?.message == "4096.0 MiB")
+    #expect(model.downloadProgress == nil, "nothing is running, so there is nothing to show")
+}
+
 @MainActor
 @Test func aCLIOlderThanTheVerbIsToldAboutRatherThanReportedAsAFailedWrite() async throws {
     let runner = ComputeRecordingRunner()
@@ -635,6 +759,47 @@ final class ComputeRecordingRunner: ManagementRunner, @unchecked Sendable {
     }
 }
 
+/// A runner that prints its lines and then waits until its task is cancelled —
+/// a download in progress, for the test that cancels it.
+final class ComputeBlockingRunner: ManagementRunner, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _lines: [String] = []
+    private var _cancelled = false
+    private var startedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var hasStarted = false
+
+    var lines: [String] { get { lock.withLock { _lines } } set { lock.withLock { _lines = newValue } } }
+    var cancelled: Bool { lock.withLock { _cancelled } }
+
+    func plannedArguments(_ command: ManagementCommand) -> [String] { ["metistry"] + command.arguments }
+
+    /// Returns once `run` has printed its lines and is waiting.
+    func started() async {
+        await withCheckedContinuation { waiter in
+            let ready = lock.withLock { () -> Bool in
+                if hasStarted { return true }
+                startedWaiters.append(waiter)
+                return false
+            }
+            if ready { waiter.resume() }
+        }
+    }
+
+    func run(_ command: ManagementCommand, onOutput: @escaping @Sendable (OutputLine) -> Void) async throws -> CommandResult {
+        for line in lines { onOutput(OutputLine(stream: .standardOutput, text: line)) }
+        let waiters = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            hasStarted = true
+            defer { startedWaiters.removeAll() }
+            return startedWaiters
+        }
+        for waiter in waiters { waiter.resume() }
+        // a process that ends when it is told to: SIGTERM is exit 143
+        while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(10)) }
+        lock.withLock { _cancelled = true }
+        return CommandResult(exitCode: 143, stdout: "", stderr: "")
+    }
+}
+
 /// Answers a scripted list and records what each call was handed — arguments
 /// and standard input both, because "the key is not in argv" is only a fact if
 /// the test can see both.
@@ -653,6 +818,21 @@ private final class FakeRunner: CommandRunner, @unchecked Sendable {
     }
 
     var calls: [Call] { lock.withLock { recorded } }
+    /// The `terminateOnCancel` every call asked for, in order.
+    private nonisolated(unsafe) var flags: [Bool] = []
+    var terminateOnCancelFlags: [Bool] { lock.withLock { flags } }
+
+    func run(
+        executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL?, standardInput: String?, terminateOnCancel: Bool,
+        onOutput: @escaping @Sendable (OutputLine) -> Void
+    ) async throws -> CommandResult {
+        lock.withLock { flags.append(terminateOnCancel) }
+        return try await run(
+            executable: executable, arguments: arguments, environment: environment,
+            currentDirectory: currentDirectory, standardInput: standardInput, onOutput: onOutput
+        )
+    }
 
     func run(
         executable: URL, arguments: [String], environment: [String: String],

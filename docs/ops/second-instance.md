@@ -152,52 +152,43 @@ Cursor's MCP pane, `opencode mcp list`, Devin's **Test listing tools** button.
 ## 7. Devin knowledge-in
 
 The pull half — Devin's notes and repo wikis land in the inbox as captures
-(`docs/ops/devin.md`, "Knowledge in"):
-
-```
-# <instance>/.metistry/state/.env
-METISTRY_DEVIN_API_KEY=cog_…
-METISTRY_DEVIN_ORG_ID=org-…
-METISTRY_DEVIN_REPOS=org/repo-a,org/repo-b   # optional: the wiki half
-```
+(`docs/ops/devin.md`, "Knowledge in"). Both halves read one **`devin` agent
+connection** (since 0.17.0 `METISTRY_DEVIN_API_KEY` and `METISTRY_DEVIN_ORG_ID`
+in `.env` are not read):
 
 ```sh
-node packages/cli/dist/main.js secrets sync --to keychain
+node packages/cli/dist/main.js secrets set devin_api_key          # the cog_ key, on stdin
+node packages/cli/dist/main.js secrets hosts devin_api_key api.devin.ai mcp.devin.ai
+node packages/cli/dist/main.js secrets grant devin_api_key connection:devin on
+node packages/cli/dist/main.js connections add devin --type agent --provider devin \
+    --url https://api.devin.ai --auth bearer --secret devin_api_key \
+    --config org=org-… --config repos=org/repo-a,org/repo-b --no-discover   # repos: optional, the wiki half
+node packages/cli/dist/main.js secrets sync --to env
 node packages/cli/dist/main.js restart console
 ```
 
 **The PAT-policy caveat:** an enterprise PAT policy is disabled by default at Devin — confirm
 it is enabled for this key's organisation, or the key answers 401 and looks like a bad one.
 
-`doctor` picks up the collector by its manifest: `devin-knowledge` reads `absent` (naming
-`METISTRY_DEVIN_API_KEY`/`ORG_ID`) until both are set, then `ok` after its next `@hourly` run.
+`doctor` picks up the collector by its manifest: `devin-knowledge` reads `absent` (naming the
+missing connection) until it is added, then `ok` after its next `@hourly` run.
 
 ## 8. Devin as a target
 
 The push half — a work row dispatched as a Devin session, the answer returned as a triaged
-proposal (`docs/ops/devin.md`, "Dispatch out"). The product's manifest ships an **empty**
-`allow` list (a third party whose default is "may train on your data"); widen it in this
-instance's own overlay, never the product file (`docs/ops/targets.md`):
-
-```
-# <instance>/.metistry/state/.env — METISTRY_DEVIN_ORG_ID: required for dispatch, not just knowledge-in
-METISTRY_TARGETS_DIRS=targets:$METISTRY_INSTANCE_DIR/.metistry/targets
-METISTRY_DEVIN_ORG_ID=org-…
-```
+proposal (`docs/ops/devin.md`, "Dispatch out"). It is the same `devin` connection as §7: nothing
+more to add. The Devin connection type ships an **empty** `allow` list (a third party whose
+default is "may train on your data"); widen it in this instance's own overlay of the type, never
+the product file (`docs/ops/targets.md`):
 
 ```yaml
-# <instance>/.metistry/targets/devin-sessions/manifest.yaml — the WHOLE file (D4: last one wins)
-name: devin-sessions
-type: target
-transport: http
-submit: { max_acu: 5 }
-result: { via: report_queue, status_via: collectors/devin-sessions }
-auth: env:METISTRY_DEVIN_API_KEY
-cost: { per_run_estimate_usd: 0 }
-data_policy:
-  allow: [Projects]        # this instance's own areas
-  deny_sources: [comms, devin]       # devin's own knowledge must not round-trip
-  max_brief_bytes: 65536
+# <instance>/.metistry/extensions/devin/manifest.yaml — the WHOLE file (D4: last one wins);
+# start from seed/connection-types/devin/manifest.yaml and change only dispatch.data_policy
+dispatch:
+  data_policy:
+    allow: [Projects]        # this instance's own areas
+    deny_sources: [comms, devin]       # devin's own knowledge must not round-trip
+    max_brief_bytes: 65536
 ```
 
 `node packages/cli/dist/main.js restart console`, then a first knowledge-research dispatch — a
@@ -207,12 +198,12 @@ cookie:
 
 ```sh
 metistry console call POST /api/tasks/<id>/dispatch --body - <<'JSON'
-{"target":"devin-sessions","purpose":"knowledge_research","max_acu":3,"brief":"…"}
+{"target":"devin","purpose":"knowledge_research","max_acu":3,"brief":"…"}
 JSON
 ```
 
-`doctor` walks `targets/` too: `devin-sessions` reads `absent` naming `METISTRY_DEVIN_ORG_ID`
-until set, `ok` once the target's `check()` resolves.
+`GET /api/targets` lists `devin` with its `check()`: `ok` once the connection's key is delivered
+and the probe resolves, `failed` naming `config.org` when the connection lacks it.
 
 ## 9. The phone
 

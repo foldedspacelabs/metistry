@@ -6,7 +6,7 @@ Three surfaces, one of which exists today:
 | --- | --- | --- | --- |
 | 1 | **Devin as an external agent** at the console's `/mcp` | Devin → this instance | **now**, `metistry connect devin` |
 | 2 | **Devin knowledge into the vault** (`collectors/devin-knowledge`) | Devin → inbox | **now**, W5 |
-| 3 | **Devin as a compute target** (`targets/devin-sessions`) | this instance → Devin | **now**, W6 — "[Dispatch out](#dispatch-out)" |
+| 3 | **Devin as a compute target** (the `devin` agent connection) | this instance → Devin | **now**, W6 — "[Dispatch out](#dispatch-out)" |
 
 W5/W6 are `docs/plan-refresh-2026-09-13.md` §4b; both need a Devin `cog_`
 credential, and an enterprise PAT policy is **disabled by default**, so check
@@ -140,29 +140,36 @@ assistant, so it may speak to a foreign server as an ordinary HTTP client.
 
 ### Configure
 
+The collector reads the **`devin` agent connection** — the same one a task is
+dispatched to (`docs/ops/connections.md`, *Agent connections*). Since 0.17.0
+(X-85) `METISTRY_DEVIN_API_KEY` in the environment is not read; `metistry
+doctor`'s *target keys* row names it if it is still set.
+
 ```sh
-# <instance>/.metistry/state/.env
-METISTRY_DEVIN_API_KEY=cog_…      # service-user key or PAT; user-scoped in the Keychain
-METISTRY_DEVIN_ORG_ID=org-…       # only for account-scoped tokens (see below)
-METISTRY_DEVIN_REPOS=acme/api,acme/web   # optional: the wiki half
-METISTRY_DEVIN_MAX_ITEMS=200      # cap per run
+metistry secrets set devin_api_key                    # the cog_ key, on stdin
+metistry secrets hosts devin_api_key api.devin.ai mcp.devin.ai
+metistry secrets grant devin_api_key connection:devin on
+metistry connections add devin --type agent --provider devin \
+    --url https://api.devin.ai --auth bearer --secret devin_api_key \
+    --config org=org-… --config repos=acme/api,acme/web --no-discover   # repos: optional, the wiki half
+metistry secrets sync --to env                        # then restart the console
 ```
 
-Then `metistry secrets sync --to keychain` and restart the console. With no
-key the collector **degrades absent**: `run()` returns 0 without error and
-`check()` reports `absent` with that remediation — captures, tasks, search and
-every other collector carry on.
+`METISTRY_DEVIN_MAX_ITEMS=200` (cap per run) stays an environment setting.
+With no connection the collector **degrades absent**: `run()` returns 0
+without error and `check()` reports `absent` with that remediation —
+captures, tasks, search and every other collector carry on.
 
-`METISTRY_DEVIN_API_KEY` is **user-scoped** in the Keychain
-(`packages/cli/src/secrets.ts`), like the compute provider keys and the AWS
-keys: it is the person's own credential, shared by every instance on the Mac,
-and `metistry secrets purge` must never take it.
+The key is the person's own credential, an owner-named secret of this
+instance (`metistry secrets migrate-scope` copies one the retired shared scope
+held under `METISTRY_DEVIN_API_KEY` to `devin_api_key`), filled at the
+connection's egress door for `api.devin.ai` and `mcp.devin.ai` only.
 
-`METISTRY_DEVIN_ORG_ID` is only needed when the token is account-scoped — an
-enterprise service-user key, or any PAT. An org-scoped service-user key
-resolves its own organization, which is what `check()`'s probe
-(`GET /v3/self`) reports. Without either, `doctor`/`check()` says `degraded`
-and names the variable rather than failing silently.
+`config.org` is **required** — a session is a spend, and which organization it
+is charged to is not something to infer. (An org-scoped service-user key could
+resolve its own organization, which is what `check()`'s probe, `GET
+/v3/self`, reports; the connection still names it.) Without it the connection
+is unavailable and `doctor`/`check()` names `config.org`.
 
 ### Transports, and why each one
 
@@ -260,31 +267,31 @@ would push the owner's own notes into a third-party cloud whose default is
 
 ## Dispatch out
 
-`targets/devin-sessions` (W6). A work row goes out as a **Devin session**; the
+The `devin` connection as a target (W6; T4-11 moved it out of
+`targets/devin-sessions`, which X-85 removed). A work row goes out as a **Devin session**; the
 answer comes back as a `report` proposal in Needs You. Outbound-only —
 Metistry calls Devin and polls — so it needs no inbound path at all, which is
 why it ships before the tunnel question above is settled.
 
+The same `devin` connection the collector reads (above) is the target; its
+`config.org` is **required**, because a session is a spend, and which
+organization it is charged to is not something to infer. Without it the
+target's `check()` fails naming `config.org`; dispatch is a `409` carrying
+that check. Nothing is sent.
+
 ```sh
-# <instance>/.metistry/state/.env — the SAME key the collector uses, plus one new var
-METISTRY_DEVIN_API_KEY=cog_…
-METISTRY_DEVIN_ORG_ID=org-…    # REQUIRED for dispatch (see below)
+# <instance>/.metistry/state/.env
 METISTRY_DEVIN_SESSION_TIMEOUT_HOURS=24   # optional; when a session is given up on
 ```
 
-`METISTRY_DEVIN_ORG_ID` is optional for `devin-knowledge` (an org-scoped key
-resolves its own organization) and **required here**: a session is a spend,
-and which organization it is charged to is not something to infer. Without it
-the target's `check()` is `absent` and names the variable; dispatch is a
-`409` carrying that check. Nothing is sent.
-
 ### The brief never leaves unchecked
 
-The manifest's `data_policy` ships with an **empty `allow` list**. That is
-deliberate: this is a third party whose default is "we may train on your
-data", so the product default lets a brief cite *nothing* from the vault.
-Widen it per instance in an overlay dir (`METISTRY_TARGETS_DIRS`, D4) to that
-instance's own areas — never in the product file.
+The Devin connection type's `dispatch.data_policy` ships with an **empty
+`allow` list**. That is deliberate: this is a third party whose default is "we
+may train on your data", so the product default lets a brief cite *nothing*
+from the vault. Widen it per instance by overlaying the type —
+`.metistry/extensions/devin/manifest.yaml` (D4) — to that instance's own
+areas, never in the product file.
 
 `deny_sources` is `[comms, devin]`. `comms` is §4.12. `devin` is the ruling
 from "[Two safety points](#two-safety-points)": Devin's own knowledge, once
@@ -309,8 +316,9 @@ The purposes and their preambles are the **Devin connection type's**
 (`seed/connection-types/devin/manifest.yaml`, `dispatch.purposes`; T4-11) —
 an overlay of that type may add or reword one — and a Devin dispatch goes
 out through the `devin` agent connection's door, its key filled there
-(`docs/ops/connections.md`, *Agent connections*); the environment keys below
-still work for one release when there is no such connection.
+(`docs/ops/connections.md`, *Agent connections*). There is no other way in:
+the `targets/devin-sessions` manifest and the environment keys it read were
+removed in 0.17.0 (X-85).
 
 It is a **`purpose`, not a new `work.kind`**, because `packages/tasks` owns
 exactly two claimable kinds (`task`, `review`) and `github-state` owns the

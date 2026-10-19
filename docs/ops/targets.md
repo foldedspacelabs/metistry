@@ -9,75 +9,71 @@ carry comms-derived content, cite a personal vault path, or exceed the byte
 cap is refused with a machine-readable reason. That is the rule "comms
 never leaves the machine" as code, not as a prompt.
 
-**Targets are also agent connections** (T4-11). An `agent` connection —
-`.metistry/connections/<name>.yaml` whose connection type
+**A target is an agent connection** (T4-11), with one exception. An `agent`
+connection — `.metistry/connections/<name>.yaml` whose connection type
 (`seed/connection-types/devin`, `…/github-issues`) carries the dispatcher,
-this `data_policy` and the purposes — is a target named for it, and its key
-is filled at its own egress door rather than read from `env:`. That is now
-the way to add Devin or GitHub Issues (`docs/ops/connections.md`, *Agent
-connections*); the `targets/` manifests below still load for one release.
+the `data_policy` and the purposes — is a target named for it, and its key is
+filled at its own egress door. That is the only way to add Devin or GitHub
+Issues (`docs/ops/connections.md`, *Agent connections*). The exception is the
+crews' **`local-crew`**, which is not a connection and stays a `targets/`
+manifest.
+
+**The one-release shim is gone (0.17.0).** T4-11 kept the `targets/`
+manifests for GitHub Issues and Devin, and the `METISTRY_GITHUB_TOKEN` /
+`METISTRY_DEVIN_API_KEY` environment keys, working for one release. 0.16.0 was
+that release. Now:
+
+- a `targets/` manifest **other than `local-crew`** is refused at load —
+  skipped with a reason that names `metistry connections add`, logged by the
+  console and shown by `metistry doctor`'s *registries* row; this holds for
+  the product's `targets/`, the owner's `.metistry/targets/` overlay and an
+  extension alike (an owner's `local-crew` still overlays the product's);
+- an environment key alone dispatches nothing, and nothing reads one: with the
+  key set and no connection, the target does not exist and `POST
+  /api/tasks/:id/dispatch` answers `404`. `metistry doctor` has a *target
+  keys* row that names the keys still set, says they are ignored, and names
+  the verb that replaces them;
+- `METISTRY_GITHUB_WRITE_TOKEN`, `METISTRY_GITHUB_DISPATCH_REPO`,
+  `METISTRY_DEVIN_ORG_ID` and the other variables those manifests named are
+  read by nothing; `METISTRY_GITHUB_TOKEN` still serves `metistry update`'s
+  Releases API calls, and nothing else.
+
+To move an install across, add the connection (`docs/ops/connections.md`
+carries the commands for each) and delete the old lines from `.env`.
 
 ## Adding a target
 
-1. Create `targets/<name>/manifest.yaml` (product default) — or, per
-   instance, as an extension (`metistry extensions add <dir>`, which lands it
-   in `.metistry/extensions/<name>/`) or under any later dir listed in
-   `METISTRY_TARGETS_DIRS` (colon-separated: the FIRST entry is the product's,
-   every later one the owner's). An owner's target with a product target's
-   `name` replaces it (D4 overlay). The directory name must equal the
-   manifest's `name`.
-2. Fill in the manifest (schema: `packages/core/src/manifest.ts`,
-   `targetManifest`). Targets load through the target registry (plan §2.7,
-   `docs/ops/extensions.md`): a manifest without `schema: 1`, or one that fails
-   its schema, is **skipped with the reason** — logged by the console, shown
-   by `metistry doctor`'s *registries* row — and every other target still
-   loads. An overlay written before this needs the `schema: 1` line added;
-   until then the product's target is in force.
+A target other than the crews' is a connection **type**, not a manifest: a
+new type is a directory under `seed/connection-types/` with a `dispatch:`
+block (`docs/ops/connections.md`), or the owner's overlay of one in
+`.metistry/extensions/<type>/manifest.yaml` (D4) — which is also how an
+instance widens a type's `data_policy.allow`. Only `local-crew` is a
+`targets/<name>/manifest.yaml`; its schema is `packages/core/src/manifest.ts`
+(`targetManifest`), and the manifest must carry `schema: 1` and name its
+directory. `apps/console/test/manifests.test.ts` validates every
+`manifest.yaml` in the repo, so a malformed policy fails the build, not a
+dispatch at 2am. After a change, `GET /api/targets` shows each target with its
+live `check()` (`absent` until configured, `ok` once the probe passes).
 
-```yaml
-schema: 1                            # every manifest carries it; a registry skips one without
-name: github-issues
-type: target
-description: Open a GitHub issue for a task
-transport: github                    # mcp | http | github | local
-submit: { repo: env:METISTRY_GITHUB_DISPATCH_REPO }   # github: owner/repo or env:VAR
-result:
-  via: report_queue                  # the only return path (§4.18.B)
-  status_via: github-state           # free-form notes are allowed under result:
-auth: env:METISTRY_GITHUB_WRITE_TOKEN  # ALWAYS an env reference, never a literal
-cost: { per_run_estimate_usd: 0 }    # written to runs.cost_usd on every dispatch
-data_policy:                         # REQUIRED, every field
-  allow: [Projects]        # vault prefixes a brief may cite; [] = none
-  deny_sources: [comms]              # provenance classes that never leave
-  max_brief_bytes: 16384
-```
-
-3. Run `pnpm test`. CI validates every `manifest.yaml` in the repo
-   (`apps/console/test/manifests.test.ts`), so a malformed policy fails the
-   build, not a dispatch at 2am.
-4. Restart the console; `GET /api/targets` shows the manifest with its live
-   `check()` (`absent` until configured, `ok` once the probe passes).
-
-## The shipped targets
+## The targets
 
 | target | transport | goes out as | comes back as | doc |
 | --- | --- | --- | --- | --- |
-| `github-issues` | `github` | an issue in `METISTRY_GITHUB_DISPATCH_REPO` | status only — `github-state` closes the work row (`gh:owner/repo#n`) | [below](#the-first-target-github-issues) |
+| a `github-issues` connection | `github` | an issue in the connection's `repo` | status only — `github-state` closes the work row (`gh:owner/repo#n`) | [below](#github-issues) |
+| a `devin` connection | `http` (`submit.kind: devin-session`) | a Devin session (`devin:<session_id>`) | the structured answer as a `report` proposal, polled home by `collectors/devin-sessions` | `docs/ops/devin.md` |
 | `local-crew` | `local` | a `work` row the assistant container's drain loop claims | whatever the crew reports, plus a `crew_run` row | `docs/ops/crews.md` |
-| `devin-sessions` | `http` (`submit.kind: devin-session`) | a Devin session (`devin:<session_id>`) | the structured answer as a `report` proposal, polled home by `collectors/devin-sessions` | `docs/ops/devin.md` |
 
-Three transports have a dispatcher today. `github` and `http` go through
-`POST /api/tasks/:id/dispatch` (the `user` principal only); `local` goes
-through the assistant's `agents_delegate` tool — its policy is that target's
-`data_policy` narrowed by the crew's `scope`. An `http` target whose
-`submit.kind` this console does not implement, and every other transport,
-validate and list, and `dispatch()` refuses them explicitly by name
-(`invalid_request`) — a registered target is never a silent no-op.
+Three dispatchers exist. A connection's go through `POST
+/api/tasks/:id/dispatch` (the `user` principal only); `local` goes through the
+assistant's `agents_delegate` tool — its policy is that target's `data_policy`
+narrowed by the crew's `scope`. A target of any other transport validates and
+lists, and `dispatch()` refuses it explicitly by name (`invalid_request`) — a
+registered target is never a silent no-op.
 
-`devin-sessions` is the first target whose **content** comes back, not just
-its status: `result.via: report_queue` is real there, where `github-issues`
-still carries it as a TODO. It is also the first with a real per-dispatch
-budget (Devin's `max_acu_limit`) and a machine-checkable return (a Draft-7
+A Devin dispatch is the one whose **content** comes back, not just its
+status: `result.via: report_queue` is real there, where `github-issues` still
+carries it as a TODO. It also has a real per-dispatch budget (Devin's
+`max_acu_limit`) and a machine-checkable return (a Draft-7
 `structured_output_schema`) — both reasons to prefer it over an issue for
 research. See `docs/ops/devin.md`, "Dispatch out".
 
@@ -97,12 +93,12 @@ A refusal is a `runs` row too (`kind = 'dispatch'`, `ok = false`,
 not silent. Widen `allow` in an instance overlay, never in the product
 default.
 
-## The first target: GitHub issues
+## GitHub issues
 
-`targets/github-issues/manifest.yaml`. Dispatch opens an issue in
-`METISTRY_GITHUB_DISPATCH_REPO`: title = the task's title, body = the brief
-plus a footer naming the task id and the return path. The task row gets
-`external_ref = gh:owner/repo#n`, `status = in_progress`,
+A `github-issues` connection (type `seed/connection-types/github-issues`).
+Dispatch opens an issue in the connection's `repo`: title = the task's title,
+body = the brief plus a footer naming the task id and the return path. The
+task row gets `external_ref = gh:owner/repo#n`, `status = in_progress`,
 `claimed_by = target:github-issues` (no lease — held until the source closes
 it), and a `dispatch` entry in `history`.
 
@@ -118,15 +114,18 @@ Developer settings → Fine-grained tokens):
 - **Expiration:** set one; the check() probe goes `failed` with a 401 when it
   lapses, and the watchdog will tell you.
 
-Put it in `.env` as `METISTRY_GITHUB_WRITE_TOKEN`. It is deliberately a
-different token from `METISTRY_GITHUB_TOKEN` (the collector's read-only PAT
-over every configured repo): a leaked write token must not also read your
-whole world, and a leaked read token must not be able to write anything.
+Store it as the connection's secret (`metistry secrets set
+github_write_token`, scoped to `api.github.com` and granted to
+`connection:github-issues`; the commands are in `docs/ops/connections.md`,
+*Agent connections*). It is deliberately a different token from the read-only
+one the `github` connection's sync uses: a leaked write token must not also
+read your whole world, and a leaked read token must not be able to write
+anything.
 
 ### Return path — what exists and what does not
 
-- **Status returns today, with nothing new.** Add the dispatch repo to
-  `METISTRY_GITHUB_REPOS`. `github-state` (every 15 min) upserts by
+- **Status returns today, with nothing new.** Add the dispatch repo to the
+  `github` connection's `repos`. `github-state` (every 15 min) upserts by
   `external_ref` — the partial unique index `work_external_ref_uidx` means
   `ON CONFLICT (external_ref) WHERE external_ref IS NOT NULL` hits the
   dispatched row rather than inserting a twin — and marks the row `closed`
@@ -134,13 +133,13 @@ whole world, and a leaked read token must not be able to write anything.
   `apps/console/test/dispatch.integration.test.ts`.
 - **Content does not return yet.** `github-state` does not fetch comments.
   When it does, a closing comment should land as a `report` proposal in the
-  queue (§4.11). The manifest's `result:` block carries the TODO; nothing on
+  queue (§4.11). The connection type's `dispatch.result` carries the TODO; nothing on
   the dispatch side needs to change.
 
 ### Verifying
 
 ```bash
-# checks: absent until both env vars are set, ok once the token can read the repo
+# checks: absent until the connection's key is delivered, ok once the token can read the repo
 curl -s --cookie "$SESSION" https://<origin>/api/targets | jq '.targets[] | {name, check}'
 # dispatch task 12 (session cookie only — an owner token is 403)
 curl -s --cookie "$SESSION" -H 'content-type: application/json' \
@@ -154,7 +153,7 @@ psql ... -c "SELECT tool, count(*), sum(cost_usd) FROM runs WHERE kind='dispatch
 
 | route                              | auth            | body / result                                                                                      |
 | ---------------------------------- | --------------- | -------------------------------------------------------------------------------------------------- |
-| `GET /api/targets`                 | passkey session | `{ targets: [{ name, transport, submit, result, auth, cost, data_policy, check }], as_of }`         |
+| `GET /api/targets`                 | passkey session | `{ targets: [{ name, transport, submit, result, auth, cost, data_policy, check, connection? }], as_of }` |
 | `POST /api/tasks/:id/dispatch`     | passkey session | `{ target, brief, sources?, purpose?, max_acu? }` → `201 { ok, ref, url, run_id }`; `400` + `violations[]` on a policy refusal (and on an unknown `purpose` or a non-positive `max_acu`); `409` + `check` when the target is unavailable or the task is already bound/closed; `404` unknown task/target |
 
 `purpose` is `work` (default) or `knowledge_research` — why the brief is
@@ -163,7 +162,7 @@ row and the session's tags. Deliberately a field on the dispatch call rather
 than a new `work.kind`: `packages/tasks` owns two claimable kinds and
 `github-state` owns the rest, so a third would ripple for no gain.
 `max_acu` is the per-dispatch budget ceiling for targets that have one; it
-overrides the manifest's `submit.max_acu`.
+overrides the connection type's `dispatch.max_acu`.
 
 Owner tokens and agent tokens get a uniform `403` — dispatch is outbound and
 lives on the management surface (CRIT-7).

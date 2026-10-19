@@ -2364,7 +2364,23 @@ older `.metistry/targets/`). `meta` carries the units per kind, every overlay
 its reason. A skip is `degraded`, never `failed`: the product runs without the
 unit, and the remediation names the file and what is wrong with it (most often
 a manifest without `schema: 1`). `metistry extensions list` is the same facts
-for the extensions directory alone.
+for the extensions directory alone. Since 0.17.0 (X-85) the console loads one
+`targets/` manifest only — the crews' `local-crew` — so the row also lists, as
+skipped, every other `targets/` manifest (the product's, the older
+`.metistry/targets/`, an extension's), each naming `metistry connections add`:
+GitHub Issues and Devin are agent connections now.
+
+**The `target keys` row** (X-85, only when it has something to say). T4-11
+kept `METISTRY_GITHUB_TOKEN` and `METISTRY_DEVIN_API_KEY` working for one
+release, for dispatch and the GitHub and Devin syncs; 0.16.0 was that release,
+and the console no longer reads either. When one is still set in this install's
+environment the row is `degraded`, names which, says it is ignored, and names
+the verb that replaces it — `metistry connections add <name> --type agent
+--provider devin|github-issues …` (`docs/ops/connections.md`, *Agent
+connections*) — then to drop the line from `.env`. Names, never values; never
+`failed`, since nothing is broken until the connection is wanted. (`metistry
+update` still reads `METISTRY_GITHUB_TOKEN` for the Releases API, which the
+row says.)
 
 **The `vault sync` row** (plan §2.21). The reconciler's `GET /vault/status`
 with its bearer: ahead and behind the remote, the last push, any conflict and

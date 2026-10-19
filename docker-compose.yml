@@ -79,13 +79,10 @@ services:
       # note contents for mcp-brain's knowledge_read. Degrades absent when unset.
       METISTRY_RECONCILER_URL: ${METISTRY_RECONCILER_URL:-}
       METISTRY_BRIDGE_TOKEN_RECONCILER: ${METISTRY_BRIDGE_TOKEN_RECONCILER:-}
-      # github-state collector: fine-grained READ-ONLY PAT + "owner/repo,owner/repo2"
+      # NOT READ since 0.17.0 (X-85): the github-state sync and the github-issues
+      # target are agent connections. Passed through only so the console can log
+      # that a key still set in .env is ignored.
       METISTRY_GITHUB_TOKEN: ${METISTRY_GITHUB_TOKEN:-}
-      METISTRY_GITHUB_REPOS: ${METISTRY_GITHUB_REPOS:-}
-      # github-issues dispatch target (§4.18): a SEPARATE fine-grained WRITE PAT
-      # (Issues read/write + Metadata on the dispatch repo only) + "owner/repo"
-      METISTRY_GITHUB_WRITE_TOKEN: ${METISTRY_GITHUB_WRITE_TOKEN:-}
-      METISTRY_GITHUB_DISPATCH_REPO: ${METISTRY_GITHUB_DISPATCH_REPO:-}
       METISTRY_TARGETS_DIRS: ${METISTRY_TARGETS_DIRS:-targets:.metistry/targets}
       # compute.yaml (docs/ops/compute.md): providers, assignments, budgets.
       # The seed's copy ships in the image and assigns nothing; an instance
@@ -101,12 +98,10 @@ services:
       METISTRY_AWS_ACCESS_KEY_ID: ${METISTRY_AWS_ACCESS_KEY_ID:-}
       METISTRY_AWS_SECRET_ACCESS_KEY: ${METISTRY_AWS_SECRET_ACCESS_KEY:-}
       METISTRY_AWS_SESSION_TOKEN: ${METISTRY_AWS_SESSION_TOKEN:-}
-      # devin-knowledge collector (degrades absent; docs/ops/devin.md): the
-      # owner's own `cog_` Devin key. ORG_ID only for account-scoped tokens
-      # (enterprise service users, PATs); REPOS is the opt-in wiki half.
+      # Devin (docs/ops/devin.md) is the `devin` agent connection; its key is
+      # not read from here since 0.17.0 (passed through only for the console's
+      # "ignored" log line).
       METISTRY_DEVIN_API_KEY: ${METISTRY_DEVIN_API_KEY:-}
-      METISTRY_DEVIN_ORG_ID: ${METISTRY_DEVIN_ORG_ID:-}
-      METISTRY_DEVIN_REPOS: ${METISTRY_DEVIN_REPOS:-}
       METISTRY_DEVIN_MAX_ITEMS: ${METISTRY_DEVIN_MAX_ITEMS:-}
       # user's timezone for brief/schedule rendering (Me/profile.md drives this later)
       TZ: ${METISTRY_TZ:-UTC}

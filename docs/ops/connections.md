@@ -427,10 +427,11 @@ read-only, `readOnlyGithub` wraps the door, and pinned to
 `https://api.github.com`), and **Devin** (`devin-sessions` and
 `devin-knowledge` read the `devin` agent connection — its key, its `org` and
 `repos`). A connection that is there but wrong fails the run by name; it
-never falls back to an older key. **For one release** a collector with no
-connection still reads its legacy environment (`METISTRY_GITHUB_TOKEN` +
-`METISTRY_GITHUB_REPOS`, `METISTRY_DEVIN_API_KEY`), so an install keeps
-running until the owner adds the connection. Two stay outside, and why:
+never falls back to an older key. Since 0.17.0 (X-85) the console reads no
+legacy environment for them: a collector with no connection degrades absent,
+and `METISTRY_GITHUB_TOKEN` / `METISTRY_DEVIN_API_KEY` set in the environment
+are ignored (`metistry doctor` has a *target keys* row naming them). Two stay
+outside, and why:
 **AWS Costs** signs each request with SigV4, which needs the secret key's
 value in the process to compute the signature — a door that fills a
 reference cannot sign; and **Calendar** (`eventkit-calendar`) reads the
@@ -449,11 +450,11 @@ metistry secrets sync --to env                        # then restart the console
 
 ## Agent connections — targets as connections (T4-11)
 
-An **agent** connection is somewhere work is sent (plan §2.6): today's two
-HTTP targets, `targets/devin-sessions` and `targets/github-issues`, moved
-into connection types — `seed/connection-types/devin/` and
-`seed/connection-types/github-issues/`. The split is where each thing
-belongs:
+An **agent** connection is somewhere work is sent (plan §2.6): the two HTTP
+targets that used to be `targets/devin-sessions` and `targets/github-issues`
+are connection types — `seed/connection-types/devin/` and
+`seed/connection-types/github-issues/` (the manifests themselves are gone,
+X-85). The split is where each thing belongs:
 
 | Where | What |
 | --- | --- |
@@ -466,9 +467,8 @@ afresh on every `GET /api/targets` and every `POST /api/tasks/:id/dispatch`
 and presents each as the target `dispatch()` already knows: the same data
 policy check, the same `runs` row, the same work-row binding, the same
 return path (`devin-sessions` polls a Devin session home; `github-state`
-reconciles the issue). A connection of the same name as a `targets/`
-manifest wins (D4) — except the crews' `local-crew`, which a connection can
-never take.
+reconciles the issue). The crews' `local-crew` is the one `targets/`
+manifest left; a connection can never take its name.
 
 **What changes is where the key comes from.** A connection-backed target's
 requests go through the connection's door (`openAgentHttp`,
@@ -517,10 +517,15 @@ metistry connections add github-issues --type agent --provider github-issues \
     --config repo=owner/repo --no-discover
 ```
 
-**For one release** the `targets/` manifests and their `env:` keys load
-beside the connections, so an install's dispatch keeps working until the
-owner adds them; a `targets/` Devin manifest dispatches with the Devin
-type's purposes.
+**The one-release shim is gone (0.17.0, X-85).** T4-11 kept the `targets/`
+manifests and their `env:` keys (`METISTRY_GITHUB_TOKEN`,
+`METISTRY_DEVIN_API_KEY`) working beside the connections for one release;
+0.16.0 was that release. A `targets/` manifest other than `local-crew` is
+refused at load, naming `metistry connections add`; an environment key alone
+dispatches nothing (the target does not exist, and dispatch answers `404`);
+and `metistry doctor`'s *target keys* row names a key still set and says it is
+ignored. The commands above are the migration: store the key, add the
+connection, delete the old line from `.env`.
 
 ## Linear
 
@@ -1132,10 +1137,10 @@ group as well.
   the owner's own door, so a per-tool Ask would ask the owner about their
   own click, and a tool would put the connection on the proxy's listing,
   where it is not reachable.
-- **Legacy keys for one release** (T4-11): a sync with no connection reads
-  its old environment, and the `targets/` manifests still dispatch with
-  `env:` keys, so `metistry update` breaks nothing before the owner adds the
-  connections; a connection, once there, always wins.
+- **No legacy keys** (X-85, 0.17.0): T4-11 let a sync with no connection read
+  its old environment and the `targets/` manifests dispatch with `env:` keys,
+  for one release. That release has passed; a connection is the only way in,
+  and `metistry doctor` names a leftover key.
 - **A rotated refresh token lives in memory** (T4-10): the process that dials
   cannot write the Keychain, so a provider that rotates refresh tokens hands
   the new one to the running console only; after a restart the stored one is

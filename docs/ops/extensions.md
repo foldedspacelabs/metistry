@@ -33,7 +33,7 @@ kind.
 | `collector` / sync | manifest + code | declared `needs_you` raise rules, the connection type it reads | `collectors/index.ts`'s array (T4-5) |
 | `agent` (actor) | `.metistry/agents/**.md` | the agent manifest | exists |
 | named query | `queries/*.yaml` | `expose`, params | exists (overlay) |
-| target | `targets/<name>/manifest.yaml` (for one release) | folds into connection type `agent` (T4-11): a type's `dispatch:` block | the target registry (T4-5), which reads agent connections beside `targets/` (T4-11) |
+| target | `targets/local-crew/manifest.yaml` only (X-85) | everything else folded into connection type `agent` (T4-11): a type's `dispatch:` block | the target registry (T4-5), which reads agent connections beside the crews' `local-crew` (T4-11) |
 
 **In this program** the registries and data-only extensions ship. Code from an
 extension never runs inside the console: an extension that needs code runs as a
@@ -100,7 +100,7 @@ directory and the owner's.
 | --- | --- | --- | --- |
 | `collector` | `collectors/<name>/` | the console's runner, the watchdog's silent-collector probe | **overlay** — replace a product collector's manifest |
 | `routine` | `routines/<name>/` | the same | **overlay** |
-| `target` | `targets/<name>/` (and the owner's older `.metistry/targets/`) | the console (dispatch, `GET /api/targets`) | add a target, or replace one |
+| `target` | `targets/local-crew/` (and the owner's older `.metistry/targets/`) | the console (dispatch, `GET /api/targets`) | replace `local-crew`'s manifest; any other name is refused at load, naming `metistry connections add` (X-85) |
 | `provider` | `seed/compute-templates/<name>/` | `metistry compute providers add --from`, the hints that name templates | add a template, or replace one |
 | `connection-type` | `seed/connection-types/<name>/` (the first ship with T4-12–T4-15) | the connections package (T4-8a) | add a type, or replace one |
 
@@ -377,9 +377,10 @@ list. **Done (T4-5):**
 **Still to move, each with the ticket that owns it:**
 
 - `targetManifest.transport` (`packages/core/src/manifest.ts`) → retired with
-  the `targets/` manifests after the one release they still load (T4-11 moved
-  their content into agent connection types; `AGENT_DISPATCHERS` is the
-  closed set that replaces the enum)
+  the `targets/` manifests (T4-11 moved their content into agent connection
+  types; `AGENT_DISPATCHERS` is the closed set that replaces the enum; X-85
+  stopped the console loading any `targets/` manifest but the crews'
+  `local-crew`, so the enum's other values have no manifest left)
 - `CREW_MODELS` (→ compute references, T4-6)
 - `SECRET_SCOPES` (→ removed, §2.14, T4-3)
 - the proposal kind → request type mapping (→ the F-5 table, open to new types

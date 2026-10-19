@@ -123,8 +123,18 @@ describe.skipIf(!hasDb)("the proxy listener: remote by construction", () => {
 
   const localOwner = { authorization: `Bearer ${localOwnerToken}` };
   const sinceNow = async (): Promise<number> => Number((await pool.query(`SELECT coalesce(max(id), 0) AS id FROM runs`)).rows[0].id);
+  // This file's own requests only: CI runs the package's files in parallel, and
+  // another suite's refusal (reach-gate's session, say) lands in `runs` between
+  // `since` and the read. This file is the only one that opens a proxy listener,
+  // so `listener = 'proxy'` is its marker; the one main-listener row it makes on
+  // purpose is the genuinely remote peer, named by that peer's address.
   const authRows = async (tool: string, since: number): Promise<Record<string, unknown>[]> =>
-    (await pool.query(`SELECT meta FROM runs WHERE component = 'console' AND kind = 'auth' AND tool = $1 AND id > $2 ORDER BY id`, [tool, since])).rows.map((r) => r.meta as Record<string, unknown>);
+    (
+      await pool.query(
+        `SELECT meta FROM runs WHERE component = 'console' AND kind = 'auth' AND tool = $1 AND id > $2 AND (meta ->> 'listener' = 'proxy' OR meta ->> 'remote' = $3::text) ORDER BY id`,
+        [tool, since, external ?? null],
+      )
+    ).rows.map((r) => r.meta as Record<string, unknown>);
 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);

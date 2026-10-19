@@ -2635,6 +2635,8 @@ the head SHA shown; the mirror resolves when the review lands.
 client; the collector's PAT stays read-only**.
 *Accept:* the owner has stored `github_write` (§3.4).
 
+*Ruling 2026-10-04 (Q30):* GitHub's refusal of self-approval is accepted for now — the owner rarely approves agent-authored PRs — but whether co-authored commits or a GitHub account for agents fits better is sanity-checked before the question is closed.
+
 **T2-14 · Stale requests** · M · W2 · deps T1-8 —
 *Spec:* A subject fingerprint per type (PR head SHA, task line text, work row
 `updated_at`) checked on answer → `409 stale`, nothing sent.
@@ -2772,6 +2774,8 @@ example (ruled 2026-09-27).
 the area**.
 *Accept:* —
 
+*Ruling 2026-10-04 (Q2):* the owner's text is trusted: a routine's task, written by the owner, is not run through `checkBrief` — as built (#413).
+
 **T3-9 · Writing the session archive** · M · W1 · deps T1-11 —
 *Spec:* The engine appends each turn (system prompt as sent, messages, tool calls
 with arguments and results, redacted) with `expires_at` 30 days out; a purge
@@ -2795,6 +2799,8 @@ Approve writes it through the Scheduled door as `user`.
 *Files:* `routines/reply-review` pattern, `apps/console/src/`.
 *Tests:* **nothing is written before Approve**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q5):* a routine suggestion is raised by the assistant through a brain tool, not by a deterministic routine; Approve still writes through the Scheduled door as `user`. Nothing raises one yet — a follow-up, not yet a ticket.
 
 **T3-12 · Three strikes and a Stop limit** · M · W2 · deps T2-9 —
 *Spec:* A component failing three times stops and raises one request (C135); a
@@ -2952,6 +2958,8 @@ sent**; a bring-your-own client id overrides the shipped one.
 
 *Ruling 2026-09-30 (Q8):* Google gets its own OAuth door; there is no secret-in-URL door, and private ICS feeds stay out.
 
+*Ruling 2026-10-04 (Q-e):* Metistry may ship a Google Desktop OAuth client secret beside the shipped client id — Google may require it at token exchange even with PKCE. F-3's rule that a connection-type manifest carries no `client_secret` is revisited for the shipped client only, by the follow-up that ships it (not yet a ticket); a bring-your-own client's secret stays a secret (`--client-secret-secret`), never a config value.
+
 **T4-15 · Mail: IMAP** · L · W4 · deps T4-8a —
 *Spec:* §2.6 (§4 Q8): `imap` type with an app password: read, `draft` by APPEND to
 Drafts; no SMTP. A Gmail known-service entry explains the 2-Step Verification +
@@ -2973,6 +2981,8 @@ where none.
 `rsvp` capability**.
 *Accept:* —
 
+*Ruling 2026-10-04 (Q-a):* §2.12's excerpt stays and is built: a message card carries an excerpt of the body, not headers only. The body is read behind §4.12's on-device reduction (the PoC-13 bar), the question's own framing — a follow-up, not yet a ticket.
+
 **T4-18 · Compute** · L · W2 · deps T4-1 —
 *Spec:* Providers gain `enabled` and `billing`; keys as secret references;
 `seed/model-identities.yaml`; catalogue search grouped by model with Refresh;
@@ -2991,6 +3001,8 @@ windows as limits.
 *Files:* `apps/console/src/compute-routes.ts`, `packages/core/src/budget.ts`.
 *Tests:* a subscription provider has no dollar limit.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q24):* an exhausted subscription window — a provider `429` — is reported to the owner, not retried blindly; the instance limit counting subscription calls is confirmed. The report is a follow-up, not yet a ticket.
 
 **T4-20 · Keep awake and the lid** · M · W1 · deps —
 *Spec:* §2.15: the object form beside the four values; `set-keep-awake` flags;
@@ -3191,6 +3203,8 @@ reason (C138). The ceiling reads `access_ceilings` on `GET /api/agents` (T2-2,
 definition editor is absent on a remote client**.
 *Accept:* as above.
 
+*Ruling 2026-10-04 (Q15):* Esc keeps the draft (C136 over screen 7); ⌘S and ⌘⌫ stay unbound, deferred; trust and per-run cost are served and drawn; Permissions Edit for connected agents only is confirmed. Trust and per-run cost are a follow-up, not yet a ticket.
+
 **T6-6 · Scheduled** · L · W3 · deps T3-3 —
 *Spec:* `screen-08-routines.md` §10–§11 + §2.5: day-banded occurrences with the
 *Throughout the day* band, the week axis, routine detail (schedule editor with
@@ -3200,6 +3214,8 @@ Default), syncs (cadence, raise toggles, Sync Now).
 *Tests:* a silent tick is not an occurrence; **the assignment editor calls the
 `local` route and is absent on a remote client**.
 *Accept:* as above.
+
+*Ruling 2026-10-04 (Q16):* a product routine's task, actor and name become editable through a door, as §10.2 draws them, and the doors are adjusted to the design — a follow-up, not yet a ticket.
 
 **T6-7 · Board and card detail** · L · W3 · deps T1-1, T1-2 —
 *Spec:* `screen-06-board.md`, `screen-14-card-detail.md`, `screen-16` §2: five
@@ -3270,6 +3286,8 @@ HTTP / Command / Path; *What it sends*; host guards; calendar and mail.
 *Tests:* a connection type loaded from an extension renders its form.
 *Accept:* as above.
 
+*Ruling 2026-10-04 (Q-h, Q-i):* the one manifest-validated `--config` flag and its refusals (unknown key, bad shape, secret kind) are confirmed, and the wider `types` payload (`description`, `provides`, `capabilities`, `tools`, per-field help; never a secret) is accepted.
+
 **T6-14 · Secrets and Variables** · M · W4 · deps T4-1, T4-4 —
 *Spec:* `screen-19-secrets-variables.md` + §2.14. A key-shaped value is refused
 with *Store as Secret* and **no** *Save as Variable* override — screen 19 §2 offers
@@ -3279,6 +3297,8 @@ one; the plan and T4-4 (#313) do not.
 what stops.
 *Accept:* as above.
 
+*Ruling 2026-10-04 (M7 reversed):* the app may mint. M7's "the app never mints" is reversed, so the Secrets pane may mint as well as rotate, through the CLI door (§2.2), and secrets and config are managed through the UI — the owner never mints, merges or cleans up by hand. The self-managing-instance design note (W5) rewrites §2.2's M7 row and says how; the pane follows it.
+
 **T6-15 · Live Capture and Sessions** · M · W4 · deps T8-4, T3-9 —
 *Spec:* `screen-11-capture-bar.md` §8, `screen-12` §4 + §2.15: the bar switch,
 placement, permissions read-through, retention, Purge Now with its count.
@@ -3286,12 +3306,16 @@ placement, permissions read-through, retention, Purge Now with its count.
 *Tests:* Purge Now lists unfolded sessions and offers *Fold First* (C136).
 *Accept:* as above.
 
+*Ruling 2026-10-04 (Q-f):* device-local preferences (`anyAppShortcuts`, `captureBar`) stay in `UserDefaults`; X-91 holds the store to its pointer and device-local sets.
+
 **T6-16 · Hot keys and the audit** · M · W4 · deps T5-2 —
 *Spec:* `components-02` §2 (C120, C127) and a pass over every view against §2.18.
 *Files:* `hotkeys.swift`, tests.
 *Tests:* nothing registers while any row conflicts; the audit's accessibility test
 covers every view.
 *Accept:* as above.
+
+*Ruling 2026-10-04 (Q-f):* device-local preferences (`anyAppShortcuts`, `captureBar`) stay in `UserDefaults`; X-91 holds the store to its pointer and device-local sets.
 
 #### T7 — The PWA
 
@@ -3335,6 +3359,8 @@ the 409; the *Can't reach Metistry* band.
 *Files:* `apps/console/web/sw.js`, `app.js`.
 *Tests:* **answers, moves, Run Now and grants are never queued**.
 *Accept:* as above.
+
+*Ruling 2026-10-04 (Q22):* Defer queues offline like Tick, and cached reads on a device revoked while offline are accepted until its next `401`. The offline Defer is a follow-up, not yet a ticket.
 
 **T7-5 · Push and enrolment** · M · W3 · deps —
 *Spec:* screen 18 §6: no `alert()`; ask in context; the install sheet.
@@ -3384,6 +3410,8 @@ and usage strings copied from `ek-helper`; the launchd job and doctor row.
 *Files:* `packages/mcp-live-capture/`, `ops/`.
 *Tests:* a crash saves up to the crash and raises one report.
 *Accept:* the owner grants the permissions and records a real meeting (§3.4).
+
+*Ruling 2026-10-04 (Q-d):* a capture request's row carries a reference to the note, not the transcript's text — a follow-up, not yet a ticket.
 
 **T8-3 · Screen and window** · L · W4 · deps T8-2a —
 *Spec:* §2.15, C76: `SCStream` with `capturesAudio` and `captureMicrophone`, one
@@ -3472,6 +3500,8 @@ accepted (§4 Q2).
 *Tests:* the invariant tests follow the ratified wording.
 *Accept:* not merged before T9-3's report clears the bar.
 
+*Ruling 2026-10-04 (Q-g):* run `metistry-eval complexity`, then accept. The owner has no time to author the 150-plus fixtures and C11 forbids Claude-authored labels, so they come from X-121's generator, spot-checked by the owner (an OpenRouter key at run time); the gate is otherwise unchanged.
+
 #### T10 — Vault git
 
 **T10-1 · One commit per act** · M · W1 · deps —
@@ -3538,6 +3568,8 @@ conflict, Roll Back…); a Knowledge page gains its history with *Restore*.
 *Tests:* §2.18; Roll Back names what it will undo.
 *Accept:* as T6's; Knowledge shows a restore request inline — answering it there
 answers it in Needs You (moved from T10-5, W2 housekeeping).
+
+*Ruling 2026-10-04 (Q19):* commits from before a rename stay view-only; restore across renames is not built.
 
 #### X — Fixes found at the W0 freeze
 
@@ -3933,6 +3965,8 @@ it.
 *Tests:* **a door reads only a secret granted to it**.
 *Accept:* —
 
+*Ruling 2026-10-04 (Q9):* yes — an owner door is a grantee kind; build as specified.
+
 **X-43 · `private` is a reserved tier name** · S · deps T8-6 —
 *Spec:* a `rules.yaml` tier named `private` parses but is shadowed by T8-6's
 private tier and refused only at resolution. `packages/core/src/tiers.ts`'s
@@ -3967,6 +4001,8 @@ no stored secret can collide with ordinary text (the owner's W3 question 27).
 *Tests:* **a too-short secret is refused at set, and redaction still finds every
 stored secret**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q27):* the owner ruled the other way, and this supersedes the title and spec above: short values, even empty ones, are allowed at `secrets set`. The redactor skips a value below a minimum length instead, so a short secret is never refused as `secret_in_model_body` — and is not redacted, the trade the owner accepted. *Tests:* **a one-character secret is stored and a model body containing it is not refused; every secret at or above the minimum is still found**.
 
 **X-46 · A provider refusal is one request per secret** · S · deps T4-23 —
 *Spec:* `apps/assistant/src/provider-refusal.ts` raises one Needs You request
@@ -4007,6 +4043,8 @@ which.
 *Tests:* the ratchet, with at least 300 tokens of headroom.
 *Accept:* —
 
+*Ruling 2026-10-04 (Q26):* lazy discovery, not a raised ceiling — with the Context Mode review's caveat (CM-7, `docs/research/2026-10-04-context-mode-review.md` §5.1): a client that already defers MCP tools must not pay two discovery hops, so the ratchet records what each connected client pays and the brain leans on a client's own deferral where it exists. *Tests* add: **no client pays two discovery turns to reach one brain tool**.
+
 **X-50 · Session-purge is quiet while the Session Fold is paused** · S · deps T3-10 —
 *Spec:* `routines/session-purge/run.ts` warns every night that sessions wait
 for the fold while the owner has paused the Session Fold. While it is paused,
@@ -4026,6 +4064,8 @@ ruled, the routine fills its slots in that file instead of skipping.
 `routines/standup/run.ts`.
 *Tests:* **an assistant-created dated file is not reported `user_owned`**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q6):* fill in the slots — when the assistant has created the day's file, the routine fills its marked slots in it instead of skipping the day, and the outcome is no longer `user_owned`.
 
 **X-52 · The weekly review counts only the owner's decisions** · S —
 *Spec:* `routines/weekly-review/run.ts` counts automatic decisions (the policy's,
@@ -4059,6 +4099,8 @@ organiser named, or moved with the attendees told — at the tool.
 *Files:* `apps/console/src/meeting-move-route.ts`.
 *Tests:* **a meeting organised by someone else is handled as ruled**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q12):* moved, if the attendee may edit the event — "some calendar events cannot be edited by attendees". The door moves a meeting someone else organised only where the calendar lets the owner edit it, and refuses with the organiser named where it does not.
 
 **X-56 · An iCloud CalDAV account needs no second step** · M · deps T4-13 —
 *Spec:* after the first sync, iCloud's per-account `pNN-caldav` host needs two
@@ -4132,6 +4174,8 @@ only**.
 *Tests:* **Slipping and Owed load their `where:` filter**.
 *Accept:* —
 
+*Ruling 2026-10-04 (Q20):* Owed tracks both directions — what the owner owes others and what others owe the owner — each with how long it has waited or when it is due; SavedTaskView and the `where:` views accommodate that design.
+
 **X-64 · The Mac's receipt knows "acknowledged"** · S · deps X-10 —
 *Spec:* a `409 already_decided` receipt words the earlier decision, but has no
 word for X-10's `acknowledged`.
@@ -4147,6 +4191,8 @@ Mac shows none.
 *Files:* `seed/queries/collector_health.yaml`, `docs/ops/client-api.md`.
 *Tests:* U2; the fixture.
 *Accept:* F-7's fixture recorded, and the Mac store method in the same PR.
+
+*Ruling 2026-10-04 (Q14):* the owner left the door to the coordinator ("make a reasonable choice for where that should live"); the builder proposes it in the PR.
 
 **X-66 · Run detail carries its route and a routine run's session** · M · deps T6-10 —
 *Spec:* `run_detail` does not join a turn's `kind: route` row, so Run detail
@@ -4258,6 +4304,8 @@ is there.
 `up` keeps it; `up` without the recorder mints nothing**.
 *Accept:* —
 
+*Ruling 2026-10-04 (M7 reversed):* widened. `up` — and `secrets mint` — mint all three of the recorder's tokens when the live-capture bridge is configured and one is missing: the control token (`METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`), the bridge token (`METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE`) and the capture owner token the bridge posts transcripts with (`METISTRY_LIVE_CAPTURE_INBOX_TOKEN`, an `owner_tokens` row labelled `live-capture`, minted as auth-store's `mintOwnerToken` mints one). The release ships no other way to mint an owner token: `docs/ops/capture-shortcut.md` uses the console's `scripts/enroll.mjs --owner-token`, which the runtime pack does not carry (`ops/release/pack-runtime.sh`). None replaces a token that is there, and the three stay distinct. *Tests* widen to all three.
+
 **X-81 · Kept recordings have a list route** · S · deps T6-15, T8-4 —
 *Spec:* the Mac lists recordings through `GET /api/knowledge/pages?prefix=Journal/Transcripts`
 and then reads each page by id (`live-capture-model.swift`, capped at 100), so
@@ -4292,6 +4340,8 @@ whichever Q-c rules.
 as the subject, and no line of the note reaches the feed**.
 *Accept:* —
 
+*Ruling 2026-10-04 (Q-c):* the subject comes from the title alone; no tier gate.
+
 **X-84 · `POST /message` carries a session-turn marker** · M · deps T8-6, T6-15 —
 *Spec:* waits on the owner's W4 question Q-b. Screen 11 §4 ("staying on this
 Mac") wants an Ask-panel turn inside a capture session held to the private
@@ -4307,6 +4357,8 @@ back (T8-6).
 `PrivateTierUnavailable`; an unmarked turn is routed as before; a marker
 naming a session that is not open is refused**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q-b):* add the field, as specified.
 
 **X-85 · The targets shim comes out** · S · deps T4-11 —
 *Spec:* T4-11 kept `METISTRY_GITHUB_TOKEN`, `METISTRY_DEVIN_API_KEY` and the
@@ -4344,6 +4396,8 @@ its connection's reachability and credential state the way
 *Tests:* **every collector manifest's entry exports `check()`, held by one CI
 check**.
 *Accept:* —
+
+*Coordinator call 2026-10-18:* widened to M — every collector (not only the four calendar ones) gains a cheap, local-first `check()`; doctor's `walkManifests` calls it and merges the result into the existing per-collector row; one strict CI check with no allowlist. Reason: CLAUDE.md's convention was never wired, and doctor cannot repair what it cannot check.
 
 **X-88 · The workspace test script isolates each package's database** · M —
 *Spec:* the root `pnpm test` runs `pnpm -r --workspace-concurrency=1 run test`
@@ -4399,6 +4453,8 @@ enumeration rather than to a literal list.
 `apps/macos/tests/kit/settings-model-tests.swift`.
 *Tests:* **a key outside both sets fails; a device-local key passes**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q-f):* `UserDefaults` is the store; build as specified.
 
 **X-92 · Dispatch's `REPO_RE` has a misuse test** · S · deps T4-11 —
 *Spec:* `apps/console/src/dispatch.ts`'s `REPO_RE` refuses `../x` and `x/..`

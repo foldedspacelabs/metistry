@@ -38,7 +38,7 @@ All of them are real.
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
 | `templates check [<file>]` | does the vault's `Templates/` read — every directive, with the line number Obsidian shows — before the next run reads it (a template change takes effect at the next run) |
-| `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
+| `doctor [--check \| --fix [--yes]] [--json]` | validate every manifest and probe every bridge, service, container, launchd job — then **repair** what it finds: in a terminal a bare `doctor` applies every fixable row's fix and re-checks once; `--check` is read-only; `--fix` repairs without a terminal (`--yes` for a fix that moves files or restarts a running service) |
 | `up` | bring an install to running: containers/host jobs, then doctor — and exit |
 | `down` | stop every host job and container for this instance, then confirm nothing is left running |
 | `update` | move an install forward: pull/build, migrate, restart what changed, pin, doctor |
@@ -2363,7 +2363,8 @@ terminal's locale is not UTF-8, come from `docs/ops/cli-style.md`;
 
 One row per thing that can be wrong; every row is a `core` `CheckResult`
 (`name`, `status`, `latency_ms`, `probe`, `remediation`, `meta`) plus a
-`kind`, and — additively, T4-21 — an optional `action`. Statuses mean what
+`kind`, and — additively, T4-21 — an optional `action`; since X-123 every row
+also carries `fix` and `fixed` (*Doctor repairs*, below). Statuses mean what
 they mean everywhere else in the product:
 
 | status | meaning | exit code |
@@ -2377,6 +2378,111 @@ they mean everywhere else in the product:
 how optional bridges are designed to behave (a Linux box has no apple-fm).
 Something you rely on that shows `absent` is still a finding — read the
 column, not just the exit code.
+
+### Doctor repairs
+
+> "Regardless of the problems found, the user only needs to run `metistry
+> doctor` to fix it and get the instance working correctly." — the owner,
+> 2026-10-04
+
+Doctor's purpose is repair, not a status pane (X-123). **Every row is
+classified**, in code, per finding — never by reading its own sentence:
+
+| `fix` | meaning | the table shows |
+| --- | --- | --- |
+| `fixable` | doctor does it: the row carries a `repair` — an id from a closed table, what it acts on, and whether it asks first | `fixable`, then `fixed` or `still failing` after a repair run |
+| `hand` | the owner does it, and the remediation says the exact step: a TCC grant (System Settings), a credential another service issues, a download, `sudo`, choosing the instance directory, a password nothing holds | `your hand` |
+| `info` | a fact, not a fault: a feature that is off, a server nobody runs, a schedule that has never run, a row that follows another's finding | nothing |
+
+**Modes.** Which one runs is decided by the flags, and for a bare `doctor` by
+whether there is a person to ask:
+
+- **`metistry doctor`** in a terminal checks, then **applies every fixable
+  row's fix**, asking once (`y/N`) per fix that moves files or restarts a
+  running service, then **re-checks once** — never a loop — and prints the
+  fixes as `up` prints its steps (`$ argv`), then **before → after** for each
+  row a fix was for, then the re-check's tally. Exit 0 when nothing is
+  `failed`, no fix failed, and none is waiting for a `--yes`.
+- **`--check`** is read-only — exactly the report, as before. It is what
+  `up`'s and `update`'s closing doctor, CI, the wave checkpoint and the Mac
+  app's refresh run (the app's M6 door is `doctor --json`, which is `--check`
+  by construction: see below).
+- **`--fix [--yes]`** repairs without a terminal. A destructive fix runs only
+  with `--yes`; without it, it is previewed, left, and the run exits non-zero.
+- **A bare `doctor` with nobody to ask** — a pipe, a script, an agent, the Mac
+  app, or `--json` (the question would land in the document) — is `--check`,
+  and ends with one line — *N fixable — `metistry doctor` in a terminal applies
+  the fixes, or `metistry doctor --fix`*. So every script and agent that
+  runs `metistry doctor` today stays read-only, and the only way to repair
+  without a terminal is to say `--fix`.
+
+**The closed table** (`RepairId`, `packages/cli/src/doctor.ts`; the fixes,
+`doctor-fix.ts`). Each is an existing audited service, run through the same
+`StepRunner` as `up`'s and `update`'s steps — no new shell-out, no raw git,
+nothing a row's prose could add (invariants 9 and 10):
+
+| id | what runs | for | asks first |
+| --- | --- | --- | --- |
+| `restart <service>` | `metistry restart <service>` (service-control.ts: the supervisor's socket for a child, `launchctl kickstart -k` for an agent, `docker compose restart` for a container) | the console down; a bridge unreachable or answering without a `check()` body; the db unreachable; a supervisor child crash-looping or exited; a launchd job bootstrapped and not running; a container not running | no — nothing running is interrupted. **Yes** when the service answers and is bounced for a newer `.env` value: the console refusing `METISTRY_LOCAL_OWNER_TOKEN`, a bridge refusing its token (never a re-mint), the reconciler predating `/vault/status`; and for the supervisor itself (every child restarts) |
+| `migrate` | the migration runner under `pg_advisory_lock`, one transaction per file — `update`'s step alone, never the rest of `update`, and never `pnpm db:migrate`, which a release install does not have | `migrations` pending, or no `schema_migrations` table (a fresh launchd install whose `up` never migrated crash-loops its console until this runs) | no |
+| `render` | `up`, inside doctor exactly as `update` runs it inside itself — one renderer | a launchd job not bootstrapped; no `supervisor.json`; `launchd env` drift or never rendered; `supervisor.json` without the assistant child; a child spawned from an older render; nothing spawned under a Seatbelt profile (`spawned.profile === null`, X-48); keep-awake with no state file or released when the supervisor stopped; a compose service with no container | **yes** — it restarts the supervisor and every child |
+| `cli_shim` | write this install's cli shim (`up`'s step) | `cli on PATH` with no shim yet | no |
+| `seed_templates` | re-seed the templates the vault lacks (`update`'s step; a file you have is never touched) | a schedule row skipped `template_missing` | no |
+| `vault_case` | rename product files to the seed's spelling through the reconciler (`update`'s step) | `vault case` | no |
+| `migrate_scope` | `secrets migrate-scope` — copies, deletes nothing (`update`'s step) | `shared scope` with credentials still only in the retired scope | no |
+| `migrate_layout` | `metistry migrate-layout` | `instance layout` legacy | **yes** — a `git mv` storm |
+| `migrate_inbox` | `metistry migrate-inbox` | `inbox` pre-#156 | **yes** — files move |
+
+What stays the owner's hand, with the exact step on the row: a TCC grant; a
+credential another service issues (a provider key, a connection's secret); a
+download (the app behind the lock, Docker); `sudo pmset`; choosing the
+instance directory; linking the shim onto `PATH` (invariant 2); a database
+password nothing holds (never minted over a data dir); removing the shared
+originals (`secrets purge-shared`, its own preview); a schedule the runner
+stopped or blocked; a conflict in the vault; `Me/profile.md`'s working days;
+the keep-awake setting (`seed/deployment.yaml` says the product may not
+decide it). Informational: a feature that is off (turning it on is yours), a
+local server nobody runs, a child **you stopped** (`metistry stop` — doctor
+never starts it; `metistry start` is yours, rule 6), rows that follow
+another's finding (the brain while the console is down; migrations and
+schedules while the db is unreachable).
+
+**Rules a repairing tool is held to**, each a code path with a test:
+
+- **No fix on a false reading.** X-122's grace and X-48's "read what the
+  supervisor spawned" land first; a row whose age nothing can tell is not
+  fixed on a guess.
+- **One pass, never a loop.** Each fix runs at most once per invocation, the
+  re-check fixes nothing, and a fix that ran without clearing its row reads
+  `tried X; still failing`. A **restart-class fix** (`restart`, `render`) is
+  not repeated for the same target within `METISTRY_DOCTOR_RESTART_WINDOW_MIN`
+  (default 30) across invocations — the fix log is the evidence — and the row
+  becomes yours, with when doctor tried and the log to read. A repair run
+  pressed repeatedly cannot restart-storm a crash loop.
+- **Dependency order, and a dependent row waits.** The db, then its schema,
+  then the render, then the supervisor, then what it runs, then the files. A
+  `render` restarts everything, so no restart runs beside it; the
+  supervisor's restart takes its children's with it. Rows those would have
+  fixed are re-evaluated by the re-check, not fixed separately.
+- **Never a declaration.** Doctor never turns a feature on or off, never
+  mints or rotates a credential, never changes `keep_awake`, a sandbox switch
+  or a host list, and never starts what you stopped.
+- **Audited.** The `$ argv` lines a terminal shows are the runner's, as
+  `up`'s are; and every fix — what, for which rows, its steps, its outcome,
+  an error — is appended to `<instance>/.metistry/state/doctor-fixes.jsonl`
+  (derived state, `0600`; names and argv, never a value).
+
+**`--json`** adds, additively: `mode` (`check` | `fix`); on every row `fix`
+(`fixable` | `hand` | `info`) and `fixed` (`true` when a repair run cleared
+the row, `false` when a fix ran — or failed — and it is still a finding,
+`null` when no fix was for it), and `repair` (`{ id, target?, confirm, does }`)
+on a fixable row; and in fix mode `fixes[]` — one per fix that was planned,
+in the order it ran: `id`, `target`, `rows`, `does`, `confirm`, `outcome`
+(`fixed` | `applied` | `failed` | `declined` | `needs_confirm`), `steps`
+(the runner's ledger), `error`, `before` and `after` (status per row). The
+rows of a fix-mode document are the **re-check's**. `action` is unchanged
+beside all this — the Status window's **Fix All** (X-125) reads `fix`,
+`fixed` and `fixes[]`.
 
 **A collector's row is the collector's own `check()`** (X-87). Every
 collector exports `check()` (CLAUDE.md; one CI test holds it — no allowlist),
@@ -3183,8 +3289,9 @@ the new release's manifests with the old manifest schema — and an update
 that changed the schema would end "updated, and doctor is not happy" (exit 1)
 while a standalone `metistry doctor` is clean. So the closing doctor runs as
 a child of the updated product's own CLI: `node
-<run-dir>/packages/cli/dist/main.js doctor --json --product-dir <run-dir>`
-(`<run-dir>` is the checkout, or `current` in release mode; `node` is the
+<run-dir>/packages/cli/dist/main.js doctor --check --json --product-dir <run-dir>`
+(`--check`: the closing doctor reports and never repairs — repair is your own
+`metistry doctor` afterwards; `<run-dir>` is the checkout, or `current` in release mode; `node` is the
 bundled runtime's when there is one, as for the `metistry` shim), and its
 report is the verdict — exit 0 when it is ok, 1 when not, exactly as
 before. When there is no built CLI there, it cannot be spawned, or it

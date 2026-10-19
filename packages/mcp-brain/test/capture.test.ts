@@ -8,7 +8,7 @@
 import { mkdtemp, readFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { captureToInbox, dirSink, placeCapture, vaultPathPredicate, vaultSink, INBOX_PREFIX, type CaptureVault, type Db } from "../src/index.js";
 
 interface Call {
@@ -184,5 +184,47 @@ describe("dirSink", () => {
     const r = await captureToInbox(fakeDb(), dirSink(dir, { prefix: INBOX_PREFIX }), { bytes: Buffer.from("z"), filename: "../../etc/passwd", source: "http", sourceAgent: null });
     expect(r.path).toMatch(/^Inbox\/\d+-_+etc_passwd$/);
     expect((await readdir(dir)).some((f) => f.includes("etc_passwd"))).toBe(true);
+  });
+});
+
+describe("two attempts racing one idempotency key", () => {
+  // Names are `<ms>-<name>`, so two attempts inside one millisecond put the
+  // SAME path. The insert that loses on the idempotency index (23505) used to
+  // remove "its" file unconditionally — which was the winner's, leaving the
+  // winner's row pointing at nothing (collectors' "two presses at once": an
+  // empty Inbox/ in ~2% of runs on a fast database). The loser may remove
+  // only a file the winning row does not name.
+  const race = (winnerPath: (rel: string) => string) => {
+    let dir = "";
+    return async () => {
+      dir = await mkdtemp(join(tmpdir(), "metistry-capture-race-"));
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+      try {
+        let looked = 0;
+        const db = {
+          async query(text: string) {
+            if (/^\s*SELECT/.test(text)) return { rows: looked++ === 0 ? [] : [{ id: 3, path: winnerPath("Inbox/1700000000000-x.md"), sha256: "w" }] }; // the lookup misses, then the winner's row is there
+            throw Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
+          },
+        } as unknown as Db;
+        const r = await captureToInbox(db, dirSink(dir, { prefix: INBOX_PREFIX }), { bytes: Buffer.from("x"), filename: "x.md", source: "linear", sourceAgent: null, idempotency: { principal: "tracker:linear", key: "linear:A-1" } });
+        return { r, files: await readdir(dir) };
+      } finally {
+        now.mockRestore();
+        await rm(dir, { recursive: true, force: true });
+      }
+    };
+  };
+
+  it("keeps the winner's file when it is the same path", async () => {
+    const { r, files } = await race((rel) => rel)();
+    expect(r).toMatchObject({ id: 3, replayed: true });
+    expect(files).toEqual(["1700000000000-x.md"]); // before the fix: []
+  });
+
+  it("still withdraws its own file when the winner's is another", async () => {
+    const { r, files } = await race(() => "Inbox/1700000000001-x.md")();
+    expect(r).toMatchObject({ id: 3, replayed: true });
+    expect(files).toEqual([]);
   });
 });

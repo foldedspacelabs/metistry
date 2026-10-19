@@ -221,6 +221,7 @@ describe.skipIf(!hasDb)("linear sync (real db)", () => {
       const [a, b] = await Promise.all([addIssueToToday(pool, sink, { key: "ENG-101", today: "2026-09-27" }), addIssueToToday(pool, sink, { key: "ENG-101", today: "2026-09-27" })]);
       expect(a.id).toBe(b.id);
       expect(readdirSync(dir)).toHaveLength(1);
+      expect(readdirSync(dir)).toEqual([a.path.replace(/^Inbox\//, "")]); // the one row's own file, not merely "a file"
     });
 
     it("refuses a key that is not one, a date that is not one, and an issue the sync has not seen — writing nothing", async () => {

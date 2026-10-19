@@ -1,5 +1,13 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.17.1
+
+### Patch Changes
+
+- 93e1c12: The Tailscale tool pack builds in the release workflow (Go is installed on the runner).
+- @foldedspacelabs/metistry-connections@0.17.1
+  - @foldedspacelabs/metistry-core@0.17.1
+
 ## 0.17.0
 
 ### Minor Changes

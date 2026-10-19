@@ -1,5 +1,11 @@
 # @foldedspacelabs/metistry-mcp-live-capture
 
+## 0.17.1
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.17.1
+
 ## 0.17.0
 
 ### Patch Changes

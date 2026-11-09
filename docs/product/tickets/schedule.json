@@ -4023,6 +4023,381 @@
       "file": "docs/product/tickets/x/x-134.md",
       "status": "blocked"
     },
+    "X-135": {
+      "title": "The Mac's accessibility text probes read macOS 27",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-135.md",
+      "status": "todo"
+    },
+    "X-136": {
+      "title": "The Mac tests wait on state, never on a count",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-28"
+      ],
+      "file": "docs/product/tickets/x/x-136.md",
+      "status": "todo"
+    },
+    "X-137": {
+      "title": "A fresh install's `up` applies the pending migrations",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-137.md",
+      "status": "todo"
+    },
+    "X-138": {
+      "title": "`init --shape launchd` prints a second instance's own ports",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-138.md",
+      "status": "todo"
+    },
+    "X-139": {
+      "title": "The fixture recorder's fixed work ids advance the sequence",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-139.md",
+      "status": "todo"
+    },
+    "X-140": {
+      "title": "Two DB-backed suites leave their siblings' rows alone",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-25"
+      ],
+      "file": "docs/product/tickets/x/x-140.md",
+      "status": "todo"
+    },
+    "X-141": {
+      "title": "Every capture attempt names its own file",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-141.md",
+      "status": "todo"
+    },
+    "X-142": {
+      "title": "The `.env` render's line hashes are keyed",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-124"
+      ],
+      "file": "docs/product/tickets/x/x-142.md",
+      "status": "todo"
+    },
+    "X-143": {
+      "title": "The hidden read restores the terminal in `finally`, and Ctrl-C is tested on `connect-repo`",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-127"
+      ],
+      "file": "docs/product/tickets/x/x-143.md",
+      "status": "todo"
+    },
+    "X-144": {
+      "title": "No fixture spells the assistant's name",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-144.md",
+      "status": "todo"
+    },
+    "X-145": {
+      "title": "The devices-pane stubs speak `enroll`'s current refusals",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-79"
+      ],
+      "file": "docs/product/tickets/x/x-145.md",
+      "status": "todo"
+    },
+    "X-146": {
+      "title": "`connect --remove`'s help names what it refuses",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-134"
+      ],
+      "file": "docs/product/tickets/x/x-146.md",
+      "status": "todo"
+    },
+    "X-147": {
+      "title": "A reconnected agent starts without its predecessor's declines",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-134"
+      ],
+      "file": "docs/product/tickets/x/x-147.md",
+      "status": "todo"
+    },
+    "X-148": {
+      "title": "An opted-out agent's briefing says so, not `tier: none`",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-128"
+      ],
+      "file": "docs/product/tickets/x/x-148.md",
+      "status": "todo"
+    },
+    "X-149": {
+      "title": "`GET /api/briefing` is bounded per bearer and answered from a short cache",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-128"
+      ],
+      "file": "docs/product/tickets/x/x-149.md",
+      "status": "todo"
+    },
+    "X-150": {
+      "title": "The briefing's marker directory is the user's own",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-129"
+      ],
+      "file": "docs/product/tickets/x/x-150.md",
+      "status": "todo"
+    },
+    "X-151": {
+      "title": "The CLI's slow tests declare their timeouts",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-151.md",
+      "status": "todo"
+    },
+    "X-152": {
+      "title": "M6 admits `doctor` by its exact form, not by prefix",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-123",
+        "X-125"
+      ],
+      "file": "docs/product/tickets/x/x-152.md",
+      "status": "todo"
+    },
+    "X-153": {
+      "title": "Doctor's restart fixer takes the path `metistry restart` takes",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-153.md",
+      "status": "todo"
+    },
+    "X-154": {
+      "title": "Doctor's rules 4, 7 and 9",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-154.md",
+      "status": "todo"
+    },
+    "X-155": {
+      "title": "Connection check stamps survive two writers",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-96"
+      ],
+      "file": "docs/product/tickets/x/x-155.md",
+      "status": "todo"
+    },
+    "X-156": {
+      "title": "`used_by` lists only who can reach a connection",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-96"
+      ],
+      "file": "docs/product/tickets/x/x-156.md",
+      "status": "todo"
+    },
+    "X-157": {
+      "title": "The compose shape carries every proxy-listener variable",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-111"
+      ],
+      "file": "docs/product/tickets/x/x-157.md",
+      "status": "todo"
+    },
+    "X-158": {
+      "title": "Linear's planner test resets what it `SET`",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-26"
+      ],
+      "file": "docs/product/tickets/x/x-158.md",
+      "status": "todo"
+    },
+    "X-159": {
+      "title": "The Add a Phone sheet cancels its code when its window closes",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-77"
+      ],
+      "file": "docs/product/tickets/x/x-159.md",
+      "status": "todo"
+    },
+    "X-160": {
+      "title": "The recorder's refusal of a non-scratch database has a test",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-160.md",
+      "status": "todo"
+    },
+    "X-161": {
+      "title": "The watchdog's all-ok test is deterministic",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-161.md",
+      "status": "todo"
+    },
+    "X-162": {
+      "title": "A namespaced instance's doctor names only its own ports",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-162.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -4040,7 +4415,7 @@
     "tickets": 205,
     "agent_days": 555.5,
     "waves": 6,
-    "candidates": 68
+    "candidates": 96
   },
   "critical_path": {
     "days": 37.5,
@@ -4125,9 +4500,37 @@
       "X-131",
       "X-132",
       "X-133",
-      "X-134"
+      "X-134",
+      "X-135",
+      "X-136",
+      "X-137",
+      "X-138",
+      "X-139",
+      "X-140",
+      "X-141",
+      "X-142",
+      "X-143",
+      "X-144",
+      "X-145",
+      "X-146",
+      "X-147",
+      "X-148",
+      "X-149",
+      "X-150",
+      "X-151",
+      "X-152",
+      "X-153",
+      "X-154",
+      "X-155",
+      "X-156",
+      "X-157",
+      "X-158",
+      "X-159",
+      "X-160",
+      "X-161",
+      "X-162"
     ],
-    "count": 68,
-    "agent_days": 125
+    "count": 96,
+    "agent_days": 157.5
   }
 }

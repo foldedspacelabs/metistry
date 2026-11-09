@@ -2213,7 +2213,7 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
 | W4 | X-24, X-29, X-31, X-32, X-41 (CI stability, dispatched first — owner 2026-09-30) · T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | tranche 1 — X-103, X-104, X-111, X-88, X-80, X-85, X-102, X-101, X-87, X-75, X-76, X-78 · tranche 2 — X-105, X-112, X-106, X-77, X-79, X-114, X-107 · the W4 follow-ups — X-82, X-86, X-90, X-91, X-92, X-93, X-94, X-95, X-96, X-97, X-98, X-99, X-100; X-83, X-84 · ruled 2026-10-04 — X-121, X-122, X-126, X-127 · X-1 (the owner's go, 2026-10-18; not in W5: the routing work — the composer keeps its eval gate, and nothing from the Routr review is scheduled — nor the Relay, Cloudflare Tunnel, zrok, ngrok and port-forwarding adapters) |
-| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-81, X-89 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 and W4 housekeeping; five CI-stability candidates went to W4 on 2026-09-30, the other W4 follow-ups to W5 on 2026-10-18) · X-108…X-110, X-113, X-115…X-120 — remote access (§2.23, §2.24), ruled 2026-09-30; the fixes, None, Tailscale and the guided flow went to W5 with Add a Phone · X-123…X-125, X-128…X-134 — ruled 2026-10-04: doctor's repair contract, the derived `.env`, the briefing, connection folds and `connect` |
+| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-81, X-89 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 and W4 housekeeping; five CI-stability candidates went to W4 on 2026-09-30, the other W4 follow-ups to W5 on 2026-10-18) · X-108…X-110, X-113, X-115…X-120 — remote access (§2.23, §2.24), ruled 2026-09-30; the fixes, None, Tailscale and the guided flow went to W5 with Add a Phone · X-123…X-125, X-128…X-134 — ruled 2026-10-04: doctor's repair contract, the derived `.env`, the briefing, connection folds and `connect` · X-135…X-162 — follow-ups found in W5 (2026-10-19): the Mac suite on macOS 27 and under load, a fresh install's migrations and a namespaced instance's ports, the shared-database suites, the briefing's edges, doctor's unbuilt rules, and the stamps |
 
 ### 3.3 The tickets
 
@@ -5259,6 +5259,431 @@ stays revoked so old proposals keep their provenance;
 *Files:* `packages/cli/src/connect.ts`, `docs/ops/cli.md`.
 *Tests:* **a second `--remove` changes nothing; a revoked id is never minted
 again; a reconnect after a revoke takes one command**.
+*Accept:* —
+
+#### X — Follow-ups found in W5
+
+What the W5 builders and reviewers reported outside their tickets (PRs
+#536–#555; `docs/product/decisions-log.md`, *Open for the owner at the W5
+checkpoint*). None is scheduled: each stays in §3.2's *Candidates* row until
+the owner assigns it a wave. Every candidate was checked against `main` on
+2026-10-19 before it was written here; what W5 had already fixed is not
+listed. Each is its own PR, outside any track's files.
+
+**X-135 · The Mac's accessibility text probes read macOS 27** · S —
+*Spec:* six tests that probe the accessibility tree for a view's text pass on
+CI's `macos-15` and fail on macOS 27.0.1, the version the owner runs:
+`connection-editor-tests.swift:84` (the choice's default by name),
+`run-detail-view-tests.swift:177` (a refused call's result),
+`secrets-variables-tests.swift:366` (the key-shape sheet's sentence),
+`shell-accessibility-tests.swift:138` (the console refusal, verbatim),
+`connections-view-tests.swift:333` (the secret's egress line) and the editor's
+largest-text probe. The tree the newer OS exposes differs in where a static
+text's `value` and `name` land, not in what the view says; the probe helper
+reads both, so one assertion holds on both versions, and no test's expectation
+weakens. First prove it is the tree and not the view (dump both).
+*Files:* `apps/macos/tests/kit/` (the probe helper and the six tests).
+*Tests:* **the six pass on macOS 27 and on `macos-15` with the same
+assertions**.
+*Accept:* —
+
+**X-136 · The Mac tests wait on state, never on a count** · M · deps X-28 —
+*Spec:* X-28 made the chat viewport test state-driven; the rest of the suite
+still counts: `chat-view-tests.swift`'s `waitUntil(seconds: 2)` and the
+`capture-bar` and `capture-view` copies poll a condition for a fixed budget,
+and the remaining `Task.sleep` literals wait for "enough" time. Under load —
+another `swift test`, a CI runner at capacity — `aWorkingTurn…`,
+`ticksThatPileUp…`, `aSendsOwnTick…`, `aWorkingTurnFirstSeenByTheScreensClock…`
+and `everyStoreMethodSpeaksItsRoute…` reach the 60 s harness limit. One shared
+helper awaits the model's own signal (a published change, a continuation the
+store resolves) with a generous ceiling that only a hang reaches; every counted
+wait and literal sleep in `apps/macos/tests` goes through it.
+*Files:* `apps/macos/tests/kit/` (one helper; the suites that wait).
+*Tests:* **no test in `apps/macos/tests` sleeps for a literal duration (a
+test enforces it); the five named tests pass ten runs in a row with a second
+`swift test` running beside them**.
+*Accept:* —
+
+**X-137 · A fresh install's `up` applies the pending migrations** · M · deps X-123 —
+*Spec:* `metistry up` (`packages/cli/src/up.ts`) never runs the migration
+runner: on a fresh launchd install (the W5 checkpoint's scratch instance on
+`main` at `a715ddc9`, section 4) `up` **exits 1** — the console starts against
+an empty schema and crash-loops until the owner's first `update` — or, since
+X-123, a `doctor` that offers the `migrate` repair. The release's own first
+step must not need a repair: either `up` migrates itself, or it runs doctor's
+fixable set once the database answers (the same closed table, no new code
+path), and in both cases it exits 0 on a fresh instance. Once the database answers (the bundled Postgres on the launchd shape;
+compose's container), `up` applies `db/migrations/*.sql` not yet in
+`schema_migrations` through `runMigrations` under the same advisory lock
+`update` and doctor's fixer take, before the console is started, and says what
+it applied. A database that does not answer stays a note, as today.
+*Files:* `packages/cli/src/up.ts`, `docs/ops/cli.md`.
+*Tests:* **a fresh scratch instance's `up` leaves no pending migration; a
+second `up` applies nothing; a database that does not answer leaves a note
+and no error**.
+*Accept:* —
+
+**X-138 · `init --shape launchd` prints a second instance's own ports** · S —
+*Spec:* `init` prints the console and reconciler lines from `loadNamespace(dir)`
+(`packages/cli/src/init.ts`), but the namespace file is written later, by
+`up --namespace`, so on a second instance `init` prints the live instance's
+7812 and 8080 and the owner is told to open a console that is not theirs.
+Either `init` takes `--namespace` and records the block `up` will read, or the
+printed lines name no port until `up` has chosen one. The first keeps one
+source for the ports; take it unless the namespace's shape forbids it.
+*Files:* `packages/cli/src/init.ts`, `packages/cli/src/namespace.ts`,
+`docs/ops/cli.md`, `docs/ops/deployment-shapes.md`.
+*Tests:* **`init --shape launchd --namespace` prints the namespaced ports and
+`up` reads the same block; without a namespace the defaults print; a compose
+`init` is unchanged**.
+*Accept:* —
+
+**X-139 · The fixture recorder's fixed work ids advance the sequence** · S —
+*Spec:* `apps/console/scripts/record-client-fixtures.mjs` inserts two `work`
+rows with `OVERRIDING SYSTEM VALUE` (ids 41 and 42, so the fixtures are
+stable) and never moves `work_id_seq` past them: on a database other suites
+share, the next identity insert collides on `work_pkey` — X-25 (#543) saw the
+collision and could not reproduce it. The recorder sets the sequence past the
+ids it forced (`setval`) in the same transaction, or inserts by the sequence
+and rewrites the fixture's ids on the way out. The fixtures stay byte-stable
+either way.
+*Files:* `apps/console/scripts/record-client-fixtures.mjs`.
+*Tests:* **after a recording, an identity insert into `work` succeeds; the
+recorded fixtures are unchanged (`--check`)**.
+*Accept:* —
+
+**X-140 · Two DB-backed suites leave their siblings' rows alone** · S · deps X-25 —
+*Spec:* two suites still reach past their own rows on a shared database.
+`apps/console/test/crews.integration.test.ts` calls `syncCrews` with its own
+map, and the sync's last statement revokes every `crew` row the map does not
+name — another file's crews, mid-test. `apps/console/test/sessions-purge.integration.test.ts`
+clears with `DELETE FROM session_archive WHERE ts <= $1`, which takes every
+suite's rows under that bound. `syncCrews` is right for the product (a crew
+absent from the manifests is gone); the tests are not. The crews test scopes
+its sync (a registry of its own crews, or X-88's per-package database) and the
+purge test deletes only the sessions it inserted.
+*Files:* `apps/console/test/crews.integration.test.ts`,
+`apps/console/test/sessions-purge.integration.test.ts`.
+*Tests:* **a sibling crew row planted before the crews suite is still live
+after it; a sibling `session_archive` row older than the bound survives the
+purge suite**.
+*Accept:* —
+
+**X-141 · Every capture attempt names its own file** · S —
+*Spec:* `captureToInbox` (`packages/mcp-brain/src/capture.ts`) names an
+unplaced capture `<ms>-<name>`, so two attempts in one millisecond — the two
+Add-to-Today presses #549 fixed — still meet on one path: #549 stopped the
+loser deleting the winner's file; the names still collide, and `vaultSink`'s
+create-only `put` throws for the second. The name carries a per-attempt
+component (a short random suffix), the row records the path that was written,
+and the idempotency answer is unchanged.
+*Files:* `packages/mcp-brain/src/capture.ts`, `packages/core/src/` (the sink).
+*Tests:* **a thousand same-millisecond attempts write a thousand files and no
+`put` throws; every inbox row names a file that exists**.
+*Accept:* —
+
+**X-142 · The `.env` render's line hashes are keyed** · S · deps X-124 —
+*Spec:* X-124's drift record (`env-render.json`) holds, per line, the name and
+an unsalted sha256 of `NAME=value`, so a short or low-entropy value — a port,
+a flag, a weak token — is recoverable by dictionary from a file that is
+0600 but outside the Keychain. Record an HMAC under a key only this instance
+holds (a Keychain item `up` mints with the others, X-80's pattern), or a salted
+hash with the salt in the same file; doctor's `env` row still names the
+changed line, and nothing about a value is derivable from the record.
+*Files:* `packages/cli/src/env-render.ts`, `packages/cli/src/doctor.ts`,
+`docs/ops/cli.md`.
+*Tests:* **the same line in two instances records two different hashes; a
+changed line is still named; the record contains no sha256 of any
+`NAME=value`**.
+*Accept:* X-124 merged.
+
+**X-143 · The hidden read restores the terminal in `finally`, and Ctrl-C is tested on `connect-repo`** · S · deps X-127 —
+*Spec:* `readHiddenLine` (`packages/cli/src/stdin-value.ts`) turns raw mode on
+and turns it back on the happy path and on Ctrl-C, but not in a `finally`: a
+throw between the two leaves the owner's terminal raw with echo off. X-127's
+Ctrl-C test covers `secrets set`; `connect-repo --auth token`'s path, which
+shares the reader, has none. The restore moves into `finally`; the Ctrl-C
+test (exit 130, terminal restored, nothing written) runs for each reader.
+*Files:* `packages/cli/src/stdin-value.ts`, `packages/cli/test/`.
+*Tests:* **a reader that throws mid-line leaves raw mode and echo as it found
+them; Ctrl-C on `connect-repo --auth token` exits 130 and writes no token**.
+*Accept:* —
+
+**X-144 · No fixture spells the assistant's name** · S —
+*Spec:* an `.example` test hostname carrying the assistant's name sits in ten
+files — `apps/console/test/passkey-origins.integration.test.ts`,
+`apps/console/test/webauthn.test.ts`, `apps/macos/tests/kit/console-session-tests.swift`,
+`apps/macos/tests/kit/devices-pane-tests.swift`, `packages/cli/test/console-client.test.ts`,
+`packages/cli/src/instances.ts`, `packages/cli/src/main.ts`, `docs/ops/auth.md`,
+`docs/ops/cli.md` and a research note — a hardcoded name `CLAUDE.md` calls a
+bug, and one the X-1 sweep did not reach because it is a hostname. Rename it
+to a neutral example host everywhere, and add the name check CI does not have:
+one grep over fixtures, tests and docs for the configured name outside
+`identity.yaml`.
+*Files:* the ten files above, `ops/scripts/` (the name check).
+*Tests:* **the name check fails on the old hostname in any of the ten and
+passes once they are renamed**.
+*Accept:* —
+
+**X-145 · The devices-pane stubs speak `enroll`'s current refusals** · S · deps X-79 —
+*Spec:* `apps/macos/tests/kit/devices-pane-tests.swift` scripts `metistry
+enroll`'s two refusals by hand (lines 43 and 48), and X-79 then moved the
+refusals' pointer from `docs/ops/auth.md` to the phone guide — the stubs kept
+the old words, so the sheet is tested against text the CLI no longer prints.
+The stubs become recorded output of the CLI's own refusal paths (X-100's
+"held to core" pattern: a fixture the CLI writes and the Swift test reads),
+so a reworded refusal fails the Mac test instead of passing it.
+*Files:* `apps/macos/tests/kit/devices-pane-tests.swift`,
+`packages/cli/test/` (the recorder of the two refusals), the client
+fixtures directory (`FIXTURE_DIR`, `apps/console/scripts/client-fixtures.mjs`).
+*Tests:* **a stub whose text differs from `enroll.ts`'s refusal fails
+`macos-app`**.
+*Accept:* —
+
+**X-146 · `connect --remove`'s help names what it refuses** · S · deps X-134 —
+*Spec:* `packages/cli/src/main.ts`'s `connect` help shows `--remove`'s form
+and says nothing of its two refusals, which `docs/ops/cli.md` and
+`connect.ts` carry: a flag that mints, widens or enrols beside `--remove` is
+refused, and an entry under the same key that names something `connect` did
+not write is left alone. The help says both in one line each, in the words
+the refusals print.
+*Files:* `packages/cli/src/main.ts`, `docs/ops/cli.md`.
+*Tests:* **the help text test asserts both sentences; the refusal's words and
+the help's are one constant**.
+*Accept:* —
+
+**X-147 · A reconnected agent starts without its predecessor's declines** · S · deps X-134 —
+*Spec:* `consecutiveDeclines` (`packages/mcp-brain/src/access.ts`) counts an
+agent's refused access requests by `agents.id`. #516 revives a revoked id in
+place, so an agent reconnected after an accidental revoke inherits every
+decline the old row collected and may start on the escalation path. The count
+reads from the reconnect: declines dated before the row's revival do not
+count. If the owner rules for a new id instead (W5 checkpoint question 1),
+this ticket closes with no change.
+*Files:* `packages/mcp-brain/src/access.ts`, `db/migrations/` if the revival
+time is not already recorded.
+*Tests:* **three declines, a revoke, a reconnect, one decline: the count is
+one**.
+*Accept:* the W5 checkpoint's ruling on X-134.
+
+**X-148 · An opted-out agent's briefing says so, not `tier: none`** · S · deps X-128 —
+*Spec:* `apps/console/src/briefing-route.ts` renders an agent with
+`briefing: false` at `tier: "none"` to empty the briefing, so the answer
+claims a tier the agent does not have and a client cannot tell an opt-out
+from an agent with no read grant. The answer carries the agent's real tier
+and `opted_out: true`, with every section empty; the hooks already read
+`opted_out`.
+*Files:* `apps/console/src/briefing-route.ts`, `docs/ops/client-api.md`.
+*Tests:* **an opted-out agent at the private tier is answered `tier:
+"private"`, `opted_out: true`, no handles; an agent with no read grant is
+answered `tier: "none"` without `opted_out`**.
+*Accept:* —
+
+**X-149 · `GET /api/briefing` is bounded per bearer and answered from a short cache** · S · deps X-128 —
+*Spec:* one briefing call is one `runs` row and four named queries, and
+nothing bounds how often a bearer may ask — X-129's once-per-session marker
+is the client's promise, not the server's rule. The route takes a per-bearer
+limit from the console's `RateLimiter` (a small number per minute; `429` with
+`Retry-After`, one audit row per refused burst, X-111's shape) and answers a
+repeated ask for the same agent and repository within a short window from a
+cache, running no query. The owner's budget and the handles' content are
+unchanged.
+*Files:* `apps/console/src/briefing-route.ts`, `apps/console/src/rate-limit.ts`,
+`docs/ops/client-api.md`.
+*Tests:* U2; **the (N+1)th call in a window is `429`; a second identical call
+inside the cache window runs no query and writes no `runs` row**.
+*Accept:* —
+
+**X-150 · The briefing's marker directory is the user's own** · S · deps X-129 —
+*Spec:* the Claude Code hook's `claimSession`
+(`plugins/claude-code/scripts/briefing.mjs`) creates `<tmpdir>/metistry-briefing`
+with `recursive: true, mode: 0o700`; on a shared `/tmp` (Linux, a multi-user
+Mac) a directory another user made is reused silently, the mode is never
+applied, and the create-only marker then fails with `EACCES`, which the hook
+reads as "deliver" — every session start delivers, or a planted marker
+suppresses the owner's briefing. The directory is the user's own
+(`$XDG_RUNTIME_DIR`, else a uid-suffixed directory the hook creates and
+verifies it owns) and an unowned directory is refused, not reused. The hook's
+`MAX_BRIEFING_CHARS` backstop (32 000) is read against the server's budget
+(`METISTRY_BRIEFING_TOKENS`) so the two cannot disagree silently.
+*Files:* `plugins/claude-code/scripts/briefing.mjs`,
+`plugins/opencode/scripts/briefing.mjs`, `docs/ops/claude-code-plugin.md`.
+*Tests:* **a pre-existing directory owned by another uid is refused and the
+briefing still delivers once; the marker is created `0600` in a `0700`
+directory the user owns**.
+*Accept:* —
+
+**X-151 · The CLI's slow tests declare their timeouts** · S —
+*Spec:* `packages/cli` runs on vitest's default 5 s, and three tests that
+spawn or wait for a process reach it on a slow runner:
+`migrate-shape.test.ts` "refuses on a platform that has no launchd",
+`up.launchd.test.ts`'s missing-Postgres case, and `tcc-pin.test.ts` without
+the database variables. Each either fakes the slow step through the seam it
+already has, or declares its own timeout with the reason beside it; the
+package's default stays 5 s so a new slow test is noticed.
+*Files:* `packages/cli/test/migrate-shape.test.ts`,
+`packages/cli/test/up.launchd.test.ts`, `packages/cli/test/tcc-pin.test.ts`.
+*Tests:* **the three pass ten runs in a row with the suite run at half the
+runner's cores**.
+*Accept:* —
+
+**X-152 · M6 admits `doctor` by its exact form, not by prefix** · S · deps X-123, X-125 —
+*Spec:* the Mac's management door lists its verbs as argument prefixes
+(`management-runner.swift`, `case .doctor: return [["doctor"]]`), which was
+harmless while `doctor` only read. X-123 gave it `--fix --yes`, so the prefix
+now admits a repairing, non-asking run through the one door §2.2 says only
+reads. M6 names the exact forms it admits — `doctor --json`, `doctor --check
+--json` — and X-125's Fix All adds `doctor --fix --json` behind the app's own
+confirm; anything else under `doctor` is refused by the admission check, not
+by the CLI.
+*Files:* `apps/macos/sources/kit/stores/management-runner.swift`,
+`apps/macos/tests/kit/`, `docs/ops/mac-app.md`.
+*Tests:* **`doctor --fix --yes` is refused by M6's admission check; `doctor
+--check --json` is admitted**.
+*Accept:* —
+
+**X-153 · Doctor's restart fixer takes the path `metistry restart` takes** · S · deps X-123 —
+*Spec:* doctor-fix.ts's `restart` fixer calls `controlServices` without the
+instance's env file, so under compose it reaches the project through
+`loadEnv`'s environment while the verb passes `--env-file` explicitly; the two
+agree today by luck and will not after X-124 (the derived `.env`). The fixer
+builds its call exactly as the verb does — one function both use — so the
+compose command doctor runs is the command the owner would type.
+*Files:* `packages/cli/src/doctor-fix.ts`, `packages/cli/src/service-control.ts`.
+*Tests:* **the restart fix's compose command equals `metistry restart
+<svc>`'s, under compose and under launchd**.
+*Accept:* —
+
+**X-154 · Doctor's rules 4, 7 and 9** · M · deps X-123 —
+*Spec:* X-123 shipped the repair contract without three of the design note's
+rules, each named in #554's body: **rule 4**, two readings at least the grace
+apart before a restart (today one failed reading after X-122's grace restarts,
+bounded only by rule 5's 30-minute window); **rule 7**, never interrupt a
+recording (unbuilt because no probe cause restarts a mid-recording bridge
+today — a code path, not a test, should say so); **rule 9**, refuse to repair
+when the release is unknown (`metistry.lock` absent or unreadable), which the
+PR did not list. Each becomes a code path with a test; doctor's `--json` says
+which rule held a fix back.
+*Files:* `packages/cli/src/doctor.ts`, `packages/cli/src/doctor-fix.ts`,
+`docs/ops/cli.md`.
+*Tests:* **one failed reading restarts nothing; two readings a grace apart do;
+a bridge whose `check()` reports a recording is never restarted; with no
+readable release every fixable row becomes your-hand and `--fix` exits
+non-zero**.
+*Accept:* —
+
+**X-155 · Connection check stamps survive two writers** · S · deps X-96 —
+*Spec:* `packages/connections/src/stamps.ts` keeps every connection's
+last-checked stamp in one file, read-modify-written atomically and serialised
+within one process — but the CLI (`connections test`, `doctor`), the Mac's
+Test and the console all write it, and two processes stamping at once lose one
+stamp to the other's rename. One file per connection under the same directory
+(a stamp is a name, a time and a word) removes the shared write; the reader
+lists the directory and stays tolerant of a garbled file.
+*Files:* `packages/connections/src/stamps.ts`, `docs/ops/connections.md`.
+*Tests:* **two processes stamping two connections at once keep both stamps;
+a garbled stamp file reads as never checked**.
+*Accept:* —
+
+**X-156 · `used_by` lists only who can reach a connection** · S · deps X-96 —
+*Spec:* `connectionGrants` (`apps/console/src/connections-route.ts`) lists a
+crew under a connection when `grants.connections` names it, but a crew calls a
+connection only through the `connections` tool group
+(`CREW_TOOL_GROUPS`, `packages/core/src/manifest.ts`), and a crew whose
+manifest grants the connection without the group can never call it — the
+listing says it is used when nothing can use it. A crew is listed only when
+its tool groups include `connections`; an agent's row is unchanged.
+*Files:* `apps/console/src/connections-route.ts`, `docs/ops/client-api.md`.
+*Tests:* **a crew granted the connection without the `connections` group is
+not listed; one with the group is**.
+*Accept:* —
+
+**X-157 · The compose shape carries every proxy-listener variable** · S · deps X-111 —
+*Spec:* X-111's limits are configuration — `METISTRY_CONSOLE_PROXY_CLIENT_HEADER`,
+`_CLIENT_LIMIT`, `_GLOBAL_LIMIT`, `_WINDOW_S` (`apps/console/src/main.ts`) —
+but `docker-compose.yml` passes the console only `METISTRY_CONSOLE_PROXY_PORT`,
+and `docs/ops/deployment-shapes.md` names only the port, so an owner who sets
+a limit under compose sets nothing. The compose file passes the four through
+with the port; the shapes page lists them once, beside the port.
+*Files:* `docker-compose.yml`, `docs/ops/deployment-shapes.md`,
+`.env.example`.
+*Tests:* **the compose config renders every `METISTRY_CONSOLE_PROXY_*` name
+the console reads (a test lists both and compares)**.
+*Accept:* —
+
+**X-158 · Linear's planner test resets what it `SET`** · S · deps X-26 —
+*Spec:* `collectors/test/linear.integration.test.ts` turns `enable_indexscan`,
+`enable_indexonlyscan` and `enable_bitmapscan` off on a pooled client to force
+a plan, and releases the client without resetting them: every later test the
+pool hands that client runs on sequential scans, and a timing or plan
+assertion downstream inherits the setting. The test uses `SET LOCAL` inside a
+transaction it ends, or `RESET` in `finally`; either way the client is
+returned as it was taken.
+*Files:* `collectors/test/linear.integration.test.ts`.
+*Tests:* **after the test, `SHOW enable_indexscan` on the same client is
+`on`**.
+*Accept:* —
+
+**X-159 · The Add a Phone sheet cancels its code when its window closes** · S · deps X-77 —
+*Spec:* the sheet cancels a live code on Done, Escape and `onDisappear`
+(`add-phone-sheet.swift`), but X-77's review noted that closing the Settings
+window with the sheet open may skip the presenter's `close()`, leaving a
+minted code live for its full ten minutes with no view showing it. Prove it
+first (a window-close test against the recorded fixtures); if it stands, the
+model cancels on the window's close as it does on the sheet's, and Devices
+reopens with no stale code.
+*Files:* `apps/macos/sources/kit/add-phone-model.swift`,
+`apps/macos/sources/kit/settings-panes/devices-pane.swift`,
+`apps/macos/tests/kit/devices-pane-tests.swift`.
+*Tests:* **closing the window with a live code runs `enroll --cancel` once;
+reopening Devices shows no code**.
+*Accept:* —
+
+**X-160 · The recorder's refusal of a non-scratch database has a test** · S —
+*Spec:* `record-client-fixtures.mjs` opens its database through `testDb()`,
+which refuses anything but a `metistry_test_*` name — a property the recorder
+relies on and nothing tests end to end: a future recorder that opened `pg`
+directly would pass CI (`check-test-db.mjs` reads test files, not scripts)
+and could record against an install's database. A spawn test under
+`ops/scripts/test/` runs the recorder with `METISTRY_TEST_DB_NAME` set to a
+non-scratch name and asserts the refusal before any connection is made;
+`check-test-db.mjs` takes `apps/console/scripts/` into its scan.
+*Files:* `ops/scripts/test/`, `ops/scripts/check-test-db.mjs`.
+*Tests:* **the recorder exits non-zero and opens no connection on a
+non-scratch name; a `new pg.Pool` in the scripts directory fails CI**.
+*Accept:* —
+
+**X-161 · The watchdog's all-ok test is deterministic** · S —
+*Spec:* `apps/watchdog/test/watchdog.integration.test.ts`'s "all-ok on a
+healthy system (probe names are the doctor contract)" failed intermittently in
+W4, reported beside the hourly-cost probe; the cause is unproven. As with
+X-126: find the race (a probe's clock, an interval that fires before the
+fixture is in place, a shared row), remove it, and keep the behaviour the test
+pins.
+*Files:* `apps/watchdog/test/watchdog.integration.test.ts`,
+`apps/watchdog/src/probes.ts` only if the race is there.
+*Tests:* **the test passes 50 runs in a row**.
+*Accept:* —
+
+**X-162 · A namespaced instance's doctor names only its own ports** · S —
+*Spec:* doctor on a namespaced scratch instance (its own ports, `metistry up
+--namespace`; the W5 checkpoint on `main` at `a715ddc9`, section 4) names the
+default install's live URLs in its rows — `127.0.0.1:1234`, `:11434`,
+`:7810`, `:7811`, `:7813`, `:7815` — so a second instance's owner reads
+another instance's bridges and model servers as their own. Doctor does apply
+the namespace (`applyPorts`, `packages/cli/src/doctor.ts`), but only into
+variables nothing has set, and the bridge and local-model derivations do not
+all read it: a `.env` `init` wrote before the namespace existed (X-138) carries
+the defaults, and the local-model discovery scan of X-123 is skipped only when
+`compute.yaml` names an on-machine provider, which a fresh instance does not.
+Prove which path names each port first; then every probe URL and every
+remediation on a namespaced instance derives from the namespace, and the
+default-port discovery scan runs only on an instance that has no namespace.
+*Files:* `packages/cli/src/doctor.ts`, `packages/cli/src/local-models.ts`,
+`packages/cli/src/namespace.ts`, `docs/ops/deployment-shapes.md`.
+*Tests:* **a namespaced instance's doctor never names another instance's
+ports — no row, URL or remediation carries a port outside its block; an
+un-namespaced instance's rows are unchanged**.
 *Accept:* —
 
 #### W5 — Acceptance

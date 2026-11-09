@@ -1,7 +1,7 @@
 {
   "route": "POST /api/proposals/:id",
   "source": "recorded",
-  "ticket": "T2-14",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/proposals/5",

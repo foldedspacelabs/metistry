@@ -35,7 +35,7 @@
 //   * a `{{ secret.x }}` in a path reach, which has nowhere to send one;
 //   * an Authorization header beside an auth shortcut that writes one;
 //   * and what a builtin provider refuses for its own connections
-//     (`builtinIssues` — CalDAV's, T4-13).
+//     (`builtinIssues` — CalDAV's, T4-13; IMAP's, T4-15).
 
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -51,6 +51,8 @@ import {
   type RegistryUnit,
 } from "@foldedspacelabs/metistry-core";
 import { CALDAV_MODULE, caldavConnectionIssues } from "./caldav.js";
+import { GOOGLE_CALENDAR_MODULE, googleCalendarConnectionIssues } from "./google-calendar.js";
+import { IMAP_MODULE, imapConnectionIssues } from "./imap.js";
 
 /** `github.yaml` → `github`. A connection's file is named for it, like a registry unit's directory. */
 export const CONNECTION_FILE_RE = /^([a-z][a-z0-9-]*)\.ya?ml$/;
@@ -87,7 +89,11 @@ export function typedValues(c: ConnectionFile): { path: string; where: Where; va
     if (value !== undefined) out.push({ path, where, value });
   };
   add("description", "description", c.description);
-  const { http, command, path } = c.reach;
+  const { http, command, path, imap } = c.reach;
+  if (imap) {
+    add("reach.imap.host", "url", imap.host);
+    add("reach.imap.username", "auth", imap.username);
+  }
   if (http) {
     add("reach.http.url", "url", http.url);
     for (const [k, v] of Object.entries(http.query)) add(`reach.http.query.${k}`, "query", v);
@@ -148,12 +154,15 @@ export function connectionFileRules(c: ConnectionFile): string[] {
  * The rules a builtin provider adds for its own connections — refused at
  * the file, before anything is dialled or written (CalDAV: a Google address,
  * a known service pointed elsewhere, a sign-in that is not an app password;
- * `caldav.ts`).
+ * `caldav.ts`. Google Calendar: anywhere but the Calendar API, a sign-in
+ * that is not Google's; `google-calendar.ts`).
  */
 function builtinIssues(c: ConnectionFile, unit: RegistryUnit<ConnectionTypeManifest>): string[] {
   const impl = unit.manifest.implementation;
   if (impl.kind !== "builtin") return [];
   if (impl.module === CALDAV_MODULE) return caldavConnectionIssues(c, unit.name);
+  if (impl.module === IMAP_MODULE) return imapConnectionIssues(c, unit.name);
+  if (impl.module === GOOGLE_CALENDAR_MODULE) return googleCalendarConnectionIssues(c, unit.name);
   return [];
 }
 

@@ -5,11 +5,13 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { Readable } from "node:stream";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { consoleCall, consoleTarget, DEFAULT_CONSOLE_URL, isLoopbackConsoleUrl, renderConsoleCallError, renderWhoami, whoami } from "../src/console-client.js";
 import { portsFile } from "../src/namespace.js";
 import type { Exec } from "../src/exec.js";
 import { main } from "../src/main.js";
+import { fakeTerminal } from "./fake-terminal.js";
 
 const TOKEN = "owner-token-never-printed";
 const INSTANCE_ID = "11111111-2222-4333-8444-555555555555";
@@ -26,7 +28,7 @@ function fakeSecurity(seed: Record<string, string> = {}): Exec {
 }
 
 /** A console that answers /api/whoami for exactly one token. */
-function fakeConsole(expected: string, body: unknown = { principal: "user", via: "local_owner_token", management: true, origin: "https://metis.example" }) {
+function fakeConsole(expected: string, body: unknown = { principal: "user", via: "local_owner_token", management: true, origin: "https://assistant.example" }) {
   const seen: Array<{ url: string; authorization: string | undefined }> = [];
   const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
     const authorization = (init?.headers as Record<string, string> | undefined)?.authorization;
@@ -136,7 +138,7 @@ describe("isLoopbackConsoleUrl", () => {
   });
 
   it("is false for anything else, including a malformed URL", () => {
-    for (const u of ["https://metis.example.com", "http://192.168.1.5:8080", "not a url"]) expect(isLoopbackConsoleUrl(u), u).toBe(false);
+    for (const u of ["https://assistant.example.com", "http://192.168.1.5:8080", "not a url"]) expect(isLoopbackConsoleUrl(u), u).toBe(false);
   });
 });
 
@@ -148,7 +150,7 @@ describe("consoleCall (module)", () => {
       throw new Error("must not be called");
     }) as unknown as typeof fetch;
     await expect(
-      consoleCall({ method: "GET", path: "/api/whoami", env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN, METISTRY_CONSOLE_URL: "https://metis.example.com" }, platform: "linux", fetchFn }),
+      consoleCall({ method: "GET", path: "/api/whoami", env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN, METISTRY_CONSOLE_URL: "https://assistant.example.com" }, platform: "linux", fetchFn }),
     ).rejects.toThrow(/is not loopback.*refuses to send it anywhere else/s);
     expect(called).toBe(false);
   });
@@ -299,6 +301,41 @@ describe("metistry console call (CLI)", () => {
     expect(c.seen[0]?.body).toBe('{"origin":"https://stdin.example"}');
   });
 
+  it("**a terminal `--body -` prompts on stderr, never stdout** — says the input ends with Ctrl-D, keeps the echo, and sends what was typed", async () => {
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = fakeCallConsole(TOKEN, { "POST /api/instances": { status: 201, body: { action: "added" } } });
+    const term = fakeTerminal();
+    const out: string[] = [];
+    const err: string[] = [];
+    const run = main(["console", "call", "POST", "/api/instances", "--body", "-", "--json"], { out: (s) => out.push(s), err: (s) => err.push(s), fetchFn: c.fetchFn, terminal: term });
+    await vi.waitFor(() => expect(term.stderrText()).toContain("Ctrl-D"));
+    term.type('{"origin":"https://typed.example"}\n');
+    term.eof();
+    expect(await run).toBe(0);
+    expect(c.seen[0]?.body).toBe('{"origin":"https://typed.example"}');
+    expect(term.stderrText()).toContain("the request body"); // the prompt is on the terminal's stderr…
+    expect(out.join("\n")).not.toMatch(/Ctrl-D|request body/); // …and never on stdout, which --json is read from
+    expect(out.join("\n")).not.toContain("typed.example");
+    expect(JSON.parse(out.join("\n"))).toEqual({ action: "added" });
+    expect(term.raw).toEqual([]); // typed text keeps the terminal's own echo
+  });
+
+  it("piped `--body -` is unchanged: read to EOF with no prompt anywhere", async () => {
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = fakeCallConsole(TOKEN, { "POST /api/instances": { status: 201, body: { action: "added" } } });
+    const stdinBefore = Object.getOwnPropertyDescriptor(process, "stdin")!;
+    Object.defineProperty(process, "stdin", { value: Readable.from(['{"origin":"https://piped.example"}\n']), configurable: true });
+    const out: string[] = [];
+    const err: string[] = [];
+    try {
+      expect(await main(["console", "call", "POST", "/api/instances", "--body", "-", "--json"], { out: (s) => out.push(s), err: (s) => err.push(s), fetchFn: c.fetchFn, terminal: null })).toBe(0);
+    } finally {
+      Object.defineProperty(process, "stdin", stdinBefore);
+    }
+    expect(c.seen[0]?.body).toBe('{"origin":"https://piped.example"}');
+    expect(err).toEqual([]);
+  });
+
   it("a >=400 answer exits non-zero and names the envelope's code and message on stderr, nothing on stdout", async () => {
     process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
     const c = fakeCallConsole(TOKEN, { "GET /api/instances/nonesuch": { status: 404, body: { error: { code: "not_found", message: "not found" } } } });
@@ -355,7 +392,7 @@ describe("metistry console call (CLI)", () => {
 
   it("refuses a non-loopback console before sending the token, and prints why", async () => {
     process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
-    process.env.METISTRY_CONSOLE_URL = "https://metis.example.com";
+    process.env.METISTRY_CONSOLE_URL = "https://assistant.example.com";
     let called = false;
     const fetchFn = (async () => {
       called = true;

@@ -172,8 +172,8 @@ describe("connect --list", () => {
   const listed = {
     console_url: "http://127.0.0.1:8080",
     tools: [
-      { tool: "cursor" as const, display_name: "Cursor", agent: "registered" as const, token: "keychain" as const, config: "~/.cursor/mcp.json → mcpServers.metistry" },
-      { tool: "devin" as const, display_name: "Devin", agent: "pending" as const, token: "n/a" as const, config: "paste at Customize -> MCPs" },
+      { tool: "cursor" as const, display_name: "Cursor", agent: "registered" as const, token: "keychain" as const, briefing: "n/a" as const, config: "~/.cursor/mcp.json → mcpServers.metistry" },
+      { tool: "devin" as const, display_name: "Devin", agent: "pending" as const, token: "n/a" as const, briefing: "n/a" as const, config: "paste at Customize -> MCPs" },
     ],
   };
 
@@ -182,9 +182,9 @@ describe("connect --list", () => {
     expect(text.split("\n").slice(0, 5)).toEqual([
       "console  http://127.0.0.1:8080",
       "",
-      "tool    agent         token       config",
-      "──────  ────────────  ──────────  ────────────────────────────────────────",
-      "cursor  ✓ registered  ✓ keychain  ~/.cursor/mcp.json → mcpServers.metistry",
+      "tool    agent         token       briefing  config",
+      "──────  ────────────  ──────────  ────────  ────────────────────────────────────────",
+      "cursor  ✓ registered  ✓ keychain  n/a       ~/.cursor/mcp.json → mcpServers.metistry",
     ]);
     expect(text).toContain("⚠ pending"); // pending is amber, not green: its token authenticates nothing yet
     expect(text).toContain("awaiting your approval");

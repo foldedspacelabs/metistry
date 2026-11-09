@@ -4,16 +4,16 @@
   "ticket": null,
   "request": {
     "method": "GET",
-    "path": "/api/turns/turn-XK1VeB0C/progress",
+    "path": "/api/turns/turn-EiTgp9ie/progress",
     "body": null,
     "idempotency_key": null
   },
   "status": 200,
   "body": {
-    "turn_id": "turn-XK1VeB0C",
+    "turn_id": "turn-EiTgp9ie",
     "calls": [
       {
-        "id": "2",
+        "id": "3",
         "tool": "knowledge_search",
         "started_at": null,
         "finished_at": null,
@@ -22,7 +22,7 @@
         "duration_ms": 12
       },
       {
-        "id": "3",
+        "id": "4",
         "tool": "tasks_update",
         "started_at": null,
         "finished_at": null,
@@ -31,6 +31,6 @@
         "duration_ms": 30
       }
     ],
-    "as_of": "2026-09-27T02:33:44.021Z"
+    "as_of": "2026-09-30T04:49:51.850Z"
   }
 }

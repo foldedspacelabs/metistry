@@ -1,0 +1,18 @@
+schema: 1
+name: recording-retention
+type: routine
+display_name: Recording Retention
+description: >
+  Keeps a live-capture recording to the owner's rulings (plan §2.15, Q7; T8-4):
+  its audio stays on the Mac until the transcript is ingested — the meeting's
+  proposals decided, or the fold has read it — plus 7 days, never more than 30
+  days after it ended; the transcript under Journal/Transcripts/ stays 30 days.
+  Each run rebuilds any recording's row missing from the vault's transcripts,
+  records ingestion from the proposals' decisions, reports it to the Mac's
+  recorder (which deletes the audio on its own clock and enforces the 30-day
+  ceiling even when this never runs), and deletes a transcript that is due as
+  a commit in the owner's name through the reconciler — never a raw unlink —
+  clearing its words from the inbox row and its proposal too. Model-free
+  (invariant 4). Without the live-capture bridge (METISTRY_LIVE_CAPTURE_URL) it
+  still deletes due transcripts and says the audio was left to the Mac.
+schedule: { every: 1h }

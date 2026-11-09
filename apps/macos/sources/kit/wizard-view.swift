@@ -20,7 +20,7 @@ public struct WizardView: View {
     private let model: WizardModel
     private let bridges: [DoctorRow]
     private let resolvedShape: String?
-    /// Where doctor found the console. Step 6 needs it to decide whether an
+    /// Where doctor found the console. Step 7 needs it to decide whether an
     /// `ASAuthorization` ceremony is possible against this install's origin.
     private let consoleURL: String?
     private let developerProductDir: URL?
@@ -85,7 +85,7 @@ public struct WizardView: View {
                 Spacer(minLength: MetistrySpace.s3)
                 Text(model.progressLabel).metistryText(.footnote, p, .textSecondary).monospacedDigit()
             }
-            // The dots are the whole progress indicator: seven steps is few
+            // The dots are the whole progress indicator: eight steps is few
             // enough to show, and a bar that fills would imply time it cannot
             // know.
             HStack(spacing: MetistrySpace.s1) {
@@ -142,7 +142,7 @@ public struct WizardView: View {
     private func body(for step: FirstRunStep, _ p: Palette) -> some View {
         VStack(alignment: .leading, spacing: MetistrySpace.s2) {
             Text("\(step.rawValue). \(step.title)").metistryText(.title2, p)
-            Text(step.summary)
+            Text(step.summary(assistantName: steps.assistantName))
                 .metistryText(.callout, p, .textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -153,11 +153,14 @@ public struct WizardView: View {
         case .versioning: versioningStep(p)
         case .secrets: secretsStep(p)
         case .services: servicesStep(p)
+        case .remoteAccess:
+            RemoteAccessStepView(steps: steps)
+                .task { await steps.remoteAccess.load() }
         case .door:
             PasskeyStepView(steps: steps)
                 .task(id: consoleURL) { steps.passkey.adopt(consoleURL: consoleURL) }
         case .compute:
-            ComputeStepView(model: steps.compute)
+            ComputeStepView(model: steps.compute, assistantName: steps.assistantName)
                 .task { await steps.compute.refresh() }
         }
         if !step.hasOwnScreen {
@@ -371,7 +374,7 @@ public struct WizardView: View {
 
             VStack(alignment: .leading, spacing: MetistrySpace.s3) {
                 Text("Deployment Shape").metistryText(.headline, p)
-                ForEach(WizardOptions.shape) { option in
+                ForEach(WizardOptions.shape(assistantName: steps.assistantName)) { option in
                     choiceRow(
                         title: option.title + (option.value == resolvedShape ? " — current" : ""),
                         detail: "\(option.pro)\n\(option.con)",

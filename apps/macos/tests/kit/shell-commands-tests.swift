@@ -160,6 +160,8 @@ private func everyShellLabel(assistantName: String?) -> [String] {
         "sources/kit/shell-model.swift",
         "sources/kit/shell-commands.swift",
         "sources/kit/keyboard-shortcuts-view.swift",
+        "sources/kit/hotkeys.swift",
+        "sources/kit/settings-panes/keyboard-pane.swift",
         "sources/app/metistry-app.swift",
     ]
     for file in files {

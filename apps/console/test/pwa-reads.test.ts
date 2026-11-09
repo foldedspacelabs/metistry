@@ -8,14 +8,11 @@
 //   - the quiet fills (C6) and the serif stack (C35): tokens, not literals;
 //   - clock times: 12-hour with AM/PM on every device.
 //
-// apps/console/web/app.js is a browser script and cannot be imported, so, as
-// in composer.test.ts, the pure top-level declarations still in it are lifted
-// out of the source by name and evaluated. A rename makes the lift throw
-// rather than letting a test pass vacuously — and `node --check` on every
-// module (last test) catches what a lift cannot see: a clash with a name
-// declared elsewhere. The helpers every view shares moved to lib.js (T7-3a),
-// and Agents to more.js (T7-3b) — modules with no DOM at import time — so
-// those are imported as they are.
+// apps/console/web/app.js is a browser script and cannot be imported; what
+// this file holds lives in modules with no DOM at import time — the helpers
+// every view shares in lib.js (T7-3a), Agents in more.js (T7-3b), the checks
+// in settings.js (T7-6) — so those are imported as they are, and `node
+// --check` on every module (last test) catches a clash of top-level names.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -26,11 +23,11 @@ import { agentAutonomy, MODE_LABEL as CLI_MODE_LABEL, renderAutonomy, renderPerm
 import { createUi } from "../../../packages/cli/src/ui.js";
 import { bodyClass, clockTime, dateTime, esc as libEsc } from "../web/lib.js";
 import { ACTION_MODE_LABEL, actionTableHtml, actionTableRows, permissionRowText as pwaPermissionRowText, permissionsListHtml, refusalText } from "../web/more.js";
+import { checkRowHtml, checksSummary } from "../web/settings.js";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const SRC = read("../web/app.js");
 /** Every module the PWA loads: the shell and the views split out of it (T7-3a, T7-3b). */
-const MODULES = ["app.js", "lib.js", "today.js", "needs-you.js", "work.js", "knowledge.js", "more.js", "live.js", "md.js"];
+const MODULES = ["app.js", "lib.js", "today.js", "needs-you.js", "work.js", "knowledge.js", "more.js", "settings.js", "live.js", "md.js"];
 /** Agents' own file since T7-3b: what prints the two tables. */
 const MORE = read("../web/more.js");
 const ALL_SRC = MODULES.map((m) => read(`../web/${m}`)).join("\n");
@@ -38,27 +35,9 @@ const CSS = read("../web/style.css");
 const TOKENS_CSS = read("../web/tokens.css");
 const TOKENS = JSON.parse(read("../../../docs/product/design/tokens.json")) as { type: { $meta: { serif: string } } };
 
-/** Lift a top-level `const NAME = …` or `function NAME(…) {…}` out of app.js. */
-function lift(name: string): string {
-  const lines = SRC.split("\n");
-  const start = lines.findIndex((l) => new RegExp(`^(?:const|let) ${name}\\b|^function ${name}\\(`).test(l));
-  if (start === -1) throw new Error(`app.js no longer declares ${name} — update this test with the rename`);
-  let depth = 0;
-  for (let i = start; i < lines.length; i++) {
-    for (const ch of lines[i]!) {
-      if ("([{".includes(ch)) depth++;
-      else if (")]}".includes(ch)) depth--;
-    }
-    if (depth <= 0) return lines.slice(start, i + 1).join("\n");
-  }
-  throw new Error(`could not find the end of ${name} in app.js`);
-}
-
 /** lib.js's esc() — what a text node's serialisation escapes: &, < and >. */
 const esc = libEsc;
 
-const lifted = <T>(names: string[], expr: string): T =>
-  new Function("esc", `${names.map(lift).join("\n")}\nreturn (${expr});`)(esc) as T;
 
 interface Row { kind: string; source: string | undefined; text: string }
 const pwa = { ACTION_MODE_LABEL, actionTableRows, actionTableHtml } as {
@@ -244,10 +223,11 @@ describe("the permissions table: the CLI, the console and MetistryKit print one 
 // The four check states (C10)
 // ---------------------------------------------------------------------------
 
-const status = lifted<{
+// Settings' own file since T7-6: Services ▸ Health prints the checks
+const status = { checkRowHtml, checksSummary } as {
   checkRowHtml: (c: Record<string, unknown>) => string;
   checksSummary: (checks: { status: string }[]) => string;
-}>(["CHECK_STATES", "CHECK_WORD", "checkRowHtml", "checksSummary"], "{ checkRowHtml, checksSummary }");
+};
 
 const check = (s: string, name = "github-state") => ({ name, status: s, latency_ms: 12, probe: "listed 1 open PR" });
 /** The state span: its class and its word. */
@@ -295,7 +275,7 @@ describe("the status list keeps the four states apart (C10)", () => {
   });
 
   it("no longer collapses the states in the source", () => {
-    expect(SRC).not.toContain('c.status === "ok" ? "ok" : "failed"');
+    expect(ALL_SRC).not.toContain('c.status === "ok" ? "ok" : "failed"');
   });
 });
 

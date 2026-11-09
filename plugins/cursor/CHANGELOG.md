@@ -1,5 +1,25 @@
 # @metistry-apps/plugin-cursor
 
+## 0.17.2
+
+No changes in this release.
+
+## 0.17.1
+
+No changes in this release.
+
+## 0.17.0
+
+No changes in this release.
+
+## 0.16.1
+
+No changes in this release.
+
+## 0.16.0
+
+No changes in this release.
+
 ## 0.15.1
 
 No changes in this release.

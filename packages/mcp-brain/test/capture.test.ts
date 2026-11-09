@@ -8,7 +8,7 @@
 import { mkdtemp, readFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { captureToInbox, dirSink, placeCapture, vaultPathPredicate, vaultSink, INBOX_PREFIX, type CaptureVault, type Db } from "../src/index.js";
 
 interface Call {
@@ -86,6 +86,48 @@ describe("vaultSink", () => {
   });
 });
 
+describe("a placed capture (T8-4: a recording's transcript, Q29)", () => {
+  it("lands at the exact path, create-only, in the principal the adapter chose — and the row records that path with no inbox conflict target", async () => {
+    const vault = fakeVault();
+    const db = fakeDb();
+    const place = { path: "Journal/Transcripts/2026-09-28-20260928-120000-00ab.md", principal: "user" };
+    const r = await captureToInbox(db, vaultSink(vault), { bytes: Buffer.from("---\nkind: \"transcript\"\n---\n"), filename: "t.md", source: "http", sourceAgent: null, place });
+    expect(vault.writes).toEqual([{ path: place.path, bytes: 27, expected: "", principal: "user" }]);
+    expect(r.path).toBe(place.path);
+    const insert = db.calls.find((c) => c.text.includes("INSERT INTO inbox"))!;
+    expect(insert.values[1]).toBe(place.path);
+    expect(insert.text).not.toContain("ON CONFLICT"); // not under Inbox/: no scan races it for that index
+  });
+
+  it("a bare directory has nowhere to place it: the capture lands under the directory as always", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "brain-place-"));
+    try {
+      const r = await captureToInbox(fakeDb(), dirSink(dir), { bytes: Buffer.from("x"), filename: "t.md", source: "http", sourceAgent: null, place: { path: "Journal/Transcripts/x.md", principal: "user" } });
+      expect(r.path).toMatch(/^\d+-t\.md$/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a second attempt that meets the first's file answers the first's row when its key is there", async () => {
+    const vault = fakeVault();
+    vault.write = async () => {
+      throw new Error("conflict: the file exists");
+    };
+    let lookups = 0;
+    const db = {
+      async query(text: string) {
+        if (/SELECT id, path, sha256 FROM inbox/.test(text)) return { rows: lookups++ === 0 ? [] : [{ id: 9, path: "Journal/Transcripts/x.md", sha256: "abc" }] };
+        return { rows: [] };
+      },
+    } as unknown as Db;
+    const r = await captureToInbox(db, vaultSink(vault), { bytes: Buffer.from("x"), filename: "t.md", source: "http", sourceAgent: null, idempotency: { principal: "owner_token", key: "live-capture:x" }, place: { path: "Journal/Transcripts/x.md", principal: "user" } });
+    expect(r).toEqual({ id: 9, path: "Journal/Transcripts/x.md", sha256: "abc", replayed: true });
+    // …and without a key there is nothing to answer with: the conflict is the caller's
+    await expect(captureToInbox(fakeDb(), vaultSink(vault), { bytes: Buffer.from("x"), source: "http", sourceAgent: null, place: { path: "Journal/Transcripts/x.md", principal: "user" } })).rejects.toThrow(/conflict/);
+  });
+});
+
 describe("the legacy inbox prefix", () => {
   // A legacy instance captures into `Knowledge/Inbox/` and its rows live
   // under migration 0015's partial index, not 0021's. The conflict target
@@ -142,5 +184,47 @@ describe("dirSink", () => {
     const r = await captureToInbox(fakeDb(), dirSink(dir, { prefix: INBOX_PREFIX }), { bytes: Buffer.from("z"), filename: "../../etc/passwd", source: "http", sourceAgent: null });
     expect(r.path).toMatch(/^Inbox\/\d+-_+etc_passwd$/);
     expect((await readdir(dir)).some((f) => f.includes("etc_passwd"))).toBe(true);
+  });
+});
+
+describe("two attempts racing one idempotency key", () => {
+  // Names are `<ms>-<name>`, so two attempts inside one millisecond put the
+  // SAME path. The insert that loses on the idempotency index (23505) used to
+  // remove "its" file unconditionally — which was the winner's, leaving the
+  // winner's row pointing at nothing (collectors' "two presses at once": an
+  // empty Inbox/ in ~2% of runs on a fast database). The loser may remove
+  // only a file the winning row does not name.
+  const race = (winnerPath: (rel: string) => string) => {
+    let dir = "";
+    return async () => {
+      dir = await mkdtemp(join(tmpdir(), "metistry-capture-race-"));
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+      try {
+        let looked = 0;
+        const db = {
+          async query(text: string) {
+            if (/^\s*SELECT/.test(text)) return { rows: looked++ === 0 ? [] : [{ id: 3, path: winnerPath("Inbox/1700000000000-x.md"), sha256: "w" }] }; // the lookup misses, then the winner's row is there
+            throw Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
+          },
+        } as unknown as Db;
+        const r = await captureToInbox(db, dirSink(dir, { prefix: INBOX_PREFIX }), { bytes: Buffer.from("x"), filename: "x.md", source: "linear", sourceAgent: null, idempotency: { principal: "tracker:linear", key: "linear:A-1" } });
+        return { r, files: await readdir(dir) };
+      } finally {
+        now.mockRestore();
+        await rm(dir, { recursive: true, force: true });
+      }
+    };
+  };
+
+  it("keeps the winner's file when it is the same path", async () => {
+    const { r, files } = await race((rel) => rel)();
+    expect(r).toMatchObject({ id: 3, replayed: true });
+    expect(files).toEqual(["1700000000000-x.md"]); // before the fix: []
+  });
+
+  it("still withdraws its own file when the winner's is another", async () => {
+    const { r, files } = await race(() => "Inbox/1700000000001-x.md")();
+    expect(r).toMatchObject({ id: 3, replayed: true });
+    expect(files).toEqual([]);
   });
 });

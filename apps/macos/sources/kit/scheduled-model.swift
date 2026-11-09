@@ -871,7 +871,7 @@ public final class ScheduledModel {
 
     // MARK: A row, presented
 
-    /// components-02 §3: *6:00 AM, Standup, default, run by Metis, working days at 6 AM. Succeeded*.
+    /// components-02 §3: *6:00 AM, Standup, default, run by the assistant, working days at 6 AM. Succeeded*.
     public func presentation(_ row: ScheduledRow, assistantName: String?) -> ScheduledRowPresentation? {
         switch row.kind {
         case .sync:
@@ -1165,7 +1165,7 @@ public struct ScheduledRowPresentation: Sendable, Equatable {
     public let when: String
     public let title: String
     public let isDefault: Bool
-    /// *Run by Metis* — an agent id for a New Routine; nil until the name is known.
+    /// *Run by <the assistant>* — an agent id for a New Routine; nil until the name is known.
     public let runBy: String?
     public let runByIsAgent: Bool
     /// The Recurrence, or for a sync its connection and cadence.

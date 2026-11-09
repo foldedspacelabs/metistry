@@ -25,6 +25,7 @@ import { Vault } from "./vault.js";
 import { Embeddings } from "./embeddings.js";
 import { Indexer } from "./indexer.js";
 import { makeBridge } from "./server.js";
+import { startPolicyMirror } from "./policy-mirror.js";
 import { syncRecorder } from "./sync-record.js";
 import { aheadBehind, commitRecorder, readVaultStatus, SyncScheduler, VaultPolicySource } from "./sync-policy.js";
 import { installShutdown } from "./shutdown.js";
@@ -212,6 +213,10 @@ const reconcile = (trigger: string) =>
 const startupWalk = setTimeout(() => reconcile("startup"), 2000);
 const reconcileTimer = setInterval(() => reconcile("interval"), reconcileIntervalSec * 1000);
 
+// X-7: the secrets policy mirror compose mounts — a revoke reaches the
+// containers within one interval, whoever made it (policy-mirror.ts)
+const policyMirror = startPolicyMirror(instanceDir);
+
 // §2.21: every sync act is a `runs` row (and a conflict its one Needs You
 // report); an integrate that changed files is followed by a walk that
 // starts after it, never one that read the tree before it (rule 5).
@@ -236,6 +241,7 @@ installShutdown({
     clearInterval(flushTimer);
     clearInterval(reconcileTimer);
     clearTimeout(startupWalk);
+    policyMirror.stop();
     stopSync();
     server.close();
   },

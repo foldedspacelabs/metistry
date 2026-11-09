@@ -114,6 +114,7 @@ rather than in every PR that touches it (`docs/product/record/README.md`).
 | `metistry-runtime-<version>-darwin-arm64.tar.gz` | the built product, for an Apple-silicon Mac |
 | `metistry-runtime-<version>-linux-x64.tar.gz` | the same, for a Linux host |
 | `metistry-runtime-deps-<version>-darwin-arm64.tar.gz` | the **bundled runtime**: Node, Postgres 17 + pgvector, git — `docs/ops/bundled-runtime.md` |
+| `metistry-remote-<tool>-<version>-darwin-arm64.tar.gz` (×3: `tailscale`, `cloudflared`, `zrok`) | the **provider tool packs** — `tailscaled` + `tailscale` built from the pinned tag, the official `cloudflared`, the zrok CLI — each pinned by sha256, signed, fetched by `metistry remote set <provider>` only when the owner picks that provider; never in the DMG — `docs/ops/bundled-runtime.md`, "Provider tool packs" |
 | `Metistry-<version>.dmg` | the **Mac app**: the SwiftUI front end for the CLI, with both packs above embedded as `Contents/Resources/metistry/`, Developer ID signed with the hardened runtime, notarized and stapled — `docs/ops/mac-app.md` |
 | `appcast.xml` | the EdDSA-signed **Sparkle feed** an installed app polls. `latest/download/appcast.xml` is the URL in the app's `Info.plist`, so it always resolves to the newest release |
 | `checksums.txt` | `sha256sum` of every asset, the DMG and the appcast included; `metistry update` verifies the runtime packs against it |
@@ -173,6 +174,25 @@ set, and caches the Postgres/git compiles on that versions file so a later
 run is a few minutes rather than fifteen. Its tarball holds a single
 top-level `runtime/`, which is why `metistry update` unpacks it with
 `tar -C <product-dir>`. Full account: `docs/ops/bundled-runtime.md`.
+
+The **provider tool packs** (`ops/release/build-remote-packs.sh`, the
+`remote-packs (darwin-arm64)` job) are the same idea for what a remote-access
+provider needs: `tailscaled` + `tailscale` from the pinned Tailscale tag
+(built with `go`), the official `cloudflared` binary re-signed, the zrok CLI
+re-signed — one `remote/<tool>/` tree each, licence beside it, pinned in the
+same versions file, signed with the same rule (`ops/release/pack-lib.sh`)
+and checked for the release identity on every Mach-O. Each tree is its own
+asset so `metistry remote set <provider>` fetches one tool and not three,
+and `publish` is gated on the job like `runtime-deps`. Nothing from them
+goes in the DMG. The Tailscale build uses a **pinned Go toolchain**
+(`TAILSCALE_GO_TOOLCHAIN` in `runtime-versions.env`, fetched and verified
+by the go command against the Go checksum database — never the runner
+image's `go`): **bumping `TAILSCALE_VERSION` means reading the new tag's
+`go.mod` and moving that pin with it.** The gate puts a third-party Go build
+on the release's critical path; if the job fails, the release stays a draft
+— fix and *Re-run failed jobs*, or ship without the packs with `gh release
+edit v<version> --draft=false` (then `remote set` names the missing asset
+until the next release). Full account: `docs/ops/bundled-runtime.md`.
 
 The **DMG** (`ops/release/build-app.sh`, the `macos-app` job) is the Mac
 app with both packs above unpacked inside it as
@@ -348,6 +368,15 @@ a fork that has not made the environment.)
 | `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD` | `macos-app` | the Developer ID Application certificate, imported into a temporary keychain; `METISTRY_SIGN_IDENTITY` is then derived from it as the identity's **SHA-1 hash**, not its display name (two valid certs for one team have identical names and `codesign -s` fails with "ambiguous"). Absent → the job skips with a notice |
 | `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8` | `macos-app` | notarization via the App Store Connect API key (`xcrun notarytool submit --key --key-id --issuer --wait`, then `stapler staple`) — **not** an Apple ID + app-specific password. `APPLE_API_KEY_P8` is the **raw contents** of `AuthKey_<KEY_ID>.p8`, `-----BEGIN PRIVATE KEY-----`/`-----END PRIVATE KEY-----` lines included: `gh secret set APPLE_API_KEY_P8 --env release --repo foldedspacelabs/metistry < AuthKey_<KEY_ID>.p8`. (Base64 of the file is also accepted — `ops/release/notarize.sh` decodes it — but the raw file is the format to set.) Anything else fails the job naming the format, instead of notarytool's bare `invalidPrivateKeyContents` (v0.15.0). Absent → the DMG is signed but not notarized, and the run says so |
 | `APPLE_TEAM_ID` | — | unused. It was for the `xcodebuild archive` in the old stub; there is no Xcode project |
+| `WEBSITE_DISPATCH_TOKEN` | `notify-website` (`release.yml`), `website-docs.yml` | telling metistry.ai to rebuild: a `repository_dispatch` (`event_type: metistry-content`) to `foldedspacelabs/metistry-website`, with `client_payload` `{"reason":"release","ref":"v<version>"}` after `publish` succeeds, or `{"reason":"docs","ref":"<sha>"}` when `docs/**` or `README.md` changes on `main`. A **fine-grained PAT or GitHub App token scoped to only `foldedspacelabs/metistry-website`**, with **Contents: read & write** — the permission GitHub requires for `repository_dispatch` — and nothing else. A **repository** secret, not in the `release` environment: it signs nothing, so it waits for no approval. Absent → both skip with a notice. The release job is `continue-on-error` and runs after publishing, so a bad or expired token never fails or holds a release |
+
+`WEBSITE_DISPATCH_TOKEN` is set once, at the repo level:
+`env -u GH_TOKEN gh secret set WEBSITE_DISPATCH_TOKEN --repo foldedspacelabs/metistry`
+(it reads the value from stdin). A fine-grained PAT expires — when it does,
+both jobs start failing the dispatch (a failed `notify-website` step, a
+failed `website-docs` run) and nothing else changes; mint a new one with the
+same single-repo scope and set it again. To rebuild the site's Docs by hand,
+run `website-docs` from the Actions tab (`workflow_dispatch`).
 
 The Developer ID certificate is also what fixes the ad-hoc-signed TCC
 helpers (D3: TCC bridges must be *stably* signed, or every rebuild

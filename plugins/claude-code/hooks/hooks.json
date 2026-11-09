@@ -1,6 +1,20 @@
 {
-  "description": "Optional end-of-session summary to POST /capture. Inert unless METISTRY_CAPTURE_ON_STOP=1; never fails the session (exit 0 on every path).",
+  "description": "SessionStart: the session-start briefing (on by default; the owner's opt-out is per agent, `metistry connect claude-code --briefing off`). SessionEnd: optional end-of-session summary to POST /capture, inert unless METISTRY_CAPTURE_ON_STOP=1. Neither ever fails the session (exit 0 on every path).",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/session-start.mjs"],
+            "timeout": 10,
+            "statusMessage": "Fetching the Metistry briefing…"
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "hooks": [

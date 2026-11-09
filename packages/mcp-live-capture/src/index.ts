@@ -3,19 +3,30 @@
 // with two reaches.
 //
 //   the bridge token     METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE — what the router,
-//                        doctor and any tool caller present. Reaches the
-//                        manifest's `exposes:` and nothing else: `check` and
-//                        `status`, both reads.
+//                        doctor, the console's recording-retention routine and
+//                        any tool caller present. Reaches the manifest's
+//                        `exposes:` — `check`, `status` and `recording_review`,
+//                        all reads — and one `system` route that is not a
+//                        tool: the retention routine's ingestion report
+//                        (src/review.ts), which can only bring a deletion
+//                        the helper's rule allows forward, never cause one.
 //   the control token    METISTRY_LIVE_CAPTURE_CONTROL_TOKEN — the owner's
 //                        hand: the capture bar on this Mac (plan §2.2,
 //                        "controlling a recording — the app talks to the
 //                        local live-capture bridge directly"). Reaches start,
-//                        stop and Keep Going as well.
+//                        stop, Keep Going and Purge Now as well.
 //   the inbox token      METISTRY_LIVE_CAPTURE_INBOX_TOKEN — not a credential
 //                        this bridge ACCEPTS at all: the capture owner token it
 //                        PRESENTS to the console's POST /capture when a
 //                        session ends (src/delivery.ts, T8-2b). Optional; must
 //                        differ from both of the above.
+//
+// What a recording takes (C76): `audio_only` — a process tap over the apps
+// the body names — or `window` / `screen`, where the body names NOTHING and
+// the system picker, presented by the helper, is the only chooser. A window
+// id, display id or app list on a picture start is refused here, and again
+// by the helper (helper/sources/kit/picture.swift): the picker's choice is
+// the only filter the helper builds.
 //
 // A tool caller that asks to start a recording is refused 403 before the
 // helper hears anything: the route is not in `exposes:` AND the credential
@@ -26,9 +37,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { errorEnvelope, parseBearer, runCheck, statusFor, tokenEquals, type CheckResult, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import { Deliverer, type DeliveryConfig, type DeliveryState } from "./delivery.js";
 import type { HelperClient, HelperResponse } from "./helper.js";
+import { purgeBody, retentionBody, retentionState, reviewAnswer, reviewQuery } from "./review.js";
 
 export { DEFAULT_HELPER_TIMEOUT_MS, Helper, type HelperClient, type HelperResponse } from "./helper.js";
 export { clock, Deliverer, idempotencyKey, IDEMPOTENCY_PREFIX, renderTranscript, type DeliveryConfig, type DeliveryState, type SessionRecordJson, type TranscriptLine } from "./delivery.js";
+export { deletedNote, MAX_REVIEW_SPAN_S, purgeBody, retentionBody, retentionState, reviewAnswer, reviewQuery, SESSION_ID_RE, type RetentionState, type ReviewAnswer, type ReviewLine } from "./review.js";
 
 export interface BridgeConfig {
   /** The bridge token: tool callers, the router, doctor. */
@@ -51,22 +64,34 @@ export type Caller = "tool" | "control";
 
 /**
  * Every route the bridge serves. `tool` names the manifest `exposes:` entry a
- * route answers; a route without one is not a tool and is reachable by the
- * control credential only. The test holds the manifest and this table to each
- * other, so a new exposed route is a decision made in both places.
+ * route answers — reach `any`, and always a GET read; a route without one is
+ * not a tool. `control` is the owner's hand only; `system` is the bridge
+ * token or the control credential, for a caller that is not an agent (the
+ * console's retention routine) and is never advertised as a tool. The test
+ * holds the manifest and this table to each other, so a new exposed route is
+ * a decision made in both places.
  */
 export const ROUTES = [
   { method: "GET", path: "/check", reach: "any", tool: "check" },
   { method: "GET", path: "/status", reach: "any", tool: "status" },
+  { method: "GET", path: "/recording/review", reach: "any", tool: "recording_review" },
+  { method: "POST", path: "/recording/retention", reach: "system" },
   { method: "POST", path: "/recording/start", reach: "control" },
   { method: "POST", path: "/recording/stop", reach: "control" },
   { method: "POST", path: "/recording/keep-going", reach: "control" },
-] as const satisfies readonly { method: string; path: string; reach: "any" | "control"; tool?: string }[];
+  { method: "POST", path: "/recording/purge", reach: "control" },
+] as const satisfies readonly { method: string; path: string; reach: "any" | "system" | "control"; tool?: string }[];
 
-/** The helper ops a tool caller can ever cause. Nothing that starts, stops or answers a recording. */
-export const TOOL_OPS = ["check", "status"] as const;
+/** The helper ops a tool caller can ever cause. Nothing that starts, stops, answers or deletes a recording. */
+export const TOOL_OPS = ["check", "status", "review"] as const;
+/** …and the one more the bridge token reaches off the tool list: the routine's report (`system`). Never `purge`. */
+export const SYSTEM_OPS = ["retention"] as const;
 
-// limit: fixed — a start body is a short list of bundle identifiers and two switches.
+/** The record sheet's three acts (C76). */
+export const CAPTURE_MODES = ["audio_only", "window", "screen"] as const;
+export type CaptureMode = (typeof CAPTURE_MODES)[number];
+
+// limit: fixed — a start body is a mode, a short list of bundle identifiers and two switches.
 const MAX_BODY_BYTES = 16 * 1024;
 // limit: fixed — the record sheet's list, matched by the helper's own cap (helper/sources/kit/scope.swift).
 const MAX_SCOPE_APPS = 16;
@@ -99,27 +124,37 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
+export type StartPayload =
+  | { op: "start"; mode: "audio_only"; apps: string[]; app_audio: boolean; microphone: boolean }
+  | { op: "start"; mode: "window" | "screen"; app_audio: boolean; microphone: boolean };
+
 /**
  * The record sheet's body, checked, and rebuilt from its known fields only —
  * nothing else in the body reaches the helper (an `op` in it cannot turn a
- * start into anything else).
+ * start into anything else, and no window, display or filter can ride along).
+ * `window` and `screen` take no `apps`: the picker chooses.
  */
-export function startPayload(body: unknown): { ok: true; payload: { op: "start"; apps: string[]; app_audio: boolean; microphone: boolean } } | { ok: false; message: string } {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) return { ok: false, message: "the body is an object: {apps, app_audio?, microphone?}" };
+export function startPayload(body: unknown): { ok: true; payload: StartPayload } | { ok: false; message: string } {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return { ok: false, message: "the body is an object: {mode?, apps?, app_audio?, microphone?}" };
   const b = body as Record<string, unknown>;
-  const unknown = Object.keys(b).filter((k) => !["apps", "app_audio", "microphone"].includes(k));
+  const unknown = Object.keys(b).filter((k) => !["mode", "apps", "app_audio", "microphone"].includes(k));
   if (unknown.length > 0) return { ok: false, message: `unknown field${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}` };
+  const mode = b.mode ?? "audio_only";
+  if (typeof mode !== "string" || !(CAPTURE_MODES as readonly string[]).includes(mode)) return { ok: false, message: `mode is one of ${CAPTURE_MODES.join(", ")}` };
+  for (const key of ["app_audio", "microphone"] as const) {
+    if (b[key] !== undefined && typeof b[key] !== "boolean") return { ok: false, message: `${key} is true or false` };
+  }
+  const app_audio = (b.app_audio as boolean | undefined) ?? true;
+  const microphone = (b.microphone as boolean | undefined) ?? true;
+  if (mode === "window" || mode === "screen") {
+    if (b.apps !== undefined) return { ok: false, message: `${mode} is chosen in the macOS picker — a start names no apps, window or display` };
+    return { ok: true, payload: { op: "start", mode, app_audio, microphone } };
+  }
   if (!Array.isArray(b.apps) || b.apps.length === 0 || !b.apps.every((a) => typeof a === "string")) {
     return { ok: false, message: "apps is a non-empty list of bundle identifiers — a recording never hears everything" };
   }
   if (b.apps.length > MAX_SCOPE_APPS) return { ok: false, message: `at most ${MAX_SCOPE_APPS} apps` };
-  for (const key of ["app_audio", "microphone"] as const) {
-    if (b[key] !== undefined && typeof b[key] !== "boolean") return { ok: false, message: `${key} is true or false` };
-  }
-  return {
-    ok: true,
-    payload: { op: "start", apps: b.apps as string[], app_audio: (b.app_audio as boolean | undefined) ?? true, microphone: (b.microphone as boolean | undefined) ?? true },
-  };
+  return { ok: true, payload: { op: "start", mode: "audio_only", apps: b.apps as string[], app_audio, microphone } };
 }
 
 /** A helper refusal, onto core's envelope, in the owner's words. */
@@ -137,6 +172,9 @@ function helperFailure(res: ServerResponse, r: HelperResponse): void {
       return fail(res, "not_found", r.error);
     case "stream_failed":
     case "unreachable":
+    case "not_available":
+    case "no_transcriber":
+    case "review_failed":
       return fail(res, "not_available", r.error);
     default:
       return fail(res, "internal");
@@ -170,7 +208,7 @@ export async function check(helper: HelperClient, deliverer?: Deliverer): Promis
       return { status: "degraded" as const, remediation: "the microphone is not allowed — System Settings ▸ Privacy & Security ▸ Microphone; recordings keep app audio only", meta };
     }
     if (delivery === "off") {
-      return { status: "degraded" as const, remediation: "transcripts are kept on this Mac and never reach Metistry — set METISTRY_LIVE_CAPTURE_INBOX_TOKEN to a capture owner token (docs/ops/capture-shortcut.md §1) and restart the bridge", meta };
+      return { status: "degraded" as const, remediation: "transcripts are kept on this Mac and never reach Metistry — `metistry up` (or `metistry secrets mint`) makes METISTRY_LIVE_CAPTURE_INBOX_TOKEN, a capture owner token; then restart the bridge", meta };
     }
     if (delivery.last_error !== undefined && delivery.owed > 0) {
       return { status: "degraded" as const, remediation: `${delivery.owed} recording${delivery.owed === 1 ? "" : "s"} not yet delivered: ${delivery.last_error}`, meta };
@@ -209,6 +247,7 @@ export function makeBridge(helper: HelperClient, cfg: BridgeConfig): Bridge {
       const route = ROUTES.find((r) => r.method === req.method && r.path === url.pathname);
       if (!route) return fail(res, "not_found");
       if (route.reach === "control" && caller !== "control") return fail(res, "forbidden");
+      // `system`: the bridge token or the control credential — both already authenticated above.
 
       switch (route.path) {
         case "/check": {
@@ -238,6 +277,31 @@ export function makeBridge(helper: HelperClient, cfg: BridgeConfig): Bridge {
         case "/recording/keep-going": {
           const r = await helper.request({ op: "keep_going" });
           return r.ok ? send(res, 200, body(r)) : helperFailure(res, r);
+        }
+        case "/recording/review": {
+          // recording_review (T8-4): text with timestamps, never audio —
+          // the answer is rebuilt from known fields (src/review.ts).
+          const q = reviewQuery(url.searchParams);
+          if (!q.ok) return fail(res, "invalid_request", q.message);
+          const r = await helper.request(q.payload);
+          if (!r.ok) return helperFailure(res, r);
+          return send(res, 200, reviewAnswer(r, { session_id: q.payload.session_id, from_s: q.payload.from_s, to_s: q.payload.to_s, ...(q.question !== undefined ? { question: q.question } : {}) }));
+        }
+        case "/recording/retention": {
+          const b = retentionBody(await readJson(req));
+          if (!b.ok) return fail(res, "invalid_request", b.message);
+          const r = await helper.request(b.payload);
+          if (!r.ok) return helperFailure(res, r);
+          const state = retentionState(r);
+          return state ? send(res, 200, { ...state, as_of: new Date().toISOString() }) : fail(res, "internal");
+        }
+        case "/recording/purge": {
+          const b = purgeBody(await readJson(req));
+          if (!b.ok) return fail(res, "invalid_request", b.message);
+          const r = await helper.request(b.payload);
+          if (!r.ok) return helperFailure(res, r);
+          const state = retentionState(r);
+          return state ? send(res, 200, { ...state, as_of: new Date().toISOString() }) : fail(res, "internal");
         }
       }
     } catch (err) {

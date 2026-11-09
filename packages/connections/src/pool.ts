@@ -30,6 +30,11 @@
 //     and nowhere else, and a redirect is not followed: a server that points
 //     the client at another host is refused `other_host`.
 //
+// An IMAP mailbox (T4-15) is not MCP and is never pooled: `openImap` opens
+// one signed-in session for the owner's hand (`check()`), through the IMAP
+// provider's own host guard, with this pool's secrets and redactor, and the
+// caller closes it.
+//
 // A stdio child is given a granted secret in its environment at spawn —
 // §2.14's rule for a local process — and is NOT network-confined in this
 // release: the supervisor's egress proxy has one allowlist for its confined
@@ -49,7 +54,6 @@ import {
   EgressRefused,
   SecretRedactor,
   fillSecretRefs,
-  guardedFetch,
   secretGrant,
   secretRefsIn,
   type SecretSource,
@@ -58,8 +62,12 @@ import {
   type ToolMode,
 } from "@foldedspacelabs/metistry-core";
 import type { ConnectionCatalog } from "./catalog.js";
+import { basicSource, connectionGrantee, pinnedDoor } from "./door.js";
 import { ConnectionRefused } from "./errors.js";
+import { callGenerated, generatedToolsFor, isGeneratedType, planGenerated, probeGenerated, type GeneratedPlan } from "./generated.js";
+import { IMAP_MODULE, openImap, type ImapDialer, type ImapSession } from "./imap.js";
 import type { ConnectionEntry } from "./load.js";
+import { OAuthError, OAuthTokens, oauthSource } from "./oauth.js";
 import { planDial, planFingerprint, type CommandDial, type DialPlan, type HttpDial } from "./plan.js";
 
 /** An idle connection is closed after this long — a stdio child is a process, and one nobody is using is a process for nothing. The host passes its own (`METISTRY_CONNECTION_IDLE_MS`). */
@@ -73,10 +81,7 @@ const STDERR_TAIL_LINES = 20; // limit: fixed — a diagnostic tail for an error
 /** The one `tools/list` page cap: a server that pages forever is not listing tools. */
 const MAX_TOOL_PAGES = 20; // limit: fixed — guards a paging loop against a server that never stops, far above any real tool list
 
-/** The grantee a connection's own secrets are granted to (`secrets.yaml`). */
-export function connectionGrantee(name: string): string {
-  return `connection:${name}`;
-}
+export { connectionGrantee };
 
 /** One tool as the upstream describes it, joined to the owner's policy for it. */
 export interface ListedTool {
@@ -137,6 +142,8 @@ export interface ConnectionPoolOptions {
   redactor?: SecretRedactor | undefined;
   /** the base fetch under the egress guard (a test's fake; default global fetch) */
   fetch?: typeof fetch | undefined;
+  /** how an IMAP connection's socket is opened (a test's fake; default Node's verified TLS) — only after its host guard passed */
+  imapDial?: ImapDialer | undefined;
   /** where THIS process runs: a `runs_on` that names the other place is refused `runs_elsewhere`. Default host */
   runsOn?: "host" | "container" | undefined;
   idleMs?: number | undefined;
@@ -163,14 +170,11 @@ interface Live {
 
 interface Prepared {
   entry: ConnectionEntry;
-  plan: DialPlan;
+  plan: DialPlan | GeneratedPlan;
   catalog: ConnectionCatalog;
   fingerprint: string;
 }
 
-function urlOf(input: Parameters<typeof fetch>[0]): string {
-  return input instanceof Request ? input.url : input instanceof URL ? input.href : String(input);
-}
 
 /** The pool. One per process that dials connections; `close()` it on the way down. */
 export class ConnectionPool {
@@ -214,14 +218,22 @@ export class ConnectionPool {
       throw new ConnectionRefused("needs_approval", c.name, `${req.tool} is set to Ask First — it runs only once the owner approves this call`, req.tool);
     }
     const bearer = req.caller?.bearer;
-    if (bearer && bearer.length >= 8 && JSON.stringify(req.args ?? {}).includes(bearer)) {
+    const argText = JSON.stringify(req.args ?? {});
+    if (bearer && bearer.length >= 8 && argText.includes(bearer)) {
       throw new ConnectionRefused("caller_credential", c.name, "the arguments carry the caller's own credential — it is never sent upstream", req.tool);
+    }
+    // the door fills `{{ secret.x }}` wherever it finds one, so a reference a caller writes
+    // would be a value the caller chose where to send (into an issue body, say)
+    const written = secretRefsIn(argText);
+    if (written.names.length > 0 || written.malformed.length > 0) {
+      throw new ConnectionRefused("secret_reference", c.name, "the arguments carry a {{ secret.… }} reference — the door fills references, so a caller never writes one; nothing was sent", req.tool);
     }
 
     const started = Date.now();
     const used = new Set<string>();
+    if (prepared.plan.kind === "generated") return this.#callGenerated(req, prepared, prepared.plan, started, used);
     try {
-      const live = await this.#ensure(req.connection, prepared);
+      const live = await this.#ensure(req.connection, prepared as Prepared & { plan: DialPlan });
       for (const n of live.envSecrets) used.add(n);
       const timeout = prepared.plan.kind === "http" ? (prepared.plan.timeoutMs ?? this.#callTimeout()) : this.#callTimeout();
       const result = (await this.#usage.run(used, () => live.client.callTool({ name: req.tool, arguments: req.args ?? {} }, undefined, { timeout }))) as {
@@ -247,12 +259,10 @@ export class ConnectionPool {
     }
   }
 
-  /** The tools an agent may be offered: listed, not Never, and present upstream — with the upstream's description and schema. */
+  /** The tools an agent may be offered: listed, not Never, and present upstream — with the upstream's description and schema. A generated type's are Metistry's own, and nothing is dialled to list them. */
   async tools(name: string): Promise<ListedTool[]> {
     const prepared = await this.#prepare(name);
-    const live = await this.#ensure(name, prepared);
-    const upstream = await this.#listTools(live);
-    this.#touch(name, live);
+    const upstream = prepared.plan.kind === "generated" ? generatedUpstream(prepared.entry) : await this.#upstreamOf(name, prepared as Prepared & { plan: DialPlan });
     const policies = prepared.entry.connection!.tools;
     const out: ListedTool[] = [];
     for (const t of upstream) {
@@ -271,11 +281,67 @@ export class ConnectionPool {
    */
   async upstreamTools(name: string, opts: { fresh?: boolean } = {}): Promise<UpstreamTool[]> {
     const prepared = await this.#prepare(name);
-    const live = await this.#ensure(name, prepared);
+    if (prepared.plan.kind === "generated") {
+      // a generated type has no server to ask: reach the service once, so a check and `add` still prove it answers
+      const used = new Set<string>();
+      await probeGenerated(prepared.plan, this.#generatedContext(name, prepared, used)).catch((err: unknown) => {
+        throw this.#safe(err);
+      });
+      return generatedUpstream(prepared.entry);
+    }
+    const live = await this.#ensure(name, prepared as Prepared & { plan: DialPlan });
     if (opts.fresh) live.tools = undefined;
     const tools = await this.#listTools(live);
     this.#touch(name, live);
     return tools;
+  }
+
+  /**
+   * Open and sign in to an IMAP connection (T4-15) — for the owner's hand
+   * (`check()`, `metistry connections test`). Not pooled and never offered to
+   * an agent: the caller closes the session. Refused before anything is
+   * dialled for an unknown or not-ready connection and for one whose
+   * provider is not the IMAP module; the host guard, the fill and the
+   * sign-in are `openImap`'s.
+   */
+  async openImap(name: string, opts: { onUse?: ((use: { names: string[]; destination: string }) => void | Promise<void>) | undefined } = {}): Promise<ImapSession> {
+    if (this.#closed) throw new Error("the connection pool is closed");
+    const catalog = await this.#opts.catalog();
+    const entry = catalog.entries.find((e) => e.name === name);
+    if (!entry) throw new ConnectionRefused("unknown_connection", name, `no connection named ${name} (\`metistry connections list\`)`);
+    if (entry.status !== "ok" || !entry.connection || !entry.provider) {
+      throw new ConnectionRefused("not_ready", name, `${entry.status}: ${entry.issues.join("; ") || "the connection is not ready"}`);
+    }
+    const impl = entry.provider.manifest.implementation;
+    const reach = entry.connection.reach.imap;
+    if (impl.kind !== "builtin" || impl.module !== IMAP_MODULE || !reach) {
+      throw new ConnectionRefused("not_built", name, `provider ${entry.provider.name} is not the IMAP module — it is not opened as a mailbox`);
+    }
+    if (!catalog.secrets.ok) {
+      throw new ConnectionRefused("secret", name, `secrets.yaml does not load (${catalog.secrets.message}), so ${reach.secret} may not be used`);
+    }
+    return openImap({
+      connection: name,
+      reach,
+      capabilities: [...entry.provider.manifest.capabilities],
+      secretsFile: catalog.secrets.file,
+      source: this.#opts.secrets,
+      redactor: this.#redactor,
+      ...(this.#opts.imapDial ? { dial: this.#opts.imapDial } : {}),
+      timeoutMs: this.#opts.connectTimeoutMs ?? DEFAULT_CONNECTION_CONNECT_TIMEOUT_MS,
+      ...(opts.onUse ? { onUse: opts.onUse } : {}),
+    });
+  }
+
+  /** What a probe of a generated connection found, in one line — `check()`'s probe text. Undefined for an MCP connection. */
+  async probe(name: string): Promise<string | undefined> {
+    const prepared = await this.#prepare(name);
+    if (prepared.plan.kind !== "generated") return undefined;
+    try {
+      return await probeGenerated(prepared.plan, this.#generatedContext(name, prepared, new Set()));
+    } catch (err) {
+      throw this.#safe(err);
+    }
   }
 
   /** Close one connection now (its file was removed, say) — or every one. */
@@ -298,6 +364,98 @@ export class ConnectionPool {
   }
 
   // ---- internals ------------------------------------------------------------------
+
+  async #upstreamOf(name: string, prepared: Prepared & { plan: DialPlan }): Promise<UpstreamTool[]> {
+    const live = await this.#ensure(name, prepared);
+    const upstream = await this.#listTools(live);
+    this.#touch(name, live);
+    return upstream;
+  }
+
+  /** One OAuth connection's tokens, kept while its sign-in is the same — a changed client or token secret starts afresh. */
+  readonly #oauth = new Map<string, { key: string; tokens: OAuthTokens }>();
+
+  /**
+   * Where an HTTP reach's values come from: the store, with Basic encoded
+   * inside the door and OAuth's token secret filled with an access token
+   * minted from the stored refresh token (through the door too, to the token
+   * endpoint's host only).
+   */
+  #httpSource(name: string, plan: HttpDial, secrets: () => SecretsFile, used: () => Set<string> | undefined): SecretSource {
+    const base = this.#opts.secrets;
+    if (plan.basic) return basicSource(base, plan.basic, this.#redactor);
+    if (!plan.oauth) return base;
+    const key = JSON.stringify(plan.oauth);
+    let held = this.#oauth.get(name);
+    if (!held || held.key !== key) {
+      held = {
+        key,
+        tokens: new OAuthTokens(plan.oauth, () => ({
+          secrets: secrets(),
+          source: base,
+          redactor: this.#redactor,
+          ...(this.#opts.fetch ? { fetch: this.#opts.fetch } : {}),
+          onUse: (names) => {
+            const set = used();
+            if (set) for (const n of names) set.add(n);
+          },
+        })),
+      };
+      this.#oauth.set(name, held);
+    }
+    const tokens = held.tokens;
+    const wrapped = oauthSource(base, tokens);
+    return {
+      async value(n) {
+        try {
+          return await wrapped.value(n);
+        } catch (err) {
+          if (err instanceof OAuthError) throw new ConnectionRefused("sign_in", name, err.message);
+          throw err;
+        }
+      },
+    };
+  }
+
+  #generatedContext(name: string, prepared: Prepared, used: Set<string>): { fetch: typeof fetch; timeoutMs: number } {
+    const plan = prepared.plan as GeneratedPlan;
+    const secrets = (): SecretsFile => (prepared.catalog.secrets.ok ? prepared.catalog.secrets.file : { secrets: {} });
+    if (!("http" in plan)) return { fetch: (() => Promise.reject(new Error("a files connection reached by path makes no request"))) as typeof fetch, timeoutMs: this.#callTimeout() };
+    const door = pinnedDoor({
+      connection: name,
+      origin: plan.http.origin,
+      secrets,
+      source: this.#httpSource(name, plan.http, secrets, () => used),
+      redactor: this.#redactor,
+      onUse: (names) => names.forEach((n) => used.add(n)),
+      ...(this.#opts.fetch ? { fetch: this.#opts.fetch } : {}),
+    });
+    return { fetch: door, timeoutMs: plan.http.timeoutMs ?? this.#callTimeout() };
+  }
+
+  async #callGenerated(req: CallRequest, prepared: Prepared, plan: GeneratedPlan, started: number, used: Set<string>): Promise<CallOutcome> {
+    const c = prepared.entry.connection!;
+    if (!generatedToolsFor(c).some((t) => t.name === req.tool)) {
+      throw new ConnectionRefused("tool_not_listed", c.name, `Metistry generates no tool ${req.tool} for a ${c.type} connection — \`metistry connections show ${c.name}\` lists the ones it does`, req.tool);
+    }
+    try {
+      const result = await callGenerated(plan, req.tool, req.args ?? {}, this.#generatedContext(req.connection, prepared, used));
+      const out: CallOutcome = {
+        content: this.#redactor.redact(result.content),
+        structuredContent: this.#redactor.redact(result.structuredContent),
+        isError: result.isError,
+        secrets: [...used].sort(),
+      };
+      await this.#emit({ kind: "connection_call", connection: req.connection, tool: req.tool, ok: true, ms: Date.now() - started, secrets: out.secrets, meta: { is_error: out.isError, generated: true } });
+      return out;
+    } catch (err) {
+      const safe = this.#safe(err);
+      if (!(err instanceof ConnectionRefused)) {
+        await this.#emit({ kind: "connection_call", connection: req.connection, tool: req.tool, ok: false, error: safe.message, ms: Date.now() - started, secrets: [...used].sort(), meta: { generated: true } });
+      }
+      throw safe;
+    }
+  }
 
   #callTimeout(): number {
     return this.#opts.callTimeoutMs ?? DEFAULT_CONNECTION_CALL_TIMEOUT_MS;
@@ -330,6 +488,10 @@ export class ConnectionPool {
     if (entry.status !== "ok" || !entry.connection) {
       throw new ConnectionRefused("not_ready", name, `${entry.status}: ${entry.issues.join("; ") || "the connection is not ready"}`);
     }
+    if (isGeneratedType(entry.connection.type)) {
+      const plan = planGenerated(entry, catalog.variables, catalog.baseDir);
+      return { entry, plan, catalog, fingerprint: planFingerprint(plan as unknown as DialPlan) };
+    }
     const plan = planDial(entry, catalog.variables, catalog.baseDir);
     const where = this.#opts.runsOn ?? "host";
     if (plan.kind === "command" && plan.runsOn !== where) {
@@ -354,7 +516,7 @@ export class ConnectionPool {
    * another call may replace the entry while this one waits on it — the
    * check and the delete that follows it never have an await between them.
    */
-  async #ensure(name: string, prepared: Prepared): Promise<Live> {
+  async #ensure(name: string, prepared: Prepared & { plan: DialPlan }): Promise<Live> {
     for (;;) {
       const existing = this.#live.get(name);
       if (!existing) {
@@ -378,7 +540,7 @@ export class ConnectionPool {
     }
   }
 
-  async #connect(name: string, prepared: Prepared): Promise<Live> {
+  async #connect(name: string, prepared: Prepared & { plan: DialPlan }): Promise<Live> {
     const { plan } = prepared;
     const secretsFile: SecretsFile = prepared.catalog.secrets.ok ? prepared.catalog.secrets.file : { secrets: {} };
     const live: Live = { fingerprint: prepared.fingerprint, client: undefined as unknown as Client, envSecrets: [], secretsFile, tools: undefined, idle: undefined, stderr: [], closed: false };
@@ -427,49 +589,20 @@ export class ConnectionPool {
   }
 
   #httpTransport(name: string, plan: HttpDial, live: Live): Transport {
-    const base = this.#opts.fetch ?? fetch;
-    const redactor = this.#redactor;
-    const source = this.#opts.secrets;
     const usage = this.#usage;
-    const pinned: typeof fetch = async (input, init) => {
-      const url = urlOf(input);
-      let target: URL;
-      try {
-        target = new URL(url);
-      } catch {
-        throw new ConnectionRefused("other_host", name, "not a URL");
-      }
-      if (target.origin !== plan.origin) {
-        throw new ConnectionRefused("other_host", name, `a request to ${target.origin} — this connection is ${plan.origin}, and it goes nowhere else`);
-      }
-      const door = guardedFetch(
-        {
-          secrets: live.secretsFile,
-          grantee: connectionGrantee(name),
-          purpose: "service",
-          redactor,
-          source,
-          onUse: ({ names }) => {
-            const set = usage.getStore();
-            if (set) for (const n of names) set.add(n);
-          },
-        },
-        base,
-      );
-      const res = await door(url, { ...(init ?? {}), redirect: "manual" });
-      if (res.status >= 300 && res.status < 400) {
-        await res.body?.cancel().catch(() => undefined);
-        const loc = res.headers.get("location");
-        let where = "somewhere else";
-        try {
-          if (loc) where = new URL(loc, url).origin;
-        } catch {
-          /* unparseable: say so generically */
-        }
-        throw new ConnectionRefused("other_host", name, `the server redirected to ${where} — a redirect is not followed; set the connection's URL to where the server lives`);
-      }
-      return res;
-    };
+    const secrets = () => live.secretsFile;
+    const pinned = pinnedDoor({
+      connection: name,
+      origin: plan.origin,
+      secrets,
+      source: this.#httpSource(name, plan, secrets, () => usage.getStore()),
+      redactor: this.#redactor,
+      onUse: (names) => {
+        const set = usage.getStore();
+        if (set) for (const n of names) set.add(n);
+      },
+      ...(this.#opts.fetch ? { fetch: this.#opts.fetch } : {}),
+    });
     const t = new StreamableHTTPClientTransport(new URL(plan.url), { fetch: pinned, requestInit: { headers: plan.headers } });
     return t as unknown as Transport;
   }
@@ -546,6 +679,11 @@ export class ConnectionPool {
     live.closed = true;
     await live.client.close().catch(() => undefined);
   }
+}
+
+/** A generated connection's tools as `tools/list` would say them. */
+function generatedUpstream(entry: ConnectionEntry): UpstreamTool[] {
+  return generatedToolsFor(entry.connection!).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, readOnly: t.group === "reads" }));
 }
 
 /** The secret names a command's environment references. */

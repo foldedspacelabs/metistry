@@ -7,8 +7,9 @@
      allowlist. So the job's root process is not node — it is
      /usr/bin/sandbox-exec running ops/sandbox/assistant.sb, and every
      child inherits the confinement: read of its own dist + runtime and
-     of its four config files BY NAME (identity.yaml, the prompt template,
-     rules.yaml, compute.yaml — never the directory holding them, which on
+     of its five config files BY NAME (identity.yaml, the prompt template,
+     rules.yaml, compute.yaml, secrets.yaml — policy, never a value — and
+     never the directory holding them, which on
      an unmigrated instance is the vault root), write only to STATE_DIR and
      the temp dir, outbound only to the console and Postgres on loopback and
      to the supervisor's egress CONNECT proxy — never `*:443`, so the host
@@ -40,6 +41,7 @@
     <string>-D</string><string>CONFIG_ASSISTANT_PROMPT=__CONFIG_ASSISTANT_PROMPT__</string>
     <string>-D</string><string>CONFIG_RULES=__CONFIG_RULES__</string>
     <string>-D</string><string>CONFIG_COMPUTE=__CONFIG_COMPUTE__</string>
+    <string>-D</string><string>CONFIG_SECRETS=__CONFIG_SECRETS__</string>
     <string>-D</string><string>CONSOLE_TCP=__CONSOLE_TCP__</string>
     <string>-D</string><string>DB_TCP=__DB_TCP__</string>
     <string>-D</string><string>PROXY_TCP=__PROXY_TCP__</string>

@@ -175,7 +175,8 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     }
     for (const label of ["Board", "Projects", "Artifacts"]) expect(html).toContain(`>${label}</button>`);
     for (const label of ["Capture", "Needs You", "Usage"]) expect(html).toContain(`aria-label="${label}"`);
-    expect(html).toContain("<h3>Components</h3>");
+    // Settings' group titles are drawn by settings.js (T7-6, pwa-settings.test.ts); these two are the page's own
+    expect(html).toContain("<h3>Notifications</h3>");
     expect(html).toContain("<h3>Reviews Waiting on You</h3>");
     expect(html).toContain('<h1 id="title" class="large-title">Metistry</h1>');
   });

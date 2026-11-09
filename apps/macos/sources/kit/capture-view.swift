@@ -3,11 +3,12 @@
 // receipt under them. Not a screen — there is no Capture row and no Capture
 // destination (§3.8): a place you navigate to contradicts a five-second promise.
 //
-// TEXT ONLY, BY RULING. The owner held live capture (audio, screen) until the
-// designer's floating action bar returns (#253), and this ticket's spec is the
-// note: the attachment chip, ⌘⇧A and the drop target are not here, and the
-// Capture menu's Ask · Note · To-do and the recording pair stay dimmed for the
-// bar (T8) to light.
+// TEXT ONLY, BY RULING. Live capture (audio, screen) is the floating bar's
+// (capture-bar-model.swift, T8-5 — the #253 hold lifted by Q28), and this
+// ticket's spec is the note: the attachment chip, ⌘⇧A and the drop target are
+// not here. The Capture menu's Ask · Note · To-do and the recording pair are
+// lit by the bar while the live-capture bridge answers; the bar's Note and
+// To-do capture through `jot(_:)` below, on this model's key and queue.
 //
 // THE FOUR PROMISES, EACH KEPT BY THE MODEL RATHER THAN BY THE VIEW:
 //
@@ -100,6 +101,10 @@ public struct PendingCapture: Identifiable, Sendable, Equatable {
     public internal(set) var state: State
     /// How many times it has been put on the wire.
     public internal(set) var attempts: Int
+    /// Whether a refusal puts its words back in the composer's field. A jot
+    /// from the capture bar (T8-5) keeps its words in the bar's own field
+    /// instead — the composer's draft is the owner's other thought.
+    var returnsToField = true
 
     var isFailed: Bool {
         if case .failed = state { return true }
@@ -164,6 +169,16 @@ public enum CaptureLine: Sendable, Equatable {
             return Mark(text, glyph: .failed, style: .callout, ink: .failed, on: ground, spoken: spoken)
         }
     }
+}
+
+/// What a jot from the capture bar came to (`CaptureComposerModel.jot`).
+public enum CaptureJotOutcome: Sendable, Equatable {
+    /// The console took it: its row.
+    case captured(CaptureReceipt)
+    /// No answer — kept with its key, resent on the composer's backoff.
+    case queued
+    /// The console refused it, in its words. Nothing was written.
+    case failed(String)
 }
 
 // MARK: - The model
@@ -324,6 +339,29 @@ public final class CaptureComposerModel {
         await send(pending.id)
     }
 
+    /// A jot from the capture bar (T8-5): the same capture, the same key
+    /// minted once and the same offline queue as ⌘↩ — only its words never
+    /// pass through the draft. What happened comes back so the bar can say
+    /// it in its one line; a refused jot is dropped from this model's list
+    /// (its words stay in the bar's field) so it never takes this line.
+    public func jot(_ text: String) async -> CaptureJotOutcome {
+        guard let session, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .failed("nothing to capture") }
+        var pending = PendingCapture(id: UUID(), text: text, idempotencyKey: mintKey(), generation: session.generation, instanceID: currentInstanceID(), createdAt: Date(), state: .sending, attempts: 0)
+        pending.returnsToField = false
+        captures.append(pending)
+        await send(pending.id)
+        guard let now = captures.first(where: { $0.id == pending.id }) else {
+            return lastReceipt.map(CaptureJotOutcome.captured) ?? .queued
+        }
+        switch now.state {
+        case .failed(let reason):
+            captures.removeAll { $0.id == pending.id }
+            return .failed(reason)
+        case .queued, .sending:
+            return .queued
+        }
+    }
+
     /// The line's Retry: the oldest failed capture, exactly as it was sent, with its key.
     public func retry() async {
         guard let failed = captures.first(where: \.isFailed) else { return }
@@ -383,7 +421,7 @@ public final class CaptureComposerModel {
                 captures[now].state = .failed(reason)
                 // Nothing is ever typed twice: the words come back, unless the
                 // owner has already started the next thought in the field.
-                if draft.isEmpty {
+                if capture.returnsToField && draft.isEmpty {
                     draft = capture.text
                     restoredFailure = id
                 }

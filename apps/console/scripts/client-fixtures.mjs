@@ -43,6 +43,7 @@ export const NOT_IN_THE_KIT = Object.freeze({
   "POST /auth/login/finish": "the passkey ceremony (as enroll/start)",
   "POST /auth/logout": "ends the calling device's session row; the local owner token has none, so the console answers 403",
   "* /mcp": "the agent door; an owner credential is not an agent principal there",
+  "GET /api/briefing": "the session-start briefing is an agent bearer's door (X-128), as /mcp is; an owner credential is not an agent principal there",
   "GET /api/push/vapid-key": "bound to a device session; the Mac notifies natively and the local owner token has no session to push to",
   "POST /api/push/subscribe": "bound to a device session (as vapid-key)",
   "POST /api/push/test": "bound to a device session (as vapid-key)",
@@ -112,4 +113,27 @@ export function fixtureBody(f) {
   if ("body_ndjson" in f) return f.body_ndjson;
   if ("stream" in f) return f.stream;
   return f.body;
+}
+
+/**
+ * Usage's two-bar month (X-31): noon on the first of `recordingNow`'s month —
+ * never the real wall clock's, or a re-record on the real 1st truncates the
+ * "first of the month" row onto the same day as the "today" rows and the
+ * chart loses a bar. Pure, so the no-database test and the recorder read one
+ * definition.
+ */
+export function recordingMonthStart(recordingNow) {
+  return new Date(Date.UTC(recordingNow.getUTCFullYear(), recordingNow.getUTCMonth(), 1, 12, 0, 0)).toISOString();
+}
+
+/**
+ * `GET /api/runs/export`'s `since` cursor (X-31), from a `{ts, id}` row —
+ * `runs_export.yaml`'s own grammar (`r.ts::text || '|' || r.id`). Read before
+ * the recorder inserts its own `runs` rows, this is the floor a dirty scratch
+ * database's leftovers — another run's rows still sitting in the table —
+ * never cross: the export page starts exactly where THIS recording's own
+ * rows begin, fresh database or dirty one alike.
+ */
+export function runsExportCursor({ ts, id }) {
+  return `${ts}|${id}`;
 }

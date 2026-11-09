@@ -255,6 +255,19 @@ export const JOURNAL_DIR = "Journal";
 export const JOURNAL_MACHINE_DIRS = Object.freeze(["Plan", "Fold", "Standup", "Brief"] as const);
 
 /**
+ * **Where a recording's transcript lives** — `Journal/Transcripts/` (the
+ * owner's ruling on W3 question 29, 2026-09-30; daily-flow-spec §8.4). It is
+ * the user's (`isUserOwnedPath`: not a machine folder), so the console files
+ * a transcript there in the owner's name — the owner's own recording — and
+ * the `recording-retention` routine's purge is a commit in that name too. No
+ * agent can edit one. And it is outside every default read grant: an area
+ * grant of `Journal` does not reach it (`underAreas`, access.ts) — only the
+ * whole vault (`/`, the owner's own assistant) or a grant that names
+ * `Journal/Transcripts` itself.
+ */
+export const TRANSCRIPTS_DIR = `${JOURNAL_DIR}/Transcripts`;
+
+/**
  * **The machine folders a ROUTINE writes, and which routine** — owner ruling
  * (a), W1 (`docs/product/decisions-log.md`): a routine's reserved subfolder is
  * an ownership fact about the routine, written through the reconciler under

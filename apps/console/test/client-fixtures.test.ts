@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CLIENT_API, EVENT_CATALOGUE, EVENT_TYPES, matchRoute, routeKey } from "@foldedspacelabs/metistry-core";
-import { FIXTURE_DIR, KIT_QUERIES, NOT_IN_THE_KIT, Q_ROUTE, REPO_ROOT, expectedFixtures, fixtureStem, shapeDiff } from "../scripts/client-fixtures.mjs";
+import { FIXTURE_DIR, KIT_QUERIES, NOT_IN_THE_KIT, Q_ROUTE, REPO_ROOT, expectedFixtures, fixtureStem, recordingMonthStart, runsExportCursor, shapeDiff } from "../scripts/client-fixtures.mjs";
 
 type Fixture = {
   route: string;
@@ -106,5 +106,32 @@ describe("shapeDiff — how a recording is held to its fixture", () => {
     expect(shapeDiff({ a: null }, { a: "x" })).toEqual([]);
     expect(shapeDiff({ rows: [] }, { rows: [{ id: 1 }] })).toEqual([]);
     expect(shapeDiff({ rows: [{ id: 1 }] }, { rows: [{ id: 1, extra: true }] })).toEqual(["$.rows[0].extra: in the recording, not in the fixture"]);
+  });
+});
+
+// The recorder's seeds are pinned to RECORDING_NOW (X-31), never the wall
+// clock — these two helpers are where that arithmetic lives, so the
+// no-database test and the recorder read one definition (this file's own
+// header).
+describe("recordingMonthStart — Usage's two-bar month, off RECORDING_NOW never the wall clock", () => {
+  it("is noon on the first of RECORDING_NOW's month, whatever the real day is", () => {
+    expect(recordingMonthStart(new Date("2026-09-28T12:00:00.000Z"))).toBe("2026-09-01T12:00:00.000Z");
+  });
+
+  it("stays the same two calendar days apart from RECORDING_NOW even when RECORDING_NOW is itself the 1st — the exact case a wall-clock `now()` used to collapse", () => {
+    const recordingNow = new Date("2026-10-01T12:00:00.000Z");
+    const monthStart = recordingMonthStart(recordingNow);
+    expect(monthStart).toBe("2026-10-01T12:00:00.000Z");
+    expect(monthStart).toBe(recordingNow.toISOString()); // both land on the 1st — Usage draws one bar, not two, and that is the seed's job to avoid by NOT doing this on a real re-record
+  });
+});
+
+describe("runsExportCursor — the export fixture's own floor against a dirty scratch database", () => {
+  it("formats runs_export.yaml's own cursor grammar: ts, a pipe, id", () => {
+    expect(runsExportCursor({ ts: "2026-09-28 12:00:00+00", id: 41 })).toBe("2026-09-28 12:00:00+00|41");
+  });
+
+  it("a fresh database's floor (no prior row) is still a valid cursor, not a blank one that would read from the beginning", () => {
+    expect(runsExportCursor({ ts: "1970-01-01 00:00:00+00", id: 0 })).toBe("1970-01-01 00:00:00+00|0");
   });
 });

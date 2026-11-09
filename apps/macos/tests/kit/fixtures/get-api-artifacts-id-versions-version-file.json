@@ -4,7 +4,7 @@
   "ticket": null,
   "request": {
     "method": "GET",
-    "path": "/api/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1/versions/ver_01M3FYT8NB0W22G5J1H3A71PTY/file?path=notes.md",
+    "path": "/api/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/versions/ver_01M3RABJAKM99M4CHEYREJKCBT/file?path=notes.md",
     "body": null,
     "idempotency_key": null
   },

@@ -108,7 +108,7 @@ final class ProcessTapStream: CaptureStream {
         ]
         try check(AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &aggregateID), "creating the aggregate device")
 
-        let sink = try SourceSink(url: directory.appendingPathComponent("\(AudioSource.app.rawValue).m4a"), format: format, onSegment: onSegment)
+        let sink = try SourceSink(url: nextMediaURL(in: directory, base: AudioSource.app.rawValue, ext: "m4a"), format: format, onSegment: onSegment)
         self.sink = sink
         try check(AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) { _, input, _, _, _ in
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input, deallocator: nil) else { return }

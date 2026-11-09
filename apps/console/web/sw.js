@@ -30,7 +30,7 @@ const EVENTS_PATH = "/api/events"; // live.js EVENTS_PATH
 const SHELL = [
   "/",
   "/app.js", "/lib.js", "/live.js", "/offline.js", "/md.js",
-  "/today.js", "/needs-you.js", "/work.js", "/knowledge.js", "/more.js", "/notify.js",
+  "/today.js", "/needs-you.js", "/work.js", "/knowledge.js", "/more.js", "/notify.js", "/settings.js",
   "/tokens.css", "/style.css",
   "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/apple-touch-icon.png",
   "/vendor/simplewebauthn.js",
@@ -104,6 +104,12 @@ async function shell(req) {
 // card) — and a test holds the two together. A tap opens the payload's page
 // on this origin, in the window already open when there is one; a link
 // anywhere else opens the app instead.
+//
+// Since X-32 the console sends nothing but Needs You — `type` a request's
+// word from a closed table, `title` the fixed "Needs You", `url` its card
+// (`/#/needs-you/<id>`) — so no request's own text is sent at all. The
+// reading and the scrub stay: a payload is still the worker's input, and a
+// sender that got it wrong must not reach a lock screen.
 const NOTE_TYPE_MAX = 40;
 const NOTE_TITLE_MAX = 120;
 const BLANK = "\u2022\u2022\u2022";

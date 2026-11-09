@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import {
+  BRIEFING_DEFAULT_TOKENS,
   budgetMiss,
   computeTiers,
   EMBED_DEFAULT_DIM,
@@ -14,6 +15,7 @@ import {
   INSTANCE_LAYOUT,
   instancePresence,
   overlayFilesFromEnv,
+  secretsPolicyFromEnv,
   resolveInstanceLayout,
   intEnv,
   optionalEnv,
@@ -31,25 +33,30 @@ import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
-import { linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
+import { calendarRsvpOpener, linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, runNow, startRunner, unitOf, type ComponentCtx, type RunnerOptions } from "./runner.js";
 import type { ScheduledAdmin } from "./scheduled-routes.js";
 import { PLAN_ROUTINE, RoutineTrigger, closeTriggeredPass } from "./close-day.js";
 import { loadRules, makeRoutePolicy } from "./router.js";
 import { watchCompute } from "./compute.js";
-import { TargetRegistry } from "./dispatch.js";
+import { CONNECTION_HINT, RETIRED_TARGET_KEYS, TargetRegistry } from "./dispatch.js";
 import {
   dirSink,
   vaultSink,
+  DEFAULT_CONNECTION_ANSWER_KEEP_HOURS,
   DEFAULT_CONNECTION_ASKS_PER_HOUR,
   DEFAULT_CONNECTION_CALLS_PER_HOUR,
   DEFAULT_CONNECTION_CONFIRM_TTL_S,
+  DEFAULT_CONNECTION_FOLD_ARRAY_KEEP,
+  DEFAULT_CONNECTION_FOLD_ARRAY_OVER,
+  DEFAULT_CONNECTION_FOLD_BYTES,
   DEFAULT_MAX_TRACKED_BYTES,
   INBOX_PREFIX,
   vaultBridgeLister,
   vaultBridgeSearcher,
   vaultBridgeWriter,
+  type ConnectionFold,
   type ConnectionLimits,
 } from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, listAgents, revokeAgent, validateGrants } from "./agents.js";
@@ -62,7 +69,8 @@ import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
 import type { VariablesView } from "./variables-route.js";
 import type { ConnectionsView } from "./connections-route.js";
-import { envSecretSource, instanceSyncOpener } from "@foldedspacelabs/metistry-connections";
+import { envSecretSource, instanceImapOpener, instanceSyncOpener, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
+import { consoleConnections } from "./connections-proxy.js";
 import { GithubWriteClient } from "./github-write.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
 import { CrewRegistry, crewRoutineQueue } from "./crews.js";
@@ -72,6 +80,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { defaultGatewayFrom, parseTrustedProxies } from "./local-owner.js";
+import { listenProxySocket, proxySocketPath, remoteHostsOf } from "./proxy-listener.js";
+import { DEFAULT_PROXY_CLIENT_HEADER, DEFAULT_PROXY_CLIENT_LIMIT, DEFAULT_PROXY_GLOBAL_LIMIT, DEFAULT_PROXY_WINDOW_S } from "./rate-limit.js";
 import { canonicalOrigin } from "./webauthn.js";
 import { loadPublicIdentity } from "./identity.js";
 import { hubFromEnv, startEventFeed } from "./events.js";
@@ -158,6 +168,9 @@ await targets.load([
   ...(extensionsDir ? [{ dir: extensionsDir, origin: "extension" as const }] : []),
 ]);
 logSkips("target", targets.skipped);
+for (const key of RETIRED_TARGET_KEYS) {
+  if (process.env[key]) console.warn(`${key} is set and is not read (0.17.0) — ${CONNECTION_HINT}`);
+}
 console.log(`targets: ${targets.names().join(", ") || "(none)"}`);
 
 // METISTRY_ORIGIN may be a comma-separated list; the FIRST entry is
@@ -373,10 +386,16 @@ const consoleVersion: string = require_("../package.json").version;
 // (the session rule, and `assignments.intent` for its one local scorer), and
 // checks a chosen query or crew against what is loaded now. No block, no
 // policy: every route row reads `absent`, the shipped behaviour.
+// A provider key's grant to `provider:<name>` (X-7): `secrets.yaml`, read at
+// each model call, so a changed grant is seen on the next one — the compose
+// mount (METISTRY_SECRETS_FILE) or the instance's own file. No file, no
+// grant: a `{{ secret.x }}` key is refused, never guessed (core's resolver).
+const secretsPolicy = secretsPolicyFromEnv(process.env);
 const routePolicy = makeRoutePolicy({
   rules,
   compute: () => compute.store.current,
   secretEnv: process.env,
+  secretsPolicy,
   hasQuery: (name) => queries.names().includes(name),
   hasCrew: (name) => crews.get(name) !== undefined,
 });
@@ -399,19 +418,58 @@ const connections: ConnectionsView | undefined = computeAdmin
 // delivered for sync-read connections — filled at the egress door for each
 // secret's listed hosts, never put on a request here. No instance: absent.
 const openSync = connections ? instanceSyncOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) : undefined;
+// Targets as connections (T4-11): the instance's agent connections join the
+// target registry, read afresh on every listing and dispatch, each dispatched
+// through its own door with the values `metistry secrets sync --to env`
+// delivered (consoleSecretNames lists an agent connection's). The Devin
+// type's purposes come from the same catalog. No instance: the crews'
+// `local-crew` only. `METISTRY_GITHUB_TOKEN` and `METISTRY_DEVIN_API_KEY` are
+// not read (X-85, 0.17.0): the one-release shim for them ended with 0.16.0.
+if (connections) {
+  const roots = { instanceDir: connections.instanceDir, seedDir: connections.seedDir };
+  targets.bindConnections({ catalog: () => loadInstanceCatalog(roots), secrets: envSecretSource(process.env) });
+}
+// The mail sync and Draft Reply (T4-17): a mail connection's IMAP session,
+// the app password `metistry secrets sync --to env` delivered filled into
+// the one LOGIN, for the connection's listed host:port only. Headers and
+// drafts; nothing sends. No instance: absent.
+const openImap = connections ? instanceImapOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) : undefined;
 console.log(
   connections
     ? `connections: ${resolveInstanceLayout(connections.instanceDir).path("connectionsDir")} (read-only; every write is \`metistry connections\`)`
     : "connections absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/connections answers 503; `metistry connections list` still works (degrades: absent)",
 );
 
+// The connections proxy (plan §2.6, C115; wired in T4-10, ruled 2026-09-30
+// Q10): one pooled client over the instance's catalog, handed to `/mcp` and
+// to the Approve path (connections-proxy.ts says what it fills and from
+// where). No instance directory: no pool, and both tools answer
+// `not_available` (the fail-closed end).
+const connectionsProxy = connections ? consoleConnections({ instanceDir: connections.instanceDir, seedDir: connections.seedDir }, { env: process.env, version: consoleVersion }).proxy : undefined;
+console.log(
+  connectionsProxy
+    ? "connections proxy: mounted on /mcp (connections_list, connections_call) and the Approve path, over the instance's catalog; values from METISTRY_SECRET_* (`metistry secrets sync --to env`)"
+    : "connections proxy absent: no instance directory — connections_list and connections_call answer not_available (degrades: absent)",
+);
+
 // The connections proxy's confirm-token lifetime and hourly limits, each
 // counted from `runs` (T4-9; docs/ops/connections.md). They bind whenever a
-// proxy is mounted; the pool itself is not wired on a live console yet.
+// proxy is mounted.
 const connectionLimits: ConnectionLimits = {
   confirmTtlS: intEnv("METISTRY_CONNECTION_CONFIRM_TTL_S", DEFAULT_CONNECTION_CONFIRM_TTL_S),
   callsPerHour: intEnv("METISTRY_CONNECTION_CALLS_PER_HOUR", DEFAULT_CONNECTION_CALLS_PER_HOUR),
   asksPerHour: intEnv("METISTRY_CONNECTION_ASKS_PER_HOUR", DEFAULT_CONNECTION_ASKS_PER_HOUR),
+};
+
+// The proxy's fold (X-132; docs/ops/connections.md "Folded answers"): an
+// upstream answer over the threshold is folded on `connections_call` and
+// kept whole for its caller to page, for the keep hours. Every number is the
+// owner's to move (R4); the per-connection off switch is the file's `fold`.
+const connectionFold: ConnectionFold = {
+  thresholdBytes: intEnv("METISTRY_CONNECTION_FOLD_BYTES", DEFAULT_CONNECTION_FOLD_BYTES),
+  arrayOver: intEnv("METISTRY_CONNECTION_FOLD_ARRAY_OVER", DEFAULT_CONNECTION_FOLD_ARRAY_OVER),
+  arrayKeep: intEnv("METISTRY_CONNECTION_FOLD_ARRAY_KEEP", DEFAULT_CONNECTION_FOLD_ARRAY_KEEP),
+  keepHours: intEnv("METISTRY_CONNECTION_ANSWER_KEEP_HOURS", DEFAULT_CONNECTION_ANSWER_KEEP_HOURS),
 };
 
 // The routine pause (C5): a routine that declares `requires.engine` is not
@@ -479,6 +537,7 @@ const componentCtx: ComponentCtx = {
   // `uses_model:` picks the provider out of it (runner.ts).
   compute: () => compute.store.current,
   secretEnv: process.env,
+  secretsPolicy,
   // The intent tier's THRESHOLDS (PoC-20 phase 1, research §3.2 P2). They
   // travel from `rules.yaml` — a §4.7 protected path, the owner's own hand —
   // and not from `compute.yaml`, which names the model. Two files, because
@@ -499,31 +558,34 @@ const componentCtx: ComponentCtx = {
   ...routineCapabilities(queries, vault),
   ...(process.env.METISTRY_EK_URL ? { ekUrl: process.env.METISTRY_EK_URL } : {}),
   ...(process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT ? { ekToken: process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT } : {}),
-  ...(process.env.METISTRY_GITHUB_TOKEN ? { githubToken: process.env.METISTRY_GITHUB_TOKEN } : {}),
+  // Recording Retention (T8-4): the live-capture bridge and its bridge token —
+  // the routine reports ingestion to the Mac, which deletes the audio. Both or
+  // neither; absent, the Mac's own 30-day ceiling still holds.
+  ...(process.env.METISTRY_LIVE_CAPTURE_URL && process.env.METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE
+    ? { liveCapture: { url: process.env.METISTRY_LIVE_CAPTURE_URL, token: process.env.METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE } }
+    : {}),
   // A sync reading its connection (T4-24, packages/connections `sync.ts`):
   // the instance's catalog, read afresh per run, and the secrets `metistry
   // secrets sync --to env` delivered for sync-read connections — filled at
   // the egress door for each secret's listed hosts, never put on a request
   // here. The `linear` collector is the first reader. No instance: absent.
   ...(openSync ? { openSync } : {}),
+  // the mail sync's mailbox (T4-17): headers only, through the IMAP provider's host guard
+  ...(openImap ? { openImap } : {}),
   // The owner's zone for a sync that must say which day something is on —
   // the ICS sync's all-day dates and window (T4-12). METISTRY_TZ, never TZ.
   ...(runnerZone ? { ownerTimeZone: runnerZone } : {}),
   ...(process.env.METISTRY_AWS_ACCESS_KEY_ID && process.env.METISTRY_AWS_SECRET_ACCESS_KEY
     ? { aws: { accessKeyId: process.env.METISTRY_AWS_ACCESS_KEY_ID, secretAccessKey: process.env.METISTRY_AWS_SECRET_ACCESS_KEY, ...(process.env.METISTRY_AWS_SESSION_TOKEN ? { sessionToken: process.env.METISTRY_AWS_SESSION_TOKEN } : {}) } }
     : {}),
-  ...(process.env.METISTRY_GITHUB_REPOS ? { githubRepos: process.env.METISTRY_GITHUB_REPOS.split(",").map((s) => s.trim()).filter(Boolean) } : {}),
-  // devin-knowledge collector (degrades absent): the owner's own `cog_` key.
+  // devin-knowledge collector (degrades absent): its key is the `devin`
+  // agent connection's, filled at the connection's door (openSync above).
   // inboxDir is the same directory /capture writes to — this collector's
   // captures are ordinary inbox rows, made idempotent by (principal, key).
-  ...(process.env.METISTRY_DEVIN_API_KEY ? { devinApiKey: process.env.METISTRY_DEVIN_API_KEY } : {}),
-  ...(process.env.METISTRY_DEVIN_ORG_ID ? { devinOrgId: process.env.METISTRY_DEVIN_ORG_ID } : {}),
-  ...(process.env.METISTRY_DEVIN_REPOS ? { devinRepos: process.env.METISTRY_DEVIN_REPOS.split(",").map((s) => s.trim()).filter(Boolean) } : {}),
   ...(process.env.METISTRY_DEVIN_MAX_ITEMS ? { devinMaxItems: intEnv("METISTRY_DEVIN_MAX_ITEMS", 200) } : {}),
-  // devin-sessions collector: the return path of targets/devin-sessions. It
-  // reads the organization off each work row's meta, so only the key is
-  // needed here; the base URL is shared with devin-knowledge.
-  ...(process.env.METISTRY_DEVIN_API_URL ? { devinApiUrl: process.env.METISTRY_DEVIN_API_URL } : {}),
+  // devin-sessions collector: the return path of a dispatch to the `devin`
+  // connection. It reads the organization off each work row's meta and the
+  // base URL off the connection.
   ...(process.env.METISTRY_DEVIN_SESSION_TIMEOUT_HOURS ? { devinSessionTimeoutHours: intEnv("METISTRY_DEVIN_SESSION_TIMEOUT_HOURS", 24) } : {}),
   inboxDir,
   inboxSink: inbox,
@@ -564,6 +626,8 @@ const planTomorrow = planRoutine ? new RoutineTrigger(PLAN_ROUTINE, closeTrigger
 if (!planTomorrow) console.warn(`${PLAN_ROUTINE} is not loaded: Close the Day writes the section but cannot render tomorrow's plan early`);
 
 const server = makeServer(pool, queries, {
+  // The session-start briefing's budget (X-128): the owner's, in tokens; chars/4 is the measure (docs/ops/client-api.md)
+  briefing: { budgetTokens: intEnv("METISTRY_BRIEFING_TOKENS", BRIEFING_DEFAULT_TOKENS) },
   origin,
   // Send to Linear (T4-25): the same opener the syncs read their connection
   // through — the catalog afresh per send, the key filled at the egress door
@@ -578,13 +642,34 @@ const server = makeServer(pool, queries, {
   // delivered by `metistry secrets sync --to env`, filled for api.linear.app
   // only. No instance: the door answers 503.
   ...(connections ? { trackers: linearTrackerOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) } : {}),
+  ...(connectionsProxy ? { connectionsProxy } : {}),
+  // Respond to an invitation (T4-17): a calendar connection that can answer
+  // (`rsvp`), by name, through the egress door the CalDAV sync reads
+  // through; and Draft Reply, through the mail sync's own opener. No
+  // instance: both answer 503 (Respond with Open in Calendar).
+  ...(connections ? { calendars: calendarRsvpOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) } : {}),
+  ...(openImap ? { mail: openImap } : {}),
   connectionLimits,
+  connectionFold,
   origins,
   ...(identity ? { identity } : {}),
   ...(instancesFiles ? { instancesFiles } : {}),
   version: consoleVersion,
   events,
   ...(localOwner ? { localOwner } : {}),
+  // The proxy listener's limits (plan §2.23, X-111; rate-limit.ts): how often
+  // an address, and the listener as a whole, may be answered without a
+  // session per window, and which header the provider writes the client's
+  // address into (read on that listener alone, for limiting alone). The
+  // defaults suit every provider that sets X-Forwarded-For; a provider
+  // adapter (X-105…) that knows a better header — Cloudflare's
+  // CF-Connecting-IP — names it here. The main listener is never limited.
+  proxyLimits: {
+    clientHeader: optionalEnv("METISTRY_CONSOLE_PROXY_CLIENT_HEADER", DEFAULT_PROXY_CLIENT_HEADER).toLowerCase(),
+    perClient: intEnv("METISTRY_CONSOLE_PROXY_CLIENT_LIMIT", DEFAULT_PROXY_CLIENT_LIMIT),
+    global: intEnv("METISTRY_CONSOLE_PROXY_GLOBAL_LIMIT", DEFAULT_PROXY_GLOBAL_LIMIT),
+    windowMs: intEnv("METISTRY_CONSOLE_PROXY_WINDOW_S", DEFAULT_PROXY_WINDOW_S) * 1000,
+  },
   inboxDir,
   inbox,
   policy: {
@@ -650,6 +735,44 @@ console.log(
 const host = optionalEnv("METISTRY_CONSOLE_HOST", "127.0.0.1"); // loopback default (invariant 8)
 const port = intEnv("METISTRY_CONSOLE_PORT", 8080);
 server.listen(port, host, () => console.log(`console listening on ${host}:${port} (${queries.names().length} queries)`));
+
+// The PROXY listener (plan §2.23, X-103; proxy-listener.ts): where a
+// remote-access provider — tailscaled, cloudflared, zrok, ngrok, a TLS
+// terminator — forwards to. Every request on it is remote by construction:
+// the local owner token is never honoured, no `local` route answers, and the
+// Host must be a remote host METISTRY_ORIGIN names. Two endpoints, same
+// routes: a loopback TCP port (METISTRY_CONSOLE_PROXY_PORT, default the
+// console port + 1 — the compose shape publishes it on 127.0.0.1, the
+// namespaced launchd shape takes a slot of the instance's block) and a 0600
+// Unix socket in the instance's state directory, for agents that can dial
+// one. Under compose there is no instance directory in the container, so
+// there is no socket; the published port is the whole surface there.
+//
+// A port that cannot be bound is said and survived: the main listener owes
+// nothing to this one, and a provider pointed at a dead proxy port simply
+// fails to connect — the fail-closed direction. There is no fallback to the
+// main port anywhere, by design.
+const remoteHosts = remoteHostsOf(origins);
+console.log(
+  remoteHosts.length
+    ? `proxy listener answers Host ${remoteHosts.join(", ")} — remote by construction: the local owner token is never honoured there (docs/ops/auth.md)`
+    : "proxy listener: METISTRY_ORIGIN names no host beyond this Mac, so every request on it is refused 421 until a remote-access provider is chosen (plan §2.23)",
+);
+const proxyPort = intEnv("METISTRY_CONSOLE_PROXY_PORT", port + 1);
+const proxyTcp = server.proxyListener();
+proxyTcp.on("error", (err: NodeJS.ErrnoException) =>
+  console.error(`proxy listener: cannot bind ${host}:${proxyPort} (${err.code ?? err.message}) — remote access is unavailable until METISTRY_CONSOLE_PROXY_PORT names a free port; the main listener is unaffected`),
+);
+proxyTcp.listen(proxyPort, host, () => console.log(`proxy listener on ${host}:${proxyPort}`));
+if (instanceDir) {
+  const sock = proxySocketPath(instanceDir);
+  listenProxySocket(server.proxyListener(), sock).then(
+    () => console.log(`proxy listener on ${sock} (0600)`),
+    (err: Error) => console.error(`proxy listener: cannot bind ${sock} (${err.message}) — providers that dial a socket are unavailable; the proxy port is unaffected`),
+  );
+} else {
+  console.log("proxy socket: none — METISTRY_INSTANCE_DIR is unset (the compose shape publishes the proxy port instead)");
+}
 
 // The standup move (T3-4, profile-tidy.ts): `standup_days`/`standup_time`
 // read ONCE from Me/profile.md into the Standup routine's scheduled.yaml

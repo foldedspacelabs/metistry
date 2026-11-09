@@ -1,0 +1,32 @@
+-- 0039_passkey_rp_id — the host a passkey was created for (design-build-plan
+-- §2.23 *Two fixes*, 2; ticket X-104; ruled 2026-09-30).
+--
+-- A passkey is scoped to one WebAuthn rpID — the host of the origin the
+-- browser was on when it was created — and an authenticator never offers it
+-- anywhere else. The console used to take every ceremony's rpID from the
+-- FIRST `METISTRY_ORIGIN` entry, so a second configured origin on another
+-- host could never finish one. Now the rpID follows the request, and this
+-- column records which host each passkey was created under, so sign-in can
+-- hold a passkey to its own host and Devices can mark one whose host is no
+-- longer configured (*"Added for old.example.com."*, X-107).
+--
+-- NULL reads as the first configured origin's host: that is the rpID every
+-- passkey created before this migration was issued under, so no row is
+-- rewritten and no existing phone is stranded by the upgrade. New rows are
+-- always written with the host.
+--
+-- DURABLE (invariant 1): a credential's binding, like the rest of the
+-- `passkeys` row. Lost with the row, nowhere else.
+--
+-- ADDITIVE: one nullable column, no default, no existing column touched, no
+-- row rewritten. `IF NOT EXISTS`, so `metistry update` can apply this twice
+-- under its advisory lock and the second pass is a no-op.
+--
+-- ROLLBACK NOTE: `ALTER TABLE passkeys DROP COLUMN IF EXISTS rp_id;` — after
+-- reverting apps/console (webauthn.ts, auth-store.ts, server.ts) to the
+-- first-origin rpID. No index, constraint or other table references it. A
+-- passkey created at a second origin after this migration cannot sign in
+-- once rolled back: the console would present the first host's rpID again.
+
+ALTER TABLE passkeys
+    ADD COLUMN IF NOT EXISTS rp_id text; -- durable: the rpID (host) the passkey was created for; NULL = the first configured origin's host

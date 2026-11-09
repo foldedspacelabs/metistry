@@ -250,7 +250,7 @@ describe.skipIf(!hasDb)("restore a file (integration)", () => {
   let passkeyId: string;
 
   const rows = async () =>
-    (await pool.query(`SELECT id, kind, source_agent, trust, decision, payload, source FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' LIKE 'restore:%' ORDER BY id`)).rows;
+    (await pool.query(`SELECT id, kind, source_agent, trust, decision, payload, source FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' LIKE $1 ORDER BY id`, [`restore:${PATH}@%`])).rows;
   // Reach `local` (X-9, ruling 7): the door's own default credential is the
   // local owner token, not the passkey session — `answer` (Approve) stays
   // reach `owner`, so its default is still the session cookie.
@@ -289,13 +289,13 @@ describe.skipIf(!hasDb)("restore a file (integration)", () => {
   });
 
   beforeEach(async () => {
-    await pool.query(`DELETE FROM proposals WHERE (source->>'kind' = 'metistry' AND source->>'external_ref' LIKE 'restore:%') OR source_agent = $1`, [agentId]);
+    await pool.query(`DELETE FROM proposals WHERE (source->>'kind' = 'metistry' AND source->>'external_ref' LIKE $2) OR source_agent = $1`, [agentId, `restore:${PATH}@%`]);
     vault = fakeVault({ [PATH]: NOW });
     history = fakeHistory();
   });
 
   afterAll(async () => {
-    await pool.query(`DELETE FROM proposals WHERE (source->>'kind' = 'metistry' AND source->>'external_ref' LIKE 'restore:%') OR source_agent = $1`, [agentId]);
+    await pool.query(`DELETE FROM proposals WHERE (source->>'kind' = 'metistry' AND source->>'external_ref' LIKE $2) OR source_agent = $1`, [agentId, `restore:${PATH}@%`]);
     await pool.query(`DELETE FROM agents WHERE id = $1`, [agentId]);
     await pool.query(`DELETE FROM owner_tokens WHERE label = $1`, [MARK]).catch(() => undefined);
     await pool.query(`DELETE FROM auth_sessions WHERE passkey_id = $1`, [passkeyId]).catch(() => undefined);

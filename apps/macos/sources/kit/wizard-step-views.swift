@@ -1,14 +1,18 @@
-// The two wizard steps that are not a `metistry` verb.
+// The three wizard steps that are not a `metistry` verb.
 //
 // Every other step is "here is the argument array, here is the CLI's output".
-// These two are not, so they get their own screens rather than being forced
+// These three are not, so they get their own screens rather than being forced
 // through a run row that would describe them wrongly:
 //
-//   6. Door    — this Mac's sign-in state first (it needs no ceremony at all),
-//                then, for the devices that DO need one, the console's own
-//                enrolment code.
-//   7. Claude  — an interactive terminal login the app cannot drive, and a watch
-//                on whether the token's NAME became set.
+//   6. Remote Access — Set Up Remote Access (plan §2.23, X-107): the guided
+//                flow remote-access-flow.swift draws, the same one Settings ▸
+//                Remote Access ▸ Change… presents; None preselected, and its
+//                Add a Phone… is step 7's sheet.
+//   7. Door    — this Mac's sign-in state first (it needs no ceremony at all),
+//                then, for the devices that DO need one, Add a Phone… — the
+//                same sheet as Settings ▸ Devices (add-phone-sheet.swift),
+//                minting the code on this Mac with `metistry enroll` (X-77).
+//   8. Compute — where the assistant's turns run (compute-step.swift).
 //
 // Both keep the app's promise in their own currency: the exact thing that will
 // happen, before it happens, and the system's own words when it refuses.
@@ -21,13 +25,53 @@
 // thing this screen had to say, because this Mac does not need a passkey. It is
 // the same package as the CLI on the same machine and the console takes its
 // local owner token as the `user` principal over loopback. So the step leads
-// with that, offers the enrolment code for the browser and the phone, and the
+// with that, offers Add a Phone… for the browser and the phone, and the
 // "ask macOS" probe moved to Settings → Advanced where a diagnostic belongs
-// (`PasskeyDiagnosticView`, below — the same view, one place).
+// (`PasskeyDiagnosticView`, below — the same view, one place). Until X-77 the
+// step printed the `enroll.mjs` command and took a pasted code; it no longer
+// shows a command at all.
 
 import SwiftUI
 
-// MARK: - Step 6
+// MARK: - Step 6: Set Up Remote Access
+
+/// The guided flow in the wizard: the flow's view over the first-run model's
+/// `remoteAccess`, and step 7's Add a Phone sheet when the flow reaches it.
+public struct RemoteAccessStepView: View {
+    @Environment(\.colorScheme) private var scheme
+    private let steps: FirstRunModel
+
+    public init(steps: FirstRunModel) {
+        self.steps = steps
+    }
+
+    public var body: some View {
+        let p = Palette(scheme)
+        VStack(alignment: .leading, spacing: MetistrySpace.s4) {
+            RemoteAccessFlowView(model: steps.remoteAccess)
+            if let label = steps.phoneAdded {
+                HStack(spacing: MetistrySpace.s2) {
+                    StatusDot(.ok)
+                    Text(AddPhoneWords.added(label)).metistryText(.footnote, p, .ok)
+                }
+            }
+        }
+        // Step 7's sheet, presented here too: one way in, drawn once.
+        .sheet(isPresented: Binding(get: { steps.addPhone != nil }, set: { if !$0 { steps.closeAddPhone() } })) {
+            if let addPhone = steps.addPhone {
+                AddPhoneSheet(model: addPhone) { steps.closeAddPhone() }
+            }
+        }
+        .sheet(isPresented: Binding(get: { steps.remoteAccess.confirmation != nil }, set: { if !$0 { steps.remoteAccess.choose(.cancel) } })) {
+            if let confirmation = steps.remoteAccess.confirmation {
+                CostConfirmView(confirmation) { choice in steps.remoteAccess.choose(choice) }
+                    .frame(width: 480)
+            }
+        }
+    }
+}
+
+// MARK: - Step 7
 
 public struct PasskeyStepView: View {
     @Environment(\.colorScheme) private var scheme
@@ -63,6 +107,13 @@ public struct PasskeyStepView: View {
                         .metistryText(.footnote, p, .textSecondary)
                 }
                 phaseRow(p)
+            }
+        }
+        // One way in, drawn once: the wizard presents the same sheet Settings ▸
+        // Devices does, over a model the app wires to the console session.
+        .sheet(isPresented: Binding(get: { steps.addPhone != nil }, set: { if !$0 { steps.closeAddPhone() } })) {
+            if let addPhone = steps.addPhone {
+                AddPhoneSheet(model: addPhone) { steps.closeAddPhone() }
             }
         }
     }
@@ -112,31 +163,26 @@ public struct PasskeyStepView: View {
         .metistryCard(p)
     }
 
+    /// Add a Phone… (§2.22): the sheet, not a command to copy. What it costs
+    /// is said beside it, and *“iPhone” was added* satisfies the step.
     private func fallbackCard(_ p: Palette) -> some View {
         VStack(alignment: .leading, spacing: MetistrySpace.s3) {
-            Text("Enrol From the Console").metistryText(.headline, p)
+            Text("Add a Phone or a Browser").metistryText(.headline, p)
             Text(PasskeyEnrolmentModel.fallbackNote)
                 .metistryText(.footnote, p, .textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            CommandCard(title: "Mint a code on the host", argument: [PasskeyEnrolmentModel.mintCommand(shape: nil)])
-            Text(PasskeyEnrolmentModel.mintNote)
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            codeField(p)
-            if let url = model.enrolmentURL {
-                VStack(alignment: .leading, spacing: MetistrySpace.s2) {
-                    Text(url.absoluteString)
-                        .metistryText(.mono, p, .accent)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: MetistrySpace.s3) {
-                        Button("Open in a Browser") { openURL(url) }
-                            .buttonStyle(.borderedProminent)
-                        Text("or type it on the phone")
-                            .metistryText(.caption1, p, .textTertiary)
-                    }
+            HStack(spacing: MetistrySpace.s3) {
+                Button(AddPhoneWords.addAPhone) { steps.beginAddPhone() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(steps.addPhone != nil)
+                if let label = steps.phoneAdded {
+                    StatusDot(.ok)
+                    Text(AddPhoneWords.added(label)).metistryText(.footnote, p, .ok)
                 }
             }
+            Text(DevicesWords.addNote)
+                .metistryText(.caption1, p, .textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .metistryCard(p)
@@ -243,7 +289,7 @@ public struct PasskeyDiagnosticView: View {
     }
 }
 
-// MARK: - Step 7
+// MARK: - Step 8
 
 /// Choosing where the assistant's turns run. Three cards and a way out: the
 /// provider, the model, and — where the provider needs one — a secure field
@@ -251,9 +297,11 @@ public struct PasskeyDiagnosticView: View {
 public struct ComputeStepView: View {
     @Environment(\.colorScheme) private var scheme
     @Bindable private var model: ComputeStepModel
+    private let assistantName: String?
 
-    public init(model: ComputeStepModel) {
+    public init(model: ComputeStepModel, assistantName: String? = nil) {
         self.model = model
+        self.assistantName = assistantName
     }
 
     public var body: some View {
@@ -318,7 +366,7 @@ public struct ComputeStepView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .metistryCard(p)
 
-            Text(ComputeStepModel.skipNote)
+            Text(ComputeStepModel.skipNote(assistantName: assistantName))
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -353,7 +401,7 @@ public struct ComputeStepView: View {
             case .skipped:
                 HStack(alignment: .top, spacing: MetistrySpace.s2) {
                     StatusDot(.absent)
-                    Text("no engine — the assistant will not be started, and everything else will").metistryText(.footnote, p, .textSecondary)
+                    Text(ComputeStepModel.skippedLine(assistantName: assistantName)).metistryText(.footnote, p, .textSecondary)
                 }
             case .failed(let why):
                 UnavailableCard(what: "Could not set compute", reason: why, command: model.lastCommand)

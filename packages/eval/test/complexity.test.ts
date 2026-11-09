@@ -492,3 +492,71 @@ describe("metistry-eval complexity, end to end on a recording", () => {
     expect(errs.join("")).toMatch(/assignments\.intent/);
   });
 });
+
+// ---- owner-written and generated rows, held to the bar separately (X-121) -------------
+
+describe("the report with owner-written and generated fixtures in one run", () => {
+  /** Two qualifying sets — the synthetic one as the owner's, a copy marked `source: generated` with distinct texts. */
+  function twoSets(): { owner: ComplexityFixture[]; generated: ComplexityFixture[] } {
+    const owner = qualifyingSet();
+    const generated = owner.map((f) => ({ ...f, id: `gen-${f.id}`, text: `generated ${f.text}`, source: "generated" as const }));
+    return { owner, generated };
+  }
+
+  it("one source: no split, the verdict is the set's", async () => {
+    const fixtures = qualifyingSet();
+    const result = await runComplexityEval({ fixtures, score: tableScorer(right, fixtures), warmUp: false });
+    const r = buildComplexityReport(result, REPORT_OPTS);
+    expect(r.sets.map((s) => s.source)).toEqual(["owner"]);
+    expect(r.verdict.pass).toBe(true);
+    expect(renderComplexityReport(r)).not.toContain("held to the bar separately");
+    expect(renderComplexityReport(r)).toContain("150 owner-labelled item(s), each scored twice");
+  });
+
+  it("both pass separately: PASS, and the line says so per set", async () => {
+    const { owner, generated } = twoSets();
+    const fixtures = [...owner, ...generated];
+    const result = await runComplexityEval({ fixtures, score: tableScorer(right, fixtures), warmUp: false });
+    const r = buildComplexityReport(result, REPORT_OPTS);
+    expect(r.sets.map((s) => [s.source, s.n, s.fixture_set.qualifies, s.verdict.pass])).toEqual([
+      ["owner", 150, true, true],
+      ["generated", 150, true, true],
+    ]);
+    expect(r.verdict.pass).toBe(true);
+    expect(r.verdict.line).toContain("owner PASS (150) · generated PASS (150)");
+    const page = renderComplexityReport(r);
+    expect(page).toContain("300 item(s) — 150 owner-labelled, 150 generated, each scored twice");
+    expect(page).toContain("### owner — 150 item(s)");
+    expect(page).toContain("### generated — 150 item(s)");
+    expect(page).toContain("(every row, both sources)");
+  });
+
+  it("a generated set that clears the bar can never carry an owner set that does not — and the other way round", async () => {
+    const { owner, generated } = twoSets();
+    const fixtures = [...owner, ...generated];
+    // the planner misses every owner-written demanding item, and nothing else: blended, 300 items would read 83 % accuracy; separately the owner set FAILS
+    const scorer = tableScorer((f) => (f.source === undefined && f.label === "demanding" ? said("simple", 0.9) : right(f)), fixtures);
+    const r = buildComplexityReport(await runComplexityEval({ fixtures, score: scorer, warmUp: false }), REPORT_OPTS);
+    expect(r.sets.find((s) => s.source === "owner")!.verdict.pass).toBe(false);
+    expect(r.sets.find((s) => s.source === "generated")!.verdict.pass).toBe(true);
+    expect(r.verdict.pass).toBe(false);
+    expect(r.verdict.line).toMatch(/^FAIL — held separately: owner FAIL \(150\) · generated PASS \(150\)\./);
+    const other = tableScorer((f) => (f.source === "generated" && f.label === "demanding" ? said("simple", 0.9) : right(f)), fixtures);
+    const r2 = buildComplexityReport(await runComplexityEval({ fixtures, score: other, warmUp: false }), REPORT_OPTS);
+    expect(r2.verdict.pass).toBe(false);
+    expect(r2.verdict.line).toContain("generated FAIL (150)");
+  });
+
+  it("a set too small to qualify is a non-result, not a failure of the other", async () => {
+    const { owner, generated } = twoSets();
+    const few = owner.slice(0, 6);
+    const fixtures = [...few, ...generated];
+    const r = buildComplexityReport(await runComplexityEval({ fixtures, score: tableScorer(right, fixtures), warmUp: false }), REPORT_OPTS);
+    expect(r.verdict.pass).toBe(true);
+    expect(r.verdict.line).toContain("owner NOT QUALIFYING (no result) (6) · generated PASS (150)");
+    const neither = [...few, ...generated.slice(0, 9)];
+    const r2 = buildComplexityReport(await runComplexityEval({ fixtures: neither, score: tableScorer(right, neither), warmUp: false }), REPORT_OPTS);
+    expect(r2.verdict.pass).toBe(false);
+    expect(r2.verdict.line).toMatch(/^NOT A QUALIFYING RUN — neither set/);
+  });
+});

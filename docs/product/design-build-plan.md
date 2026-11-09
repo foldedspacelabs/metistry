@@ -432,6 +432,8 @@ console cannot or must not do it (credentials, the machine, code that runs):
 | M16 | Compute providers | `metistry compute providers add\|remove\|set` | keys and base URLs — where prompts go |
 | M17 | Models on this Mac | `metistry compute models install\|load\|unload` | this Mac's disk and memory |
 | M18 | The vault's git policy and rollback | `metistry vault settings`, `metistry vault rollback <commit\|--to date\|--file path>` (T10-2, T10-6) | the repository's history and its remote; a rollback still waits for Approve in Needs You |
+| M19 | Add a phone: mint a passkey enrolment code | `metistry enroll [--json]`, `metistry enroll --cancel <id>` (X-75; §2.22) *(ruled 2026-09-28)* | a first credential for a new device; shell access to this Mac is its root of trust (plan §4.2), so no HTTP route mints one |
+| M20 | Remote access: the provider the phone reaches this Mac through | `metistry remote [status]\|set\|authorize\|test\|off` (X-105…X-120; §2.23, §2.24) *(ruled 2026-09-30)* | the provider's credentials live in the login Keychain, and it decides what is exposed to the internet |
 
 **Device-local, no CLI and no API:** global hot keys, the capture bar's placement
 and window preferences, the login item, reading TCC state, the instance chooser
@@ -466,7 +468,8 @@ exist. Reach (§2.1) enforces it; a client hiding a control is never the control
 | Services: restart, stop, start, logs; Keep Awake | — | write | the machine; a remote stop locks the owner out |
 | Updates: versions | read | read | |
 | Updates: update, roll back, runtime source | — | write | replaces running code |
-| Account: devices, revoke a device, Sign Out Everywhere | write | write | a lost phone is revoked from another device |
+| Devices: the list, remove a device, Sign Out Everywhere (in Account until §2.22) | write | write | a lost phone is revoked from another device |
+| Devices: Add a Phone (an enrolment code, M19) | — | write | a new credential; shell access to the Mac is the root of trust *(ruled 2026-09-28, §2.22)* |
 | Account: console sign-in, instance repository | — | write | |
 | Sessions: *Let Metis learn*, retention | write | write | the session-fold and purge routines' settings, through the Scheduled doors (§2.5) |
 | Sessions: Purge Now | — | write | irreversible |
@@ -929,6 +932,10 @@ lands it in `CLAUDE.md` and in `metistry-build-plan.md` §1, which is kept in sy
 | 0035 | `event_notify.sql` | `metistry_notify()` and `AFTER INSERT OR UPDATE` triggers on `runs`, `proposals`, `work`, `inbox`, `artifact_comments`, `outbound_messages`, `agents` — `pg_notify` with `{table, op, id}` only (§2.20) | no data | T2-18 |
 | 0036 | — | spare | | |
 | 0037 | — | spare | | |
+| 0038 | `passkey_revocation.sql` | `passkeys.revoked_at timestamptz` — a removed device's passkey never signs in again (§2.22) *(ruled 2026-09-28)* | durable, like `auth_sessions.revoked_at` | X-76 |
+| 0039 | `passkey_rp_id.sql` | `passkeys.rp_id text` — the host a passkey was created for; null reads as the first origin's host (§2.23) *(ruled 2026-09-30)* | durable | X-104 |
+| 0040 | `enrollment_opened.sql` | `auth_enrollment_codes.opened_at timestamptz`, `opened_via text` — the phone reached the Mac with this code, and through which listener (§2.23) *(ruled 2026-09-30)* | durable, like `used_at` | X-114 |
+| 0041 | `relay_device_labels.sql` | `relay_labels (label, code_id, passkey_id, state, created_at, revoked_at)` — each phone's relay address, pending until its passkey exists (§2.24) *(ruled 2026-09-30)* | durable | X-119 |
 
 **No migration needed:** `inbox.source = 'app'` (no CHECK); `runs.kind` values
 `connection_call`, `route`, `config_write`, `access_ceiling`; `runs.meta.outcome`;
@@ -944,7 +951,7 @@ new proposal kinds.
 | `.metistry/variables.yaml` *(new)* | name → plain value; no scheduling | CLI (M14) |
 | `.metistry/extensions/<name>/` | §2.7 | CLI (M15) |
 | `.metistry/identity.yaml` | name, mention, mark | CLI (M10) |
-| `.metistry/deployment.yaml` | `keep_awake` gains `{enabled, sleep_on_battery, sleep_lid_closed}`; the four values stay valid | CLI (M4) |
+| `.metistry/deployment.yaml` | `keep_awake` gains `{enabled, sleep_on_battery, sleep_lid_closed}`; the four values stay valid; `remote:` — provider, origin, non-secret settings (§2.23), never a credential | CLI (M4) |
 | `.metistry/compute.yaml` | providers gain `enabled`, `billing`; `auth.secret` takes `{{ secret.x }}` | console + CLI (existing) |
 | `.metistry/agents/<area>/<id>.md` | `model:` takes `<provider>/<model>` | CLI (M12) |
 | `seed/model-identities.yaml` *(new)* | provider model id → one identity (C131); overlayable | product |
@@ -1356,6 +1363,777 @@ reports branch, ahead/behind, last commit, last push, and any conflict.
   tool exposes it, the rollback route is `local`, and the reconciler refuses the
   revert operation for any principal but `user`.
 
+### 2.22 Add a Phone — enrolment from the Mac *(ruled 2026-09-28)*
+
+**Why this exists.** The metistry.ai Download page (`foldedspacelabs/metistry-website`,
+`design/Download.dc.html`, section *Phone*; the *Phone · Download* board in
+`Phone Layouts.dc.html`) promises a phone setup that the product did not have:
+
+> **Add your phone.** Once Metistry is running on your Mac, your iPhone can use it
+> too, as a web app on your Home Screen. It's the same instance, so everything
+> stays in sync.
+>
+> 1. **Let your phone reach your Mac** *(BEING DESIGNED)* — Metistry only answers
+>    on your home network to start with. To use it from anywhere, connect your
+>    devices privately with a service like Tailscale, or forward a port on your
+>    router.
+> 2. **Start from your Mac** — In Metistry, open Settings, then Devices, and
+>    choose Add a Phone. A QR code appears.
+> 3. **Scan it with your iPhone** — Open the link, then choose Add to Home Screen
+>    from the share menu.
+> 4. **Sign in with Face ID** — Your phone gets its own passkey. You can remove
+>    it from Devices anytime.
+
+The owner ruled to **build the flow rather than cut it from the site**. Today
+enrolment is `apps/console/scripts/enroll.mjs`, run from the wizard's step 6, which
+shows a URL and takes a pasted code; `docs/ops/mac-app.md` lists *Minting an
+enrolment code* and *A QR code* under "Not yet". This section is what closes both.
+Step 1 — reaching the Mac from outside — is **not** this section: it is §2.23,
+*Remote access — the owner's choice*.
+
+**The root of trust does not move.** Plan §4.2: shell access to the host is the
+root of trust for a first passkey, so **no HTTP route mints an enrolment code** —
+not an unauthenticated one, and not a `local` one either. The Mac app already
+drives the CLI for exactly this class of act (§2.2), so minting is a CLI verb, M19,
+and the app runs it through the transport it uses for every other management verb.
+
+**Entry point (Mac).** Settings gains a **Devices** pane in the ACCESS group —
+`Account · Devices · Connections · Secrets · Variables` — which takes the device
+list and **Sign Out Everywhere** from Account (screen 15 §1 draws no Devices pane;
+this ruling adds it, so the website's "Settings, then Devices" is the product's
+path). The pane's primary button is **Add a Phone…**; the app menu's *Set up…*
+and the wizard's step 6 open the same sheet, so there is one way in, drawn once.
+
+**Minting — `metistry enroll` (M19).**
+
+- Runs where `enroll.mjs` runs today and calls the same `mintEnrollmentCode`
+  (`apps/console/src/auth-store.ts`): **single-use, 10 minutes, stored hashed**
+  (`auth_enrollment_codes`, `0003`). No new table, no new lifetime; the 10 minutes
+  stays a fixed security parameter.
+- Prints the enrolment URL — `<first METISTRY_ORIGIN entry>/#enroll=<code>` — and
+  its expiry. `--json` writes exactly one document: `{url, code_id, origin,
+  expires_at}`. `code_id` is the row's id, never the code.
+- `metistry enroll --cancel <code_id>` expires an unused code at once; the Mac's
+  sheet runs it when it closes, so a QR left on screen or in a screenshot is dead
+  as soon as the owner is done with it.
+- **Refuses before minting** when the phone cannot possibly complete the ceremony
+  (below). A refusal mints nothing.
+- `enroll.mjs` keeps `--owner-token` (the capture Shortcut) and its code path for
+  enrolment calls the same function, so the two can never disagree; `docs/ops/cli.md`
+  drops `metistry enroll` from "Not yet".
+- The CLI prints the URL only. **A terminal QR is not in scope**: it needs an
+  encoder, a dependency nobody has asked for (open question 1, below).
+
+**The QR code (Mac).** Rendered with CoreImage's `CIQRCodeGenerator` — part of
+macOS, **no dependency** (the objection `mac-app.md` recorded was to an encoder
+package, which this avoids). Error-correction level `M`; scaled by an integer
+factor with no interpolation so the modules stay sharp; drawn dark-on-light in
+both appearances with a quiet zone (scanners need contrast, not the theme). The
+URL is printed selectable under the code, with **Copy Link**, for a phone that
+cannot scan. VoiceOver reads the image as "QR code for adding a phone" and the URL
+is the accessible alternative (§2.18).
+
+**The sheet (Mac), in order.**
+
+1. **Checking** — the app runs `metistry enroll --json`.
+2. **Refused** — the refusal's own words, the fix it names, and **Learn How**
+   (the phone guide, `docs/ops/phone.md`, X-79). No QR is drawn.
+3. **Ready** — the QR, the URL, *Expires in 9:41* counting down, **Make a New
+   Code** (cancels the old one first) and **Done**.
+4. **Expired** — the QR is replaced, not dimmed, by *This code expired* and
+   **Make a New Code**.
+5. **Opened on your phone** — the phone's request for this code arrived through
+   the proxy listener (§2.23, X-114): the proof the phone reached the Mac.
+6. **Added** — when `GET /api/devices` (refetched on `GET /api/events`, polled
+   while the stream is down, §2.20) shows a passkey enrolled after the sheet
+   opened: *"iPhone" was added* with the label the phone chose, and **Done**.
+
+Closing the sheet from any state runs `--cancel` for a code that is still live.
+
+**When `METISTRY_ORIGIN` is not reachable from the phone.** The Mac cannot prove
+a phone can reach it, but it can prove when a phone **cannot**, and it refuses
+those cases by name rather than drawing a QR that leads nowhere. The first
+`METISTRY_ORIGIN` entry is checked; each refusal is a code path with a test (U3):
+
+| Case | Refusal (the wording to build) |
+| --- | --- |
+| host is loopback (`127.0.0.0/8`, `::1`, `localhost`) — **every install's default** (`init` writes `http://127.0.0.1:<port>`, and the console binds `METISTRY_CONSOLE_HOST=127.0.0.1`) | "Your phone can't reach this Mac yet: Metistry only answers on this Mac. Choose how your phone reaches it in Settings ▸ Remote Access (`metistry remote set`)." — the remote-access choice is None (§2.23) |
+| scheme is `http:` | "A passkey needs HTTPS. METISTRY_ORIGIN is <origin>; set it to the https:// address your phone will open." |
+| host is an IP literal | "A passkey needs a name, not an IP address. METISTRY_ORIGIN is <origin>; set it to a hostname your phone can open." |
+| `GET <origin>/health` does not answer from this Mac within 5 s, or `GET <origin>/api/identity` (public) names another instance's `instance_id` | "<origin> doesn't answer from this Mac, so your phone won't reach it either. Settings ▸ Remote Access shows what <provider> reports." — naming the provider `metistry remote` records, and its first failing doctor row |
+
+Every refusal ends with the same pointer: Settings ▸ Remote Access on the Mac
+(`metistry remote` in the CLI), and the phone guide, which links
+`docs/ops/remote-access.md` (§2.23, X-105).
+The checks are necessary, not sufficient: a name that resolves only on this Mac
+still passes, which is why the sheet says under the QR *"Your phone must be able
+to open <host>."* and the phone's own wall says the rest (below).
+
+**The phone, in order.** The ceremony happens in Safari, because an installed
+web app on iOS does not share Safari's storage and the code lives in the URL:
+
+1. **Scan** — the Camera opens `<origin>/#enroll=<code>` in Safari. The PWA reads
+   the code, then **removes it from the address bar** (`history.replaceState`), so
+   Add to Home Screen never saves a spent code and it never sits in history.
+2. **Create the passkey** — the enrolment wall (exists: `app.js`, *auth: a wall*)
+   with the device's name prefilled; one **Face ID** (Touch ID, or the passcode)
+   creates this phone's own passkey, bound to `METISTRY_ORIGIN`'s rpID.
+3. **Add to Home Screen** — when not running standalone, the wall is followed by
+   screen 18 §6's install sheet (Share → Add to Home Screen → open it), the
+   T7-5 sheet, not a new one. Safari has no install prompt; push needs the
+   installed app.
+4. **Sign in with Face ID** — the installed app opens on the sign-in wall
+   (*Welcome to Metistry · Sign In with Face ID*, the *Phone* board) and signs in
+   with the passkey from step 2 — a login ceremony, not a second enrolment.
+5. **Notifications** — asked **in context, the first time something reaches Needs
+   You**, never during setup (screen 18 §6, ratified). The install sheet's last
+   line says so, so the owner is not surprised by the question later.
+
+If the phone cannot load the origin, Safari shows its own error — the product
+cannot draw anything there. What it can do is the Mac's refusal above and a
+guide that tells the owner what the Mac's line *"Your phone must be able to open
+<host>"* means.
+
+**Devices — the list and removal.** A device is a **passkey**, with its sessions
+under it. `GET /api/devices` today lists session rows and `POST
+/api/devices/:id/revoke` revokes one session — the passkey stays valid and the
+phone can sign straight back in, so the website's *"You can remove it from Devices
+anytime"* is not yet true. X-76 makes it true: **Remove** revokes the passkey
+(`passkeys.revoked_at`, migration `0038`) and every session under it, and drops
+their push subscriptions; a revoked passkey's login is refused with the same
+uniform 401 as an unknown one (no existence leak). The Mac's Devices pane and the
+PWA's Settings (T7-6) list each device's label, when it was added, when it was
+last seen, and *This device* on the caller's own row; **Remove** is irreversible,
+so it confirms naming the device (C136). **Sign Out Everywhere** keeps its meaning:
+sessions only, passkeys kept. Every add and remove lands in `runs` (`auth`).
+
+**CLI parity.** Every app act is a CLI verb:
+
+| App | CLI |
+| --- | --- |
+| Add a Phone… (mint, show) | `metistry enroll [--json]` |
+| closing the sheet, Make a New Code | `metistry enroll --cancel <code_id>` |
+| the device list | `metistry console call GET /api/devices` |
+| Remove | `metistry console call POST /api/devices/<id>/revoke` |
+
+The list and Remove stay client-API acts (§2.3: the phone may do them too), so
+their CLI form is `console call` like every other API act; only minting is a
+management verb.
+
+**Acceptance — the flow is done when:**
+
+- On a fresh install (loopback origin), **Add a Phone…** draws no QR and shows the
+  loopback refusal naming `METISTRY_ORIGIN`; `metistry enroll` prints the same
+  refusal and exits non-zero; no row is written to `auth_enrollment_codes`.
+- With an HTTPS origin the phone can open, scanning the QR on a real iPhone
+  enrols a passkey, the Mac's sheet turns to *Added* by itself, and the installed
+  app signs in with Face ID — the four website steps, end to end, on the owner's
+  second instance.
+- A code works once, for 10 minutes; closing the sheet or **Make a New Code**
+  kills the old one at once (**a cancelled code's URL is refused**).
+- **No console route mints a code** — a test enumerates the route table.
+- **A removed phone cannot sign in again** with its passkey; its push stops.
+- The enrolment URL is gone from the phone's address bar and history once read.
+- `docs/ops/cli.md`, `docs/ops/auth.md`, `docs/ops/mac-app.md` and
+  `docs/ops/client-api.md` say what shipped, and `mac-app.md`'s two "Not yet" rows
+  (minting, the QR) are gone.
+- **The metistry.ai Download page's copy is re-checked against the shipped flow**
+  (X-79) and every difference is fixed on the site or here.
+
+**What the site says that the product does not, as of this ruling** — for X-79 to
+settle, not for the site to fix blind:
+
+1. Step 1 says Metistry "only answers on your home network to start with". It
+   answers **only on this Mac** (loopback), and a home-network address cannot hold
+   a passkey anyway (HTTPS and a hostname are required). Step 1 is a prerequisite
+   for **every** phone, not only for "from anywhere".
+2. Steps 3–4 put Add to Home Screen before Face ID. The passkey is created in
+   Safari **before** installing (step 2 above); Face ID in the installed app signs
+   in with it. The copy can stay four steps if step 3 reads "Open the link and use
+   Face ID to create your phone's passkey, then Add to Home Screen" — the designer's
+   call.
+3. "Settings, then Devices" is true once X-77 lands; "remove it from Devices
+   anytime" once X-76 lands.
+
+**Open for the owner.**
+
+1. A terminal QR for `metistry enroll` (plan §4.2 says "QR/URL in the terminal")
+   needs an encoder package, or a hand-rolled one. Until ruled, the CLI prints the
+   URL only.
+2. Settings ▸ Devices and the Add a Phone sheet are not drawn on any board. X-77
+   builds them from this section with screen 15's pane grammar unless the designer
+   draws them first.
+3. Approving another device from an already signed-in phone (plan §4.2, *More
+   devices*) stays out: it would be an HTTP route that mints, and this ruling
+   keeps minting on the Mac.
+
+### 2.23 Remote access — the owner's choice *(ruled 2026-09-30)*
+
+**Why this exists.** Add a Phone (§2.22) refuses until the phone can open an
+HTTPS origin with a stable name, and every install starts loopback-only. The
+2026-09-28 ruling asked for research into an FSL-run opt-in relay; the owner
+read it and on 2026-09-30 ruled against any FSL-hosted service — *"I don't want
+to pay to host a service that scales up in cost as user counts grow when I'm
+not charging anything for the app"* — and for a choice: **the owner picks a
+provider at setup, can change it later in Settings, and Metistry makes each one
+as close to *sign in, authorize, done* as the provider allows.** A follow-up
+ruling the same day made **Tailscale Funnel the recommended path**, **added
+zrok**, and **allowed Metistry to bundle or install provider tools** — *"If
+there are things we can do to make it easier on the user, let's do that as
+well."* The facts behind every row, with sources and dates checked, are in
+`docs/research/2026-09-28-reaching-your-mac-remotely.md` (revised 2026-09-30).
+No choice but **Metistry Relay** (§2.24, opt-in and capped) is an FSL service,
+and no other choice sends anything to FSL.
+
+**The choices** — in this order wherever they are listed:
+
+| Choice | Reachable from | TLS ends at — who can read traffic | Origin it yields | Cost to the owner |
+| --- | --- | --- | --- | --- |
+| **None** *(default)* | this Mac only | — | — (`METISTRY_ORIGIN` stays loopback) | $0 |
+| **Tailscale — Any browser (Funnel)** *(recommended)* | the internet; the phone needs **no app** | **the Mac** (Funnel's relays "do not decrypt the traffic") | `https://<node>.<tailnet>.ts.net` | $0 (all plans) |
+| **Tailscale — Only my devices** | the owner's tailnet; the phone needs the Tailscale app | **the Mac** | same name | $0 |
+| **Metistry Relay** *(§2.24)* | the internet; no account anywhere | **the Mac** (the relay passes TLS through unopened) | `https://<id>.u.metistry.app` | $0 — 5 GB a month |
+| **Cloudflare Tunnel** | the internet | **Cloudflare** | `https://<name>.<owner's domain>` | $0 + a domain (~$10/yr) |
+| **zrok** | the internet | **zrok's frontend** (NetFoundry) | `https://<name>.share.zrok.io` | $0 (5 GB/day; warning page unless a card is verified) |
+| **ngrok** | the internet | **ngrok** | `https://<dev-domain>.ngrok-free.dev` | $0 with a weekly warning page; $10/mo removes it |
+| **Port forwarding** | the internet | **the Mac** | `https://<name>.dedyn.io[:port]` | $0; impossible behind CGNAT |
+
+**How each is set up — what is bundled, installed or pasted.** Metistry
+fetches a provider's tool only when the owner picks that provider, through the
+runtime pack's channel (X-112): pinned version and sha256, signed in CI with
+the Folded Space Labs identity, verify-then-unpack, moved forward by `metistry
+update` (`docs/ops/bundled-runtime.md`).
+
+| Provider | The tool, and how Metistry gets it | The credential, and where it lives | What the owner does | What Metistry automates |
+| --- | --- | --- | --- | --- |
+| None | — | — | nothing | nothing |
+| Tailscale | **bundled:** upstream `tailscaled` + `tailscale` (BSD-3), built from a pinned tag, run unprivileged with `--tun=userspace-networking`, its own `--statedir` and `--socket`, as a supervised job — **no Tailscale app or system extension on the Mac**. The owner's existing Tailscale app is detected and offered as the alternative. | the node's state (its machine key) in `.metistry/state/tailscale/`, 0700; no account credential | signs up or in at Tailscale's page (Google, Apple, Microsoft, GitHub…); clicks Tailscale's *approve HTTPS* and *approve Funnel* pages if asked; tailnet mode: installs Tailscale on the iPhone | starts the node as `metistry-<instance>`, opens the login URL, waits for `Running`, runs `serve` or `funnel` to the proxy listener, surfaces each approval link, waits for public DNS (up to 10 min) |
+| Metistry Relay | **bundled:** the relay client (frp's `frpc` or the PoC's choice) and the Mac's TLS terminator | a relay token from opt-in registration — Keychain; the certificate's key never leaves the Mac | turns it on; nothing else | registers, gets a certificate through FSL's DNS helper, holds the tunnel, reports the allowance (§2.24) |
+| Cloudflare Tunnel | **bundled:** `cloudflared` (Apache-2.0), the official release binary (published SHA-256), pinned and re-signed with FSL's Developer ID — the upstream macOS binary is not reliably notarized | OAuth refresh token (PKCE, if R-1 passes), else `cert.pem` from `tunnel login`, else a pasted API token — Keychain; the tunnel token — Keychain, passed as `TUNNEL_TOKEN`, never argv | has a Cloudflare account **with a domain on it**; clicks *Connect to Cloudflare* (or the browser sign-in); picks a hostname | creates the tunnel, ingress and DNS record over the API; runs `cloudflared` supervised |
+| zrok | **bundled:** the zrok CLI (Apache-2.0; v2 ships as `zrok2`), pinned and re-signed | the account token, pasted once (no OAuth exists), used for `enable`; the environment in `.metistry/state/zrok/` | signs up at zrok.io (no card); pastes the account token; optionally verifies a card to remove the warning page | enables an environment, creates a reserved name in the `public` namespace, runs the share headless and supervised |
+| ngrok | **not bundleable:** the agent is closed-source and may not be redistributed to users with their own accounts. Either the owner's `ngrok` install (Homebrew or ngrok's zip), or the `@ngrok/ngrok` SDK (MIT/Apache-2.0, a native addon) — a dependency (U5), and ngrok's terms require its written consent to distribute the agent to users with their own accounts, which may extend to the SDK (R-3) | the authtoken, pasted (no OAuth or device flow exists) — Keychain | creates an account; pastes the authtoken; a paid plan to remove the warning page | reads the dev domain; runs the forwarder supervised |
+| Port forwarding | **in-process:** NAT-PMP/PCP (+ UPnP) and ACME — dependencies still the owner's call | the DDNS token, pasted — Keychain; the ACME account key — Keychain | allows NAT-PMP/UPnP on the router (or forwards by hand); creates a deSEC name | maps, detects CGNAT, updates DNS, obtains and renews the certificate, serves TLS |
+
+**Two fixes come first, and the internet-facing rules after them.** The research
+found two gaps that make every proxy path unsafe or broken today, and every
+choice but None and tailnet mode puts the sign-in page on the internet:
+
+1. **The proxy listener (X-103).** Every provider's agent — `tailscaled`,
+   `cloudflared`, zrok, ngrok, a TLS terminator for port forwarding — connects
+   to the console from `127.0.0.1`, so the loopback-only
+   `METISTRY_LOCAL_OWNER_TOKEN` would be honoured for anything arriving through
+   a tunnel, including the `local` routes that mint agent bearers. The console
+   gains a **second listener for proxies only**: a Unix socket
+   (`.metistry/state/console-proxy.sock`, 0600) for agents that can dial one, and
+   a loopback TCP port (`METISTRY_CONSOLE_PROXY_PORT`, default the console port +
+   1) for the rest (Tailscale Serve documents only `http://127.0.0.1` targets;
+   zrok's proxy backend takes an HTTP URL). A request on either is **remote by
+   construction**: the local owner token is never honoured, no `local` route
+   answers, and its `Host` must be the configured remote host. Doctor fails any
+   provider whose upstream is the main port.
+2. **Passkeys per origin (X-104).** `rpFromOrigin` takes the rpID from the
+   first `METISTRY_ORIGIN` entry, so a second origin on another host can never
+   finish a ceremony. The rpID becomes **per request**, verification takes the
+   list (`expectedRPID` as an array, `@simplewebauthn/server` 13), and migration
+   `0039` (`passkeys.rp_id`) records the host each passkey was created for.
+3. **A console on the internet (X-111).** Funnel, Cloudflare Tunnel, zrok,
+   ngrok and port forwarding all put the sign-in page where any scanner can reach
+   it. Before any of them ships, the proxy listener adds per-client rate limits
+   on every unauthenticated route (keyed on the provider's client-address header,
+   read **only** on the proxy listener and only for limiting, never for identity),
+   a global ceiling, security headers (HSTS without preload, CSP,
+   `X-Content-Type-Options`, `Referrer-Policy`, frame denial), and one audit row
+   per refused burst. Tailnet mode does not need it, but ships with it.
+
+**Where the choice lives.** `.metistry/deployment.yaml` gains `remote:` —
+`provider: none | tailscale | relay | cloudflare | zrok | ngrok | port-forward`, `mode`
+(Tailscale: `funnel | tailnet`), the `origin` it yields, and non-secret settings
+(node name, tunnel id, hostname, zrok name, the mapped port), written by the
+protected write with preview-then-confirm, as `deployment set-keep-awake` is
+(M4). **No credential is in that file** — each lives where the table above
+says.
+
+**How the origin flows.** The environment renderer (`up`, `secrets sync --to
+env`) derives `METISTRY_ORIGIN` from the record: **the remote origin first**,
+the loopback origin `init` wrote second. So `metistry enroll` — which mints for
+the first entry (§2.22) — and the Add a Phone QR use the remote origin with no
+change to their spec. With **None** the list is the loopback origin alone. A
+passkey is bound to the host it was created on, so **changing provider strands
+the phones added under the old one**: the pane says so before it changes
+anything, and Devices marks each passkey whose host is no longer configured
+(*"Added for old.example.com. Remove it and add this phone again."*). The
+bundled Tailscale node's name is Metistry's (`metistry-<instance>`), so renaming
+the Mac no longer changes it.
+
+**Set Up Remote Access — the guided flow.** One flow, the same in the wizard's
+**Remote Access** step (new, between *Services* and *Door*) and behind Settings
+▸ Remote Access ▸ **Change…**:
+
+1. **Choose.** *"How should your phone reach this Mac?"* The choices as a list,
+   **None** selected; **Tailscale — Any browser** carries *Recommended*. Each
+   row names what it needs (an account, a domain, a router), who can read the
+   traffic, and the cost. Continuing with None satisfies the step.
+2. **Get the tool.** Metistry fetches and verifies the provider's pack (X-112),
+   with progress; a checksum mismatch stops here and changes nothing.
+3. **Sign in.** Metistry opens the provider's own sign-up or sign-in page in
+   the browser — Tailscale's login URL, Cloudflare's consent page, zrok's or
+   ngrok's dashboard page for the token — and **detects completion** itself:
+   Tailscale's `BackendState` reaching `Running`, the OAuth callback on
+   `127.0.0.1`, a pasted token that `enable`s or authenticates. Metistry never
+   asks for a provider password.
+4. **Approve.** Where the provider asks a one-time question of its own —
+   Tailscale's *enable HTTPS* and *enable Funnel* pages — the flow shows that
+   link as the one step and waits for it.
+5. **Expose.** The adapter's `configure` points the provider at the proxy
+   listener and records the origin. For Funnel, *"Waiting for <name> to appear
+   on the internet — this can take up to 10 minutes."*
+6. **Check.** The provider's own status (Tailscale's funnel status, the
+   Cloudflare tunnel's connections, the zrok share, the ngrok endpoint), then
+   `GET <origin>/health` from the Mac returning this instance's `instance_id`.
+   This is said as *"answers from this Mac"*, never as *"reachable from your
+   phone"*: a Mac on the same tailnet may reach a Funnel name over the tailnet,
+   and a router may hairpin a forwarded port. **No FSL or third-party probe
+   service is used.**
+7. **Add a Phone.** Only now is **Add a Phone…** offered. Its sheet (§2.22)
+   gains one state between *Ready* and *Added* (X-114): **Opened on your
+   phone** — the console saw this code's `POST /auth/enroll/start` arrive
+   through the proxy listener — which is the proof from outside: *"Your phone
+   reached this Mac through <provider>."* If the code expires without it, the
+   sheet says *"Your phone didn't reach <origin>. Open it in Safari on your
+   phone with Wi-Fi off to see what it says."*
+
+**Settings ▸ Remote Access.** A pane in ACCESS, before Devices — `Account ·
+Remote Access · Devices · Connections · Secrets · Variables` (screen 15 §1 gains
+it): the choice and mode, the origin, the provider's doctor rows with when they
+were checked, **Change…** (the guided flow), **Test** (step 6) and **Turn Off**
+(back to None, running the adapter's revoke after a confirm naming what it
+undoes and what is left for the owner at the provider).
+
+**The provider adapter.** One interface in `packages/cli/src/remote/`, one
+module per provider; the CLI is the only implementation and the Mac drives it
+over the CLI transport (§2.2, M20):
+
+```ts
+interface RemoteProvider {
+  id: "none" | "tailscale" | "relay" | "cloudflare" | "zrok" | "ngrok" | "port-forward";
+  /** Read-only: is the tool here (pack or owner install), signed in, and what would configure change? */
+  detect(ctx: RemoteContext): Promise<Detection>;
+  /** Idempotent. Fetch the tool (X-112), sign in or hand the owner the provider's sign-in,
+   *  expose the proxy listener, return the stable origin. Writes nothing on failure. */
+  configure(ctx: RemoteContext, opts: ProviderOptions): Promise<{ origin: string; settings: Record<string, string> }>;
+  /** Doctor rows: core CheckResult, kind "remote", each with a remediation and, where it can name one, an action. */
+  status(ctx: RemoteContext): Promise<CheckResult[]>;
+  /** Undo exactly what configure created; name what only the owner can undo at the provider. */
+  revoke(ctx: RemoteContext): Promise<{ undone: string[]; left_for_owner: string[] }>;
+}
+```
+
+**Switching configures the new provider first and revokes the old one only once
+the new origin answers**, so the phone is never left with nothing mid-change.
+
+**CLI parity** (`docs/ops/cli.md`, U7). Every verb takes `--instance` and
+`--json`, the writing ones `--dry-run`:
+
+| App | CLI |
+| --- | --- |
+| the pane's status | `metistry remote [status] [--json]` |
+| the guided flow, a provider picked | `metistry remote set <none\|tailscale\|relay\|cloudflare\|zrok\|ngrok\|port-forward> [provider flags] [--yes]` |
+| a provider's browser sign-in | `metistry remote authorize <tailscale\|cloudflare> [--no-browser] [--timeout 300]` |
+| a pasted token | `metistry remote set zrok\|ngrok`, `metistry remote set cloudflare --token` — on stdin, hidden at a prompt in a terminal, **never in argv** (the `secrets set` rule) |
+| Test | `metistry remote test [--json]` — step 6 |
+| Turn Off | `metistry remote off [--yes]` — `set none`, with revoke |
+
+Provider flags: `tailscale [--mode funnel\|tailnet] [--use-app]`; `cloudflare
+--hostname <name.domain> [--access]`; `zrok [--name <name>]`; `ngrok [--domain
+<name>]`; `port-forward [--ddns desec\|cloudflare] [--hostname <name>] [--manual
+<external-port>]`.
+
+**Doctor rows.** Kind `remote`, one row per thing that can be wrong, in the
+product's voice — reported state, each absence its own sentence naming the fix.
+**None** is one `ok` row: *"Remote access: none. Your phone can't reach this
+Mac. Choose a way in Settings ▸ Remote Access."* Every provider adds *tool
+present* (the pack's version, or the owner's install), *proxy listener* (`failed`
+when the upstream is the main port: *"<provider> is forwarding to the console's
+main port, which accepts this Mac's owner token. Run `metistry remote set
+<provider>`."*) and *answers from this Mac*, plus its own rows below.
+
+**Per provider — what is detected and accepted.**
+
+*None.* Nothing is exposed; no PWA, no web push, no capture Shortcut from the
+phone. A home-network-only mode is not offered: a passkey needs HTTPS and a
+stable name, which a LAN address lacks. *Accept:* a fresh install's `metistry
+remote` says *none*, its row is `ok`, `METISTRY_ORIGIN` is loopback only, and
+Add a Phone refuses, naming Settings ▸ Remote Access.
+
+*Tailscale* (X-106). Two modes of one provider, **Funnel the default**. No
+third-party OAuth exists for a tailnet and none is needed: Tailscale's own login
+page signs the node in. Funnel needs MagicDNS, HTTPS certificates and the
+`funnel` attribute in the tailnet's policy file; `tailscale funnel` "triggers a
+web interface that prompts you to approve enabling Funnel", which the flow shows
+as its step 4. Funnel listens on 443, 8443 or 10000 only, under bandwidth limits
+Tailscale does not publish. **Rows:** node running · signed in (`NeedsLogin` →
+*"This Mac's Metistry node isn't signed in to Tailscale. Sign in again."*) ·
+HTTPS certificates · Funnel allowed (mode funnel) · handler → proxy listener ·
+public name resolves (mode funnel) · node key expiry (`degraded` within 14 days).
+In tailnet mode the sheet adds *"Your phone must be signed in to the same
+Tailscale account."* **Revoke:** turn off the handler, stop the node, and
+`tailscale logout` it; removing the node from the admin console is listed for
+the owner. *Accept:* on the owner's second instance with no Tailscale app
+installed, the guided flow from a new Tailscale account ends with a real iPhone,
+on cellular, with no Tailscale app, showing *Opened on your phone* and then
+*Added*; tailnet mode does the same with the iPhone app; `remote off` leaves no
+handler and a logged-out node.
+
+*Cloudflare Tunnel* (X-108). **Needs a domain on the owner's Cloudflare DNS**
+(partial zones are Business-plan only). A **Quick Tunnel is refused** — its
+hostname changes every run, and it does not carry Server-Sent Events. Sign-in,
+best first: *Connect to Cloudflare* (self-managed OAuth with PKCE, one public FSL
+client verified on `metistry.ai`, no FSL server — gated on R-1), then
+`cloudflared tunnel login`, then a pasted API token. A remotely-managed tunnel,
+ingress to the proxy socket, the proxied CNAME, `cloudflared tunnel run` with
+the token from the Keychain. `--access` adds Cloudflare Access, off by default
+until R-2. **Rows:** allowed into the account · zone present · tunnel connected ·
+DNS record → this tunnel · ingress → proxy listener. **Revoke:** delete the
+tunnel and the record by id; revoking the grant or token is the owner's.
+*Accept:* with a test zone, the guided flow reaches *Opened on your phone*; a
+Quick Tunnel is refused with its reasons.
+
+*zrok* (X-113). No OAuth: the owner pastes the account token once and Metistry
+runs `enable` into its own environment directory. A **reserved name in the
+public namespace** gives `https://<name>.share.zrok.io`, stable across runs
+(zrok v2's names replace v1's reserved shares); custom domains are not on the
+free hosted plan. Public shares terminate TLS at zrok's frontend. The free plan
+shows browsers a warning page about once a week unless the owner verifies a card
+(no charge); the chooser says so, and R-5 checks a Home Screen app gets past it.
+**Rows:** environment enabled (401 `enableUnauthorized` → *"zrok didn't accept
+the account token. Copy it again from zrok.io."*) · name reserved · share running
+· daily limit (*"Your zrok plan's daily limit is used up."*). **Revoke:** stop
+the share, delete the name and `disable` the environment. *Accept:* with a free
+zrok.io account, the guided flow reaches *Opened on your phone*.
+
+*ngrok* (X-109). No OAuth or device flow: the owner pastes the authtoken. The
+agent cannot be bundled; the adapter uses the owner's `ngrok` install or — if
+the owner approves it — the `@ngrok/ngrok` SDK in-process. The free plan's
+weekly warning page cannot be skipped by a Safari navigation; if R-3 finds a Home
+Screen app cannot get past it, the chooser offers ngrok only on a paid plan.
+**Rows:** authtoken accepted (`ERR_NGROK_105`/`107`) · endpoint online
+(`ERR_NGROK_334` → *"<domain> is already in use by another ngrok agent."*) ·
+plan quota. *Accept:* as zrok's, with an ngrok account.
+
+*Port forwarding* (X-110). PCP → NAT-PMP → UPnP-IGD with renewal; **CGNAT and
+double NAT refused by name before anything is mapped** (*"Your internet provider
+shares one public address among many customers, so nothing outside can reach
+this Mac. Choose Tailscale or a tunnel."*); a deSEC name kept current; ACME
+DNS-01 renewed in ARI's window; TLS served to the proxy socket. **Rows:** router
+mapping · public address · DNS name → address · certificate expiry. *Accept:* on
+a NAT-PMP or UPnP router with a public IPv4, the guided flow reaches *Opened on
+your phone*; on a CGNAT line it refuses before mapping.
+
+**Order — recommended.**
+
+1. **X-103, X-104, X-111.** The two gaps are bugs whatever the owner picks; the
+   recommended default (Funnel) is public, so the hardening comes with them.
+2. **None, Tailscale (Funnel and tailnet), the packs, the guided flow and
+   *Opened on your phone*** (X-105, X-112, X-106, X-107, X-114). Funnel removes
+   the biggest friction of plain Tailscale — an app and a VPN on the phone —
+   while TLS still ends on the Mac; the bundled node removes the Mac app too;
+   the owner's only steps are Tailscale's own sign-in and two one-click approvals.
+3. **Metistry Relay** (X-115…X-118, §2.24): for owners who will not make a
+   Tailscale account — no account at all, and the relay cannot read the traffic.
+   After Funnel because Funnel costs FSL nothing and needs no FSL service; the
+   relay is capped, operated, and gated on its PoC and the PSL entry.
+4. **Cloudflare Tunnel** (X-108): no warning page and the owner's own domain,
+   but the domain is a prerequisite and Cloudflare reads the traffic.
+5. **zrok** (X-113): bundleable, open source, self-hostable, 5 GB a day free and
+   a warning page removable by verifying a card — ahead of ngrok on every count
+   but maturity.
+6. **ngrok** (X-109): a pasted token, a closed agent Metistry cannot bundle,
+   1 GB a month free, and a warning page only a paid plan removes.
+7. **Port forwarding** (X-110): the most code, the most exposure (the home
+   address in public DNS), dependencies to approve, and impossible behind CGNAT.
+
+**To verify before the ticket that relies on it** (hands-on checks, no product
+code; the research's §7):
+
+- **R-1** (X-108): a private Cloudflare OAuth client accepts a loopback redirect,
+  and tunnel and DNS permissions are grantable scopes.
+- **R-2** (X-108 `--access`): Cloudflare Access in front of a Home Screen app.
+- **R-3** (X-109): ngrok's free warning page on a Home Screen app; and whether ngrok's terms let an app embed the SDK for users with their own accounts without written consent.
+- **R-4** (X-110): PCP/NAT-PMP/UPnP on the owner's router, and one CGNAT line.
+- **R-5** (X-113): zrok v2's `zrok2` name and commands, SSE through a public
+  share, the warning page on a Home Screen app, and whether the release binaries
+  are signed.
+- **R-6** (X-106, X-112): upstream `tailscaled` built from source on macOS,
+  unprivileged with `--tun=userspace-networking`, serving Funnel to the proxy
+  port, beside an installed Tailscale app; `GET /api/events` (SSE) held open through
+  Funnel; and the binary sizes the packs add.
+- **R-7** (X-115): the Metistry Relay PoC (§2.24).
+- **R-8** (X-120): whether Apple App Attest (`DCAppAttestService`) works for a
+  Developer ID–signed macOS app distributed outside the App Store.
+- **R-9** (X-116, X-119): per-instance `*.<id>.u.metistry.app` records on Route
+  53 — wildcard synthesis beside `_acme-challenge` TXT records, and the zone's
+  record quota.
+
+**Open for the owner.**
+
+1. **The Tailscale node:** a bundled userspace `tailscaled` (recommended) or
+   only the owner's Tailscale app. The alternative to both, a tsnet helper (Go;
+   `ListenFunnel` exists), would add FSL-written Go to the product.
+2. **Dependencies for port forwarding** (U5): hand-roll NAT-PMP and PCP, and for
+   UPnP and ACME approve packages or run Caddy. Until ruled, X-110 is not
+   dispatched — and nor is X-117, whose certificate needs the same ACME client.
+3. **The ngrok route:** the `@ngrok/ngrok` SDK (a native addon, U5; ngrok's
+   consent may be needed, R-3) or the owner's own agent.
+4. **FSL's Cloudflare OAuth client:** making it public is permanent and needs
+   domain verification on `metistry.ai` — the maintainer's act, after R-1.
+5. **Free-plan warning pages** (ngrok, zrok), if R-3 or R-5 fail: refuse the free
+   plan, or offer it with the warning.
+6. **Metistry Relay** (§2.24): the PoC's relay component,
+   the cap and throttle numbers, and when to file the PSL entry.
+
+### 2.24 Metistry Relay — opt-in, capped, FSL-hosted *(ruled 2026-09-30)*
+
+**Why this exists.** §2.23 ruled out an FSL-hosted service whose cost grows
+with users. The owner then asked for one FSL-hosted provider after all — for
+owners who will not make a Tailscale account — **on terms that keep FSL's bill
+flat**: AWS only, a per-host bandwidth limit as the cost guard, `metistry.app` on
+the Public Suffix List, and abuse controls. The earlier relay designs (WebRTC
+rendezvous, an uncapped SNI relay, FSL-paid TURN) stay rejected. The research is
+`docs/research/2026-09-28-reaching-your-mac-remotely.md` §3.9.
+
+**What the owner gets.** A seventh choice, **Metistry Relay**, after Tailscale
+Funnel: *"No account needed. Metistry's relay passes your encrypted traffic
+through; it can't read it. 5 GB a month."* Each phone gets its own address,
+`https://<label>.<id>.u.metistry.app` (below); the phone needs nothing else. Off until the owner turns
+it on, from the Mac.
+
+**Data plane — one Lightsail instance.** A $7/month Lightsail Linux bundle
+(2 TB of transfer, a static IP included) runs an **SNI-routing TLS-passthrough
+relay**: it reads the TLS ClientHello's SNI, forwards the still-encrypted
+stream down the reverse tunnel the matching Mac holds open, and **never
+terminates TLS**. The component — frp's `https` vhost mode with `frpc` on the
+Mac, or HAProxy `ssl_preread` with a reverse-tunnel client — is the PoC's
+decision (X-115). The Mac holds the tunnel **outbound** (so CGNAT does not
+matter) with its bundled client (an X-112 pack), and terminates TLS itself, in
+front of the proxy listener, with its own Let's Encrypt wildcard certificate
+for `*.<id>.u.metistry.app`. DNS: a per-instance `*.<id>.u.metistry.app` record →
+the relay's static IP (below, *Keeping the relay Metistry-only*), in the
+existing Route 53 zone `metistry.app` (`Z03790842KLR6UEFALDPY`); the apex and
+`www` keep redirecting to metistry.ai.
+
+**Control plane — in FSL's AWS account.** An API Gateway HTTP API + Lambda +
+DynamoDB, defined in CDK:
+
+- **Register** (opt-in, from the Mac): issues an opaque random `<id>` (never
+  `instance_id`, which `GET /api/identity` publishes) and a **relay token**,
+  revocable, stored hashed; rate-limited per day, per source address and
+  globally.
+- **Usage**: per-id monthly relayed bytes, written by the relay, read by the
+  Mac (`GET /v1/usage`, the relay token).
+- **ACME DNS-01 helper**: writes **only** `_acme-challenge.<id>.u.metistry.app`
+  TXT records, only for the authenticated id, then removes them. Whether it
+  speaks the acme-dns update API so an off-the-shelf ACME client can use it is a
+  PoC decision.
+- **Device labels**: register, activate and revoke each phone's label (at most
+  10 per instance); the relay forwards only active ones.
+- **Revoke and kill switch**: the owner revokes from the Mac; FSL disables an id
+  (abuse) — the relay then forwards nothing for that name, and its DNS record is
+  deleted.
+
+**Where the code lives** *(ruled 2026-09-30)*: a new **private** repository,
+`foldedspacelabs/metistry-relay`, holds the relay's CDK (Lightsail, API Gateway,
+Lambda, DynamoDB, the Route 53 records under `metistry.app`), the control-plane
+code, and its operations (abuse thresholds and detection, CT monitoring, budget
+alarms, runbooks), with its own deploy pipeline and OIDC role. Two things stay
+**public**, because owners opting in must be able to check the claim that FSL
+cannot read their traffic: the relay **client and protocol** in this repo (the
+client ships in the open-source app regardless), and the relay's **forwarding
+configuration** (the frp or HAProxy setup that routes by SNI and never decrypts),
+published here as `ops/relay/` and deployed verbatim by the private repo. The
+relay never needs the rest of the product repo's code.
+
+**Cost guards — the bill stays flat.** Lightsail counts **inbound and outbound**
+against the allowance, so a relayed byte counts twice: the $7 bundle's 2 TB is
+about **1 TB relayed**. Overage is $0.09/GB of outbound in US regions, and is
+never allowed to happen silently:
+
+1. **Per-host monthly cap**, default **5 GB** relayed (configurable by FSL). At
+   the cap the relay refuses new sessions for that id until the month resets.
+   Product voice, in the pane and `metistry doctor`: *"This Mac has used its 5 GB
+   relay allowance for September; it resets on 1 October. Tailscale Funnel has
+   no allowance."* — with **Switch to Tailscale Funnel** beside it.
+2. **Per-host throughput throttle**, about 2 Mbps.
+3. **Global monthly cap** at about 90% of the bundle's relayed capacity —
+   **≈ 0.9 TB on the 2 TB plan** — after which the relay refuses new sessions for
+   everyone until the month resets; the product says *"Metistry Relay is full
+   for September; it resets on 1 October."*
+4. **Backstops:** an AWS Budgets alert at $10/month, and an optional Lambda that
+   stops the instance on a breach.
+5. **Registration limits** per day (per address and global).
+
+**Capacity.** At about 200 MB relayed per owner per month (to be measured in the
+PoC), one $7 box carries **≈ 4,500 owners**. Growth is a deliberate step — the
+$12/3 TB bundle or a second instance — **never automatic overage**.
+
+**Abuse and isolation.**
+
+- **Owner hostnames live under an explicit user-space label, `u.`** —
+  `<id>.u.metistry.app`, never `<id>.metistry.app` — so FSL's own names
+  (`metistry.app`, the planned `auth.metistry.app` token broker, §2.6) never sit
+  beside an owner's.
+- **`u.metistry.app` on the Public Suffix List** (private section): each
+  `<id>.u.metistry.app` becomes its own registrable domain, so no owner's page
+  can set or read another's cookies or claim a parent as a passkey rpID. It
+  **still lifts Let's Encrypt's limit**: that limit is "50 certificates … per
+  registered domain … every 7 days", and Let's Encrypt takes the registered
+  domain from the PSL — with `u.metistry.app` listed, the registered domain of
+  `<id>.u.metistry.app` is `<id>.u.metistry.app` itself, so each owner has their
+  own 50 a week. Inclusion is permanent and takes weeks: **until it lands,
+  registrations are capped below that limit** (about 40 a week, all counted
+  against `metistry.app`).
+- **An explanatory page** at `https://metistry.app` (and `https://u.metistry.app`)
+  says that names under `u.metistry.app` are run by individual Metistry owners on
+  their own Macs, not by Folded Space Labs, with an abuse report link. Today the
+  apex 301s to metistry.ai (the website repo's redirect distribution). When the
+  relay ships, `metistry-relay` takes over **every record under `metistry.app`**
+  (apex, `www`, `u.`) and serves this page, and metistry-website drops its
+  redirect distribution — a follow-up for both repos then, not now. The two
+  stacks share the zone safely only while each owns different records.
+- **No "user content" banner can be injected** into an owner's pages: the relay
+  never sees the plaintext. That is the deliberate trade for end-to-end
+  encryption; the explanatory page and the PSL entry carry the disclosure
+  instead.
+- Opt-in only; revocable tokens; a per-id kill switch; the relay forwards only
+  **registered and active** names and refuses every other SNI; an abuse contact
+  (`abuse@metistry.ai`) on the website.
+- Like every public provider, it is **blocked by X-103 and X-111**: the Mac's
+  sign-in page faces the internet through it.
+
+**What FSL can see:** SNI hostnames (the `<id>`), source and Mac IP addresses,
+connection times and volume — **never content**. The privacy policy says so
+before launch; relay logs keep counters, not connection lists, beyond 24 hours.
+
+**Sub-paths rejected** (2026-09-30). `metistry.app/user/<id>` with one shared
+certificate was considered and rejected: routing by path means the relay must
+decrypt, so FSL could read every owner's traffic; a shared certificate means
+every Mac holds the same private key, so any owner could impersonate the site
+and read others' traffic; and one origin for everyone shares cookies, storage,
+service workers and the passkey rpID. A wildcard certificate held by the relay
+has the same decryption problem. The research's §6 has the detail.
+
+**Trade-offs, said plainly.** One instance is a single point of failure —
+snapshots and a scripted rebuild, and the pane says *"Metistry Relay isn't
+answering"* when it is down. FSL operates a service. CloudFront's flat-rate
+plans were considered and rejected: CloudFront must terminate TLS, so FSL would
+see the traffic.
+
+**Keeping the relay Metistry-only** *(ruled 2026-09-30)*. With end-to-end
+encryption and the owner in control of the Mac, nothing can **prove** that only
+Metistry is served at an owner's name — the relay never sees the content. The
+owner accepted that and approved four layers that make anything else
+impractical, visible and revocable:
+
+1. **Device-only addresses — the primary control (X-119).** Each phone paired by
+   Add a Phone gets its own unguessable label: `https://<label>.<id>.u.metistry.app`.
+   The Mac registers the label with the control plane; the relay forwards **only
+   registered, active labels** (by SNI — it still never decrypts); the bare
+   `<id>.u.metistry.app` and every unknown label are refused, so there is **no
+   public front door** to share. At most 10 labels per instance. **Remove** in
+   Settings ▸ Devices (§2.22) revokes the label at the relay as well as the
+   passkey. Knock-on effects, each part of X-119:
+   - **Certificate.** The Mac holds one wildcard, `*.<id>.u.metistry.app`. Its
+     DNS-01 challenge is still `_acme-challenge.<id>.u.metistry.app`, so the
+     helper's scope does not change — and Certificate Transparency logs show only
+     the wildcard, never a device's label.
+   - **DNS.** A global `*.u.metistry.app` wildcard stops matching
+     `<label>.<id>.u.metistry.app` whenever `_acme-challenge.<id>.u.metistry.app`
+     exists: the TXT record makes `<id>.u.metistry.app` an empty non-terminal, and
+     a wildcard is only synthesised below the closest existing name (RFC 4592).
+     So the control plane creates a **per-instance** `*.<id>.u.metistry.app`
+     record at registration and deletes it on revoke — which also makes a killed
+     instance NXDOMAIN. Route 53's per-zone record quota (10,000 by default,
+     adjustable) is the ceiling to watch (R-9).
+   - **Enrolment.** `metistry enroll` with the relay chosen mints the code
+     **and** registers a pending label first; the QR's URL is
+     `https://<label>.<id>.u.metistry.app/#enroll=<code>`; the label turns active
+     when the passkey is created, and is released if the code is cancelled or
+     expires unused. *Opened on your phone* (X-114) works unchanged.
+   - **Passkeys.** The rpID for every label host is **`<id>.u.metistry.app`**,
+     so one owner's passkey (synced by iCloud Keychain, say) works at any of the
+     owner's labels. This is allowed: WebAuthn requires the rpID to be a
+     registrable domain suffix of, or equal to, the origin's host, and HTML's
+     algorithm refuses a suffix only if it **is** a public suffix or sits inside
+     the host's public suffix. With **`u.metistry.app`** on the PSL,
+     `<id>.u.metistry.app` is a registrable domain, not a public suffix, and
+     `.<id>.u.metistry.app` does not fall inside `u.metistry.app` — so it passes
+     (checked 2026-09-30). It passes before the PSL entry lands, too (the
+     registrable domain is then `metistry.app`). **The PSL entry must be the
+     plain `u.metistry.app`, never the wildcard rule `*.u.metistry.app`** — that
+     would make every `<id>.u.metistry.app` a public suffix itself, break the
+     shared rpID, and push Let's Encrypt's limit down to each label. X-104's
+     per-request rpID therefore maps a relay label host to its instance's
+     `<id>.u.metistry.app`, not to the host itself.
+   - **Origins.** `METISTRY_ORIGIN` keeps the loopback origin; the relay's
+     allowed origins are the **registered labels**, read per request from the
+     console's label table (migration `0041`), so a label revoked on the Mac stops
+     passing the ceremony's origin check at once.
+   - **Isolation.** Each label is its own origin under `<id>.u.metistry.app`, so
+     cookies, storage and service workers are per device — fine for a phone that
+     only ever opens its own label.
+   - **What a label is not.** It travels in the clear in SNI (until ECH), so it
+     is a gate against strangers and link sharing, not a credential; the passkey
+     is still the door.
+2. **Behaviour limits at the relay, without decrypting (X-115).** Per instance:
+   distinct client IP addresses per day (about 15), concurrent connections, the
+   bandwidth allowance, and a **probation period** with tighter limits for a new
+   instance. The numbers come from the PoC.
+3. **A genuine-app gate (X-117, X-120).** The relay client ships in the signed
+   app and is **hard-wired to the console's proxy listener** (X-103) — there is
+   no setting that points it anywhere else. Registration can additionally require
+   **Apple App Attest** (X-120) — an extra layer, never a dependency, and only if
+   R-8 shows App Attest works for a Developer ID app outside the App Store.
+   Without it, "forks and source builds can't use the FSL relay" is a term of use,
+   not an enforcement — they can use every other provider.
+4. **The console's surface, and detection (X-111, X-116).** Through the proxy
+   listener, the routes that answer without a session are exactly the sign-in
+   and enrolment bootstrap — the PWA shell's static files, `GET /health`, `GET
+   /api/identity` and the four passkey ceremony routes — and **there are no public
+   share links**; a test enumerates both. FSL watches Certificate Transparency
+   for `*.u.metistry.app` issuance it did not expect, publishes an abuse contact
+   and relay **terms of use** (Metistry only), keeps the per-instance kill
+   switch, and relies on the PSL entry for isolation between owners.
+
+**In the product.** Provider id `relay`; `metistry remote set relay` registers,
+fetches the client pack, obtains the certificate through the helper, starts the
+tunnel and the TLS terminator as supervised jobs, and records the origin; the
+adapter's `status` adds rows for *registered*, *tunnel connected*, *certificate
+expiry* and **allowance** (`degraded` at 80%, `failed` at the cap, with the
+sentence above); `revoke` deletes the registration, the certificate and the
+jobs. The relay token lives in the Keychain. The Mac's TLS terminator and ACME
+client are the same ones port forwarding needs — so §2.23's ACME dependency
+question now gates both.
+
+**PoC first (X-115).** One $7 Lightsail box, two FSL instances behind it, a
+month: measure relayed bytes per owner, `GET /api/events` (SSE) held open
+through the relay, reconnect after the Mac sleeps, and the throttle's effect on
+the PWA. **Gate:** under 1 GB per owner per month at the 95th percentile, and
+SSE stable — or the owner revisits the cap before launch.
+
+**Acceptance.** An owner with no other account turns on Metistry Relay from the
+guided flow and reaches *Opened on your phone* on cellular; FSL's console
+cannot decrypt a captured session (only the Mac holds the key); a host at its
+cap is refused and the pane names the reset date; the global cap holds the
+month's bill at the bundle's price; a revoked or killed id gets no traffic; the
+bare `<id>.u.metistry.app` and an unregistered label are refused at the relay; a
+removed phone's label stops resolving to anything that answers; and through the
+proxy listener nothing but the sign-in and enrolment bootstrap answers without a
+session, with no public share links.
+
+**Open for the owner.** The PoC's relay component; the
+per-host cap, throttle and behaviour-limit numbers after the PoC; when to submit
+the PSL entry for `u.metistry.app` (X-118 — permanent); and whether to require
+App Attest at registration if R-8 shows it works.
+
 ---
 
 ## 3. Execution plan
@@ -1370,8 +2148,8 @@ reports branch, ahead/behind, last commit, last push, and any conflict.
 | **W1** Foundations | data, the first doors, the scheduler, per-instance secrets, the actor model, the Mac shell, live events, commits and sync; the W0 freeze fixes | 119.5 | week 3 |
 | **W2** The day | Needs You, Today, Chat, Activity; Scheduled routes and the day's routines; connections P1; Linear; file history and rollback | 128.5 | week 5 |
 | **W3** Work and agents | Knowledge, Agents, Scheduled, Board, Projects, Artifacts, Run detail, the Settings window; connections P2; ICS and CalDAV; sessions; PR reviews; the recorder | 105 | week 6½ |
-| **W4** Reach | connections P3, Google Calendar, IMAP, the remaining panes, the capture bar, the router wiring | 65 | week 7½ |
-| **W5** Acceptance | the owner's walkthrough, the doc sweep, the 1.0 decision | 1 | week 8 |
+| **W4** Reach | CI stability (X-24, X-29, X-31, X-32, X-41); connections P3, Google Calendar, IMAP, the remaining panes, the capture bar, the router wiring | 73 | week 7½ |
+| **W5** Acceptance | remote access's fixes, None and Tailscale; Add a Phone; the W4 follow-ups; doctor's grace, the complexity fixtures, the terminal readers; the owner's walkthrough, the doc sweep, the 1.0 decision | 69 | week 8 |
 
 **Waves are checkpoints, not start gates.** A ticket starts the moment its
 dependencies have merged; the wave says which release it lands in. The
@@ -1433,9 +2211,9 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W1 | T1-1, T1-2, T1-3, T1-6, T1-7, T1-8, T1-9, T1-11, T1-12, T1-14, T1-15 · T2-1, T2-2, T2-4 → T2-5, T2-6, T2-15, T2-16, T2-17, T2-18 · T3-1, T3-2, T3-4, T3-9 · T4-1 → T4-2, T4-3; T4-4, T4-5, T4-6, T4-20, T4-21 · T5-1, T5-2, T5-3 · T7-2 · T9-1 · T10-1 → T10-3, T10-2 · X-2, X-3, X-4, X-5 |
 | W2 | T1-10, T1-13 · T2-3, T2-7, T2-8, T2-9, T2-10, T2-11, T2-14 · T3-3, T3-5 → T3-6, T3-7, T3-12 · T4-7, T4-8a → T4-8b, T4-24; T4-18 · T5-4a, T5-4b, T5-5, T5-6, T5-7 · T6-1a, T6-1b, T6-2, T6-3 · T7-3a, T7-3b, T7-7 · T9-2 · T10-4 → T10-5, T10-6 |
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
-| W4 | T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
-| W5 | X-1 |
-| Candidates | X-24…X-74 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping) |
+| W4 | X-24, X-29, X-31, X-32, X-41 (CI stability, dispatched first — owner 2026-09-30) · T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
+| W5 | tranche 1 — X-103, X-104, X-111, X-88, X-80, X-85, X-102, X-101, X-87, X-75, X-76, X-78 · tranche 2 — X-105, X-112, X-106, X-77, X-79, X-114, X-107 · the W4 follow-ups — X-82, X-86, X-90, X-91, X-92, X-93, X-94, X-95, X-96, X-97, X-98, X-99, X-100; X-83, X-84 · ruled 2026-10-04 — X-121, X-122, X-126, X-127 · X-1 (the owner's go, 2026-10-18; not in W5: the routing work — the composer keeps its eval gate, and nothing from the Routr review is scheduled — nor the Relay, Cloudflare Tunnel, zrok, ngrok and port-forwarding adapters) |
+| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-81, X-89 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 and W4 housekeeping; five CI-stability candidates went to W4 on 2026-09-30, the other W4 follow-ups to W5 on 2026-10-18) · X-108…X-110, X-113, X-115…X-120 — remote access (§2.23, §2.24), ruled 2026-09-30; the fixes, None, Tailscale and the guided flow went to W5 with Add a Phone · X-123…X-125, X-128…X-134 — ruled 2026-10-04: doctor's repair contract, the derived `.env`, the briefing, connection folds and `connect` · X-135…X-162 — follow-ups found in W5 (2026-10-19): the Mac suite on macOS 27 and under load, a fresh install's migrations and a namespaced instance's ports, the shared-database suites, the briefing's edges, doctor's unbuilt rules, and the stamps |
 
 ### 3.3 The tickets
 
@@ -1857,6 +2635,8 @@ the head SHA shown; the mirror resolves when the review lands.
 client; the collector's PAT stays read-only**.
 *Accept:* the owner has stored `github_write` (§3.4).
 
+*Ruling 2026-10-04 (Q30):* GitHub's refusal of self-approval is accepted for now — the owner rarely approves agent-authored PRs — but whether co-authored commits or a GitHub account for agents fits better is sanity-checked before the question is closed.
+
 **T2-14 · Stale requests** · M · W2 · deps T1-8 —
 *Spec:* A subject fingerprint per type (PR head SHA, task line text, work row
 `updated_at`) checked on answer → `409 stale`, nothing sent.
@@ -1994,6 +2774,8 @@ example (ruled 2026-09-27).
 the area**.
 *Accept:* —
 
+*Ruling 2026-10-04 (Q2):* the owner's text is trusted: a routine's task, written by the owner, is not run through `checkBrief` — as built (#413).
+
 **T3-9 · Writing the session archive** · M · W1 · deps T1-11 —
 *Spec:* The engine appends each turn (system prompt as sent, messages, tool calls
 with arguments and results, redacted) with `expires_at` 30 days out; a purge
@@ -2017,6 +2799,8 @@ Approve writes it through the Scheduled door as `user`.
 *Files:* `routines/reply-review` pattern, `apps/console/src/`.
 *Tests:* **nothing is written before Approve**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q5):* a routine suggestion is raised by the assistant through a brain tool, not by a deterministic routine; Approve still writes through the Scheduled door as `user`. Nothing raises one yet — a follow-up, not yet a ticket.
 
 **T3-12 · Three strikes and a Stop limit** · M · W2 · deps T2-9 —
 *Spec:* A component failing three times stops and raises one request (C135); a
@@ -2133,6 +2917,8 @@ keeps refusing to set it (ruled 2026-09-27, the coordinator's call; §2.5).
 checked**.
 *Accept:* —
 
+*Ruling 2026-09-30 (Q10):* the console still builds no `ConnectionPool` (`apps/console/src/main.ts`, open since #374), so proxied connection tools answer `not_available` outside tests; wiring it is this ticket's first task.
+
 **T4-11 · Targets and syncs as connections** · L · W4 · deps T4-10 —
 *Spec:* Targets become Agent connections behind an adapter (dispatch unchanged);
 collectors become syncs bound to a connection and its secret; Devin's purposes
@@ -2170,6 +2956,10 @@ this app* while that is true.
 sent**; a bring-your-own client id overrides the shipped one.
 *Accept:* the maintainer's client exists and is published (§3.4).
 
+*Ruling 2026-09-30 (Q8):* Google gets its own OAuth door; there is no secret-in-URL door, and private ICS feeds stay out.
+
+*Ruling 2026-10-04 (Q-e):* Metistry may ship a Google Desktop OAuth client secret beside the shipped client id — Google may require it at token exchange even with PKCE. F-3's rule that a connection-type manifest carries no `client_secret` is revisited for the shipped client only, by the follow-up that ships it (not yet a ticket); a bring-your-own client's secret stays a secret (`--client-secret-secret`), never a config value.
+
 **T4-15 · Mail: IMAP** · L · W4 · deps T4-8a —
 *Spec:* §2.6 (§4 Q8): `imap` type with an app password: read, `draft` by APPEND to
 Drafts; no SMTP. A Gmail known-service entry explains the 2-Step Verification +
@@ -2191,6 +2981,8 @@ where none.
 `rsvp` capability**.
 *Accept:* —
 
+*Ruling 2026-10-04 (Q-a):* §2.12's excerpt stays and is built: a message card carries an excerpt of the body, not headers only. A follow-up, not yet a ticket.
+
 **T4-18 · Compute** · L · W2 · deps T4-1 —
 *Spec:* Providers gain `enabled` and `billing`; keys as secret references;
 `seed/model-identities.yaml`; catalogue search grouped by model with Refresh;
@@ -2209,6 +3001,8 @@ windows as limits.
 *Files:* `apps/console/src/compute-routes.ts`, `packages/core/src/budget.ts`.
 *Tests:* a subscription provider has no dollar limit.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q24):* an exhausted subscription window — a provider `429` — is reported to the owner, not retried blindly; the instance limit counting subscription calls is confirmed. The report is a follow-up, not yet a ticket.
 
 **T4-20 · Keep awake and the lid** · M · W1 · deps —
 *Spec:* §2.15: the object form beside the four values; `set-keep-awake` flags;
@@ -2409,6 +3203,8 @@ reason (C138). The ceiling reads `access_ceilings` on `GET /api/agents` (T2-2,
 definition editor is absent on a remote client**.
 *Accept:* as above.
 
+*Ruling 2026-10-04 (Q15):* Esc keeps the draft (C136 over screen 7); ⌘S and ⌘⌫ stay unbound, deferred; trust and per-run cost are served and drawn; Permissions Edit for connected agents only is confirmed. Trust and per-run cost are a follow-up, not yet a ticket.
+
 **T6-6 · Scheduled** · L · W3 · deps T3-3 —
 *Spec:* `screen-08-routines.md` §10–§11 + §2.5: day-banded occurrences with the
 *Throughout the day* band, the week axis, routine detail (schedule editor with
@@ -2418,6 +3214,8 @@ Default), syncs (cadence, raise toggles, Sync Now).
 *Tests:* a silent tick is not an occurrence; **the assignment editor calls the
 `local` route and is absent on a remote client**.
 *Accept:* as above.
+
+*Ruling 2026-10-04 (Q16):* a product routine's task, actor and name become editable through a door, as §10.2 draws them, and the doors are adjusted to the design — a follow-up, not yet a ticket.
 
 **T6-7 · Board and card detail** · L · W3 · deps T1-1, T1-2 —
 *Spec:* `screen-06-board.md`, `screen-14-card-detail.md`, `screen-16` §2: five
@@ -2488,6 +3286,8 @@ HTTP / Command / Path; *What it sends*; host guards; calendar and mail.
 *Tests:* a connection type loaded from an extension renders its form.
 *Accept:* as above.
 
+*Ruling 2026-10-04 (Q-h, Q-i):* the one manifest-validated `--config` flag and its refusals (unknown key, bad shape, secret kind) are confirmed, and the wider `types` payload (`description`, `provides`, `capabilities`, `tools`, per-field help; never a secret) is accepted.
+
 **T6-14 · Secrets and Variables** · M · W4 · deps T4-1, T4-4 —
 *Spec:* `screen-19-secrets-variables.md` + §2.14. A key-shaped value is refused
 with *Store as Secret* and **no** *Save as Variable* override — screen 19 §2 offers
@@ -2497,6 +3297,8 @@ one; the plan and T4-4 (#313) do not.
 what stops.
 *Accept:* as above.
 
+*Ruling 2026-10-04 (M7 reversed):* the app may mint. M7's "the app never mints" is reversed, so the Secrets pane may mint as well as rotate, through the CLI door (§2.2), and secrets and config are managed through the UI — the owner never mints, merges or cleans up by hand. The self-managing-instance design note (W5) rewrites §2.2's M7 row and says how; the pane follows it.
+
 **T6-15 · Live Capture and Sessions** · M · W4 · deps T8-4, T3-9 —
 *Spec:* `screen-11-capture-bar.md` §8, `screen-12` §4 + §2.15: the bar switch,
 placement, permissions read-through, retention, Purge Now with its count.
@@ -2504,12 +3306,16 @@ placement, permissions read-through, retention, Purge Now with its count.
 *Tests:* Purge Now lists unfolded sessions and offers *Fold First* (C136).
 *Accept:* as above.
 
+*Ruling 2026-10-04 (Q-f):* device-local preferences (`anyAppShortcuts`, `captureBar`) stay in `UserDefaults`; X-91 holds the store to its pointer and device-local sets.
+
 **T6-16 · Hot keys and the audit** · M · W4 · deps T5-2 —
 *Spec:* `components-02` §2 (C120, C127) and a pass over every view against §2.18.
 *Files:* `hotkeys.swift`, tests.
 *Tests:* nothing registers while any row conflicts; the audit's accessibility test
 covers every view.
 *Accept:* as above.
+
+*Ruling 2026-10-04 (Q-f):* device-local preferences (`anyAppShortcuts`, `captureBar`) stay in `UserDefaults`; X-91 holds the store to its pointer and device-local sets.
 
 #### T7 — The PWA
 
@@ -2553,6 +3359,8 @@ the 409; the *Can't reach Metistry* band.
 *Files:* `apps/console/web/sw.js`, `app.js`.
 *Tests:* **answers, moves, Run Now and grants are never queued**.
 *Accept:* as above.
+
+*Ruling 2026-10-04 (Q22):* Defer queues offline like Tick, and cached reads on a device revoked while offline are accepted until its next `401`. The offline Defer is a follow-up, not yet a ticket.
 
 **T7-5 · Push and enrolment** · M · W3 · deps —
 *Spec:* screen 18 §6: no `alert()`; ask in context; the install sheet.
@@ -2603,12 +3411,16 @@ and usage strings copied from `ek-helper`; the launchd job and doctor row.
 *Tests:* a crash saves up to the crash and raises one report.
 *Accept:* the owner grants the permissions and records a real meeting (§3.4).
 
+*Ruling 2026-10-04 (Q-d):* a capture request's row carries a reference to the note, not the transcript's text — a follow-up, not yet a ticket.
+
 **T8-3 · Screen and window** · L · W4 · deps T8-2a —
 *Spec:* §2.15, C76: `SCStream` with `capturesAudio` and `captureMicrophone`, one
 filter-construction path, the display glyph on the rail.
 *Files:* `packages/mcp-live-capture/helper/`.
 *Tests:* the picker's choice is the only filter the helper builds.
 *Accept:* —
+
+*Ruling 2026-09-30 (Q28):* the #253 "no capture UI" hold is lifted; this ticket proceeds in W4.
 
 **T8-4 · Retention and re-review** · M · W4 · deps T8-2b, F-6 —
 *Spec:* §2.15: migration 0033; the purge after ingestion + 7 days (never over 30);
@@ -2619,6 +3431,8 @@ filter-construction path, the display glyph on the rail.
 when the audio was deleted**.
 *Accept:* —
 
+*Ruling 2026-09-30 (Q29):* transcripts live in `Journal/Transcripts/`, not `Inbox/`; retention and re-review read from there (X-73 is the move).
+
 **T8-5 · The bar** · L · W4 · deps T8-2a, T5-5 —
 *Spec:* `screen-11-capture-bar.md` §2–§7: the rail, glass at the measured floors,
 the one breath, Note and To-do with session anchors, Ask as the conversation's
@@ -2626,6 +3440,8 @@ tail at 328px with *Open in Chat*, the record sheet.
 *Files:* `capture-bar-panel.swift`.
 *Tests:* §2.18; the breath holds still under Reduce Motion.
 *Accept:* as T6's.
+
+*Ruling 2026-09-30 (Q28):* the #253 "no capture UI" hold is lifted; this ticket proceeds in W4.
 
 **T8-6 · The private tier** · M · W3 · deps T4-18 —
 *Spec:* §2.15: `metistry compute assign private` refuses an off-machine provider;
@@ -2640,6 +3456,8 @@ turns in a capture session run on it.
 *Files:* `apps/console/src/`, `collectors/inbox-drain`.
 *Tests:* Accept All keeps every receipt.
 *Accept:* —
+
+*Ruling 2026-09-30 (Q29):* transcripts live in `Journal/Transcripts/`; anchors point there.
 
 #### T9 — The dynamic router
 
@@ -2681,6 +3499,8 @@ accepted (§4 Q2).
 `collectors/test/invariant4.test.ts` (its "composer door is not wired" block retires).
 *Tests:* the invariant tests follow the ratified wording.
 *Accept:* not merged before T9-3's report clears the bar.
+
+*Ruling 2026-10-04 (Q-g):* run `metistry-eval complexity`, then accept. The owner has no time to author the 150-plus fixtures and C11 forbids Claude-authored labels, so they come from X-121's generator, spot-checked by the owner (an OpenRouter key at run time); the gate is otherwise unchanged.
 
 #### T10 — Vault git
 
@@ -2748,6 +3568,8 @@ conflict, Roll Back…); a Knowledge page gains its history with *Restore*.
 *Tests:* §2.18; Roll Back names what it will undo.
 *Accept:* as T6's; Knowledge shows a restore request inline — answering it there
 answers it in Needs You (moved from T10-5, W2 housekeeping).
+
+*Ruling 2026-10-04 (Q19):* commits from before a rename stay view-only; restore across renames is not built.
 
 #### X — Fixes found at the W0 freeze
 
@@ -2954,7 +3776,7 @@ What the W3 builders and reviewers reported outside their tickets (PRs
 ticket that waits on one of the owner's open W3 questions says so by number.
 Each is its own PR, outside any track's files.
 
-**X-24 · Plan-tomorrow's test runs on its own clock** · S · deps X-15 —
+**X-24 · Plan-tomorrow's test runs on its own clock** · S · W4 · deps X-15 —
 *Spec:* `routines/test/plan-tomorrow.integration.test.ts` writes real `now()`
 into `runs` while asserting against a fixed clock, so "two closes re-render, the
 23:00 run supersedes them" fails by time of day — the most frequent W3 flake
@@ -3003,7 +3825,7 @@ PRs. Find the race and remove it; the behaviour it pins stays.
 *Tests:* **the test passes 50 runs in a row**.
 *Accept:* —
 
-**X-29 · Main's Mac fixtures match the recorder** · M —
+**X-29 · Main's Mac fixtures match the recorder** · M · W4 —
 *Spec:* main's fixtures predate the recorder's current seed (it seeds seven
 syncs plus standup and session-fold runs; `get-api-scheduled` has four), so any
 full re-record breaks `macos-app`. Re-record every fixture on main in one PR and
@@ -3026,7 +3848,7 @@ reason — are also compared by value, clocks and ids aside.
 timestamp does not**.
 *Accept:* —
 
-**X-31 · The recorder's seeds are pinned to its clock** · S —
+**X-31 · The recorder's seeds are pinned to its clock** · S · W4 —
 *Spec:* three sources of drift between recordings: raw proposal `INSERT`s use
 Postgres `now()`, not `RECORDING_NOW`; the seeded crew call lands on the
 recording day, so a re-record on the 1st changes the daily spend; and
@@ -3038,7 +3860,7 @@ the export fixture selects its seeded ids.
 database, produce identical fixtures**.
 *Accept:* —
 
-**X-32 · A push carries Needs You only, and no text** · M —
+**X-32 · A push carries Needs You only, and no text** · M · W4 —
 *Spec:* `apps/console/src/push.ts`'s `startNotifier` pushes every
 `outbound_messages` row — 160 characters of its text, url `/`, no type. Screen 18
 §6: only Needs You items push, the payload is type, title and the card's deep
@@ -3120,7 +3942,7 @@ upstream's text or an argument.
 only**.
 *Accept:* —
 
-**X-41 · An owner-door secret refuses a connection or agent grant** · S · deps T2-13 —
+**X-41 · An owner-door secret refuses a connection or agent grant** · S · W4 · deps T2-13 —
 *Spec:* `metistry secrets grant github_write connection:*` (or `agent:*`) is
 refused only by convention, and `docs/ops/cli.md` even documents it as valid. A
 secret an owner door holds refuses any `connection:` or `agent:` grantee at the
@@ -3142,6 +3964,8 @@ it.
 `apps/console/src/github-write.ts`, `docs/ops/cli.md`.
 *Tests:* **a door reads only a secret granted to it**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q9):* yes — an owner door is a grantee kind; build as specified.
 
 **X-43 · `private` is a reserved tier name** · S · deps T8-6 —
 *Spec:* a `rules.yaml` tier named `private` parses but is shadowed by T8-6's
@@ -3177,6 +4001,8 @@ no stored secret can collide with ordinary text (the owner's W3 question 27).
 *Tests:* **a too-short secret is refused at set, and redaction still finds every
 stored secret**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q27):* the owner ruled the other way, and this supersedes the title and spec above: short values, even empty ones, are allowed at `secrets set`. The redactor skips a value below a minimum length instead, so a short secret is never refused as `secret_in_model_body` — and is not redacted, the trade the owner accepted. *Tests:* **a one-character secret is stored and a model body containing it is not refused; every secret at or above the minimum is still found**.
 
 **X-46 · A provider refusal is one request per secret** · S · deps T4-23 —
 *Spec:* `apps/assistant/src/provider-refusal.ts` raises one Needs You request
@@ -3217,6 +4043,8 @@ which.
 *Tests:* the ratchet, with at least 300 tokens of headroom.
 *Accept:* —
 
+*Ruling 2026-10-04 (Q26):* lazy discovery, not a raised ceiling — with the Context Mode review's caveat (CM-7, `docs/research/2026-10-04-context-mode-review.md` §5.1): a client that already defers MCP tools must not pay two discovery hops, so the ratchet records what each connected client pays and the brain leans on a client's own deferral where it exists. *Tests* add: **no client pays two discovery turns to reach one brain tool**.
+
 **X-50 · Session-purge is quiet while the Session Fold is paused** · S · deps T3-10 —
 *Spec:* `routines/session-purge/run.ts` warns every night that sessions wait
 for the fold while the owner has paused the Session Fold. While it is paused,
@@ -3236,6 +4064,8 @@ ruled, the routine fills its slots in that file instead of skipping.
 `routines/standup/run.ts`.
 *Tests:* **an assistant-created dated file is not reported `user_owned`**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q6):* fill in the slots — when the assistant has created the day's file, the routine fills its marked slots in it instead of skipping the day, and the outcome is no longer `user_owned`.
 
 **X-52 · The weekly review counts only the owner's decisions** · S —
 *Spec:* `routines/weekly-review/run.ts` counts automatic decisions (the policy's,
@@ -3269,6 +4099,8 @@ organiser named, or moved with the attendees told — at the tool.
 *Files:* `apps/console/src/meeting-move-route.ts`.
 *Tests:* **a meeting organised by someone else is handled as ruled**.
 *Accept:* —
+
+*Ruling 2026-10-04 (Q12):* moved, if the attendee may edit the event — "some calendar events cannot be edited by attendees". The door moves a meeting someone else organised only where the calendar lets the owner edit it, and refuses with the organiser named where it does not.
 
 **X-56 · An iCloud CalDAV account needs no second step** · M · deps T4-13 —
 *Spec:* after the first sync, iCloud's per-account `pNN-caldav` host needs two
@@ -3342,6 +4174,8 @@ only**.
 *Tests:* **Slipping and Owed load their `where:` filter**.
 *Accept:* —
 
+*Ruling 2026-10-04 (Q20):* Owed tracks both directions — what the owner owes others and what others owe the owner — each with how long it has waited or when it is due; SavedTaskView and the `where:` views accommodate that design.
+
 **X-64 · The Mac's receipt knows "acknowledged"** · S · deps X-10 —
 *Spec:* a `409 already_decided` receipt words the earlier decision, but has no
 word for X-10's `acknowledged`.
@@ -3357,6 +4191,8 @@ Mac shows none.
 *Files:* `seed/queries/collector_health.yaml`, `docs/ops/client-api.md`.
 *Tests:* U2; the fixture.
 *Accept:* F-7's fixture recorded, and the Mac store method in the same PR.
+
+*Ruling 2026-10-04 (Q14):* the owner left the door to the coordinator ("make a reasonable choice for where that should live"); the builder proposes it in the PR.
 
 **X-66 · Run detail carries its route and a routine run's session** · M · deps T6-10 —
 *Spec:* `run_detail` does not join a turn's `kind: route` row, so Run detail
@@ -3434,12 +4270,1420 @@ refused**.
 *Tests:* **a finished session's transcript lands in the ruled folder**.
 *Accept:* —
 
+*Ruling 2026-09-30 (Q29):* the folder is `Journal/Transcripts/`; this ticket is the move from `Inbox/`.
+
 **X-74 · CI's Swift-helper filter is anchored** · S —
 *Spec:* #417's path filter `.*Package\.swift$` is unanchored, so any
 `Package.swift` anywhere runs the helper tests. It names
 `packages/*/Package.swift`.
 *Files:* `.github/workflows/ci.yml`.
 *Tests:* as spec.
+*Accept:* —
+
+#### X — Follow-ups found in W4
+
+What the W4 builders and reviewers reported outside their tickets (PRs
+#460–#482; `docs/product/decisions-log.md`, *W4*). Most went to W5 on
+2026-10-18 (§3.2); the rest stay in §3.2's *Candidates* row until the owner
+schedules them at a checkpoint. A ticket that waits on one of the owner's W4
+questions names it by letter (Q-a…Q-i; ruled 2026-10-04). Each is its own PR,
+outside any track's files. X-75…X-79 are the owner's, in #456.
+
+**X-80 · `metistry up` mints the recorder's control token** · S · W5 · deps T8-5 —
+*Spec:* an install that configures the recorder still mints
+`METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` by hand (`metistry secrets mint`), the
+one owner-hand step the 0.16.0 morning report could not remove. `up` mints it
+when the live-capture bridge is configured and none exists — the way it already
+mints the supervisor's control token (`packages/cli/src/up.ts`,
+`mintControlToken`) — into the login Keychain item the bar reads
+(`metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`), and never replaces one that
+is there.
+*Files:* `packages/cli/src/up.ts`, `packages/cli/src/secrets.ts`,
+`docs/ops/cli.md`.
+*Tests:* **`up` with the recorder configured and no token mints one; a second
+`up` keeps it; `up` without the recorder mints nothing**.
+*Accept:* —
+
+*Ruling 2026-10-04 (M7 reversed):* widened. `up` — and `secrets mint` — mint all three of the recorder's tokens when the live-capture bridge is configured and one is missing: the control token (`METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`), the bridge token (`METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE`) and the capture owner token the bridge posts transcripts with (`METISTRY_LIVE_CAPTURE_INBOX_TOKEN`, an `owner_tokens` row labelled `live-capture`, minted as auth-store's `mintOwnerToken` mints one). The release ships no other way to mint an owner token: `docs/ops/capture-shortcut.md` uses the console's `scripts/enroll.mjs --owner-token`, which the runtime pack does not carry (`ops/release/pack-runtime.sh`). None replaces a token that is there, and the three stay distinct. *Tests* widen to all three.
+
+**X-81 · Kept recordings have a list route** · S · deps T6-15, T8-4 —
+*Spec:* the Mac lists recordings through `GET /api/knowledge/pages?prefix=Journal/Transcripts`
+and then reads each page by id (`live-capture-model.swift`, capped at 100), so
+the Sessions pane costs one request per recording and stops at the cap. One
+route — the live-capture bridge's or the console's, the owner's call — serves
+the kept recordings with their retention state, and the Mac reads that.
+*Files:* `apps/console/src/`, `seed/queries/`, `docs/ops/client-api.md`,
+`apps/macos/sources/kit/live-capture-model.swift`.
+*Tests:* U2; **a hundred and one kept recordings list in one call**.
+*Accept:* F-7's fixture recorded, and the Mac store method in the same PR.
+
+**X-82 · The Mac's meeting group decodes `group_id`** · S · W5 · deps T8-7 —
+*Spec:* T8-7 serves `group_id` on `GET /api/proposals`, but
+`apps/macos/sources/kit/request-bodies/meeting-group.swift` still groups a
+meeting's rows by what the list says; it decodes `group_id` and Needs You shows
+a recording's rows as one card.
+*Files:* `apps/macos/sources/kit/request-bodies/meeting-group.swift`,
+`apps/macos/sources/kit/request-bodies/request-shape.swift`.
+*Tests:* **two proposals sharing a `group_id` are one card; a null group is one
+card each**.
+*Accept:* —
+
+**X-83 · The activity feed's capture subject reads the title only** · S · W5 · deps T8-6 —
+*Spec:* waits on the owner's W4 question Q-c. `seed/queries/activity_feed.yaml`'s
+capture branch derives `subject` from the note body's first line, so a
+transcript's first spoken line is servable through `queries_run` on any tier,
+unlike `recording_review`, which the assistant cannot reach. The subject comes
+from the path (the title) alone, or the branch is gated to the private tier —
+whichever Q-c rules.
+*Files:* `seed/queries/activity_feed.yaml`.
+*Tests:* **a capture whose note begins with a spoken line shows its file name
+as the subject, and no line of the note reaches the feed**.
+*Accept:* —
+
+*Ruling 2026-10-04 (Q-c):* "take it from the subject only" — "subject" read as the question's title-only option: the subject comes from the title alone; no tier gate.
+
+**X-84 · `POST /message` carries a session-turn marker** · M · W5 · deps T8-6, T6-15 —
+*Spec:* waits on the owner's W4 question Q-b. Screen 11 §4 ("staying on this
+Mac") wants an Ask-panel turn inside a capture session held to the private
+tier, but `POST /message` has no field that says the turn belongs to a
+session, so `turnTier()` cannot see it. The route takes a session marker,
+checked against the open capture session, and the turn resolves its tier
+through `turnTier()` as a capture-session turn does — refusing, never falling
+back (T8-6).
+*Files:* `apps/console/src/server.ts`, `apps/console/src/router.ts`,
+`packages/core/src/client-api.ts`, `docs/ops/client-api.md`,
+`apps/macos/sources/kit/live-capture-model.swift`.
+*Tests:* **a marked turn with the private tier unavailable answers
+`PrivateTierUnavailable`; an unmarked turn is routed as before; a marker
+naming a session that is not open is refused**.
+*Accept:* —
+
+*Ruling 2026-10-04 (Q-b):* add the field, as specified.
+
+**X-85 · The targets shim comes out** · S · W5 · deps T4-11 —
+*Spec:* T4-11 kept `METISTRY_GITHUB_TOKEN`, `METISTRY_DEVIN_API_KEY` and the
+`targets/` manifests loading for one release, only where no connection of the
+name exists (`apps/console/src/dispatch.ts`, `apps/console/src/main.ts`,
+`packages/cli/src/secrets.ts`). The release after 0.16.0 removes the shim:
+the env keys are ignored with a doctor row naming `connections add`, and a
+`targets/` manifest other than `local-crew` is refused at load.
+*Files:* `apps/console/src/dispatch.ts`, `apps/console/src/main.ts`,
+`packages/cli/src/secrets.ts`, `packages/cli/src/doctor.ts`, `docs/ops/cli.md`.
+*Tests:* **an env key alone dispatches nothing and doctor names the verb;
+`local-crew` still loads**.
+*Accept:* the 0.17.0 release notes name the removal.
+
+**X-86 · The Mac's Secrets pane hides Grant for an owner-door secret** · S · W5 · deps X-41, T6-14 —
+*Spec:* X-41 makes the server refuse a connection or agent grant on an
+owner-door secret (`github_write`), but `secrets-view.swift` still draws the
+Grant row for it, so the owner is offered a control that can only fail. The
+pane reads the secret's kind and shows the owner-door sentence instead.
+*Files:* `apps/macos/sources/kit/secrets-view.swift`,
+`apps/macos/sources/kit/secrets-model.swift`.
+*Tests:* **an owner-door secret has no Grant row and says why; an ordinary
+secret keeps its rows**.
+*Accept:* —
+
+**X-87 · The calendar collectors export `check()`** · M · W5 · deps T4-14 —
+*Spec:* CLAUDE.md says every collector exports `check()` so `metistry doctor`
+is generic; `collectors/google-calendar`, `ics-calendar`, `caldav-calendar`
+and `eventkit-calendar` export none (the Devin collectors do). Each reports
+its connection's reachability and credential state the way
+`collectors/devin-sessions/run.ts` does, and doctor shows the row.
+*Files:* `collectors/google-calendar/run.ts`, `collectors/ics-calendar/run.ts`,
+`collectors/caldav-calendar/run.ts`, `collectors/eventkit-calendar/run.ts`,
+`ops/scripts/` (the manifest check, if it does not already require `check()`).
+*Tests:* **every collector manifest's entry exports `check()`, held by one CI
+check**.
+*Accept:* —
+
+*Coordinator call 2026-10-18:* widened to M — every collector (not only the four calendar ones) gains a cheap, local-first `check()`; doctor's `walkManifests` calls it and merges the result into the existing per-collector row; one strict CI check with no allowlist. Reason: CLAUDE.md's convention was never wired, and doctor cannot repair what it cannot check.
+
+**X-88 · The workspace test script isolates each package's database** · M · W5 —
+*Spec:* the root `pnpm test` runs `pnpm -r --workspace-concurrency=1 run test`
+against one scratch database; a `--no-file-parallelism` passed to it never
+reaches vitest, so every package's DB-backed suites share rows — the root
+cause of the cross-suite flakes W4 saw again (morning-brief, tasks
+`external_ref`, reply-review's FK, linear-order, push-needs-you). The
+workspace script gives each package its own scratch database
+(`recreateScratchDb` with the package name as suffix) and drops it after.
+X-25's per-suite ownership stays worthwhile; this removes the shared row space
+they collide in.
+*Files:* `package.json`, `ops/scripts/test-db.sh`,
+`packages/core/src/test-env.ts`, `docs/ops/testing.md`.
+*Tests:* **two packages' DB suites run at once against different databases;
+ten consecutive `pnpm test` runs pass**.
+*Accept:* —
+
+**X-89 · A request raised while the console is down still pushes** · S · deps X-32 —
+*Spec:* `needsYouNotifier` (`apps/console/src/push.ts`) learns the queue on its
+first pass, so a request raised while the console was down is "already
+waiting" at startup and never pushes. Migration: `proposals.notified_at`
+(additive, nullable); the notifier pushes every showing row with a null
+`notified_at` and stamps it, so a restart pushes what arrived meanwhile,
+once.
+*Files:* `apps/console/src/push.ts`, `apps/console/migrations/`,
+`docs/ops/client-api.md`.
+*Tests:* **a pending row with null `notified_at` pushes on the first pass and
+not the second; a row stamped before the restart does not push again**.
+*Accept:* U4's rollback note.
+
+**X-90 · The hot-key and accessibility audits see what they miss** · S · W5 · deps T6-16 —
+*Spec:* T6-16's hot-key audit (`apps/macos/tests/kit/hotkeys-tests.swift`,
+`bindingCalls`) matches the SwiftUI binding calls and misses a raw
+`keyDown(with:)` override, so an AppKit view can bind a key the audit never
+sees. The accessibility audit's view regex
+(`accessibility-audit-tests.swift:267`) is anchored at line start, so a `View`
+struct nested in another type escapes coverage. Both audits find those, and a
+fixture of each shape fails them.
+*Files:* `apps/macos/tests/kit/hotkeys-tests.swift`,
+`apps/macos/tests/kit/accessibility-audit-tests.swift`.
+*Tests:* **a `keyDown(with:)` override is a binding; a nested `View` struct is
+audited**.
+*Accept:* —
+
+**X-91 · The three-pointers test tolerates the device-local keys** · S · W5 · deps T6-16, T6-15 —
+*Spec:* waits on the owner's W4 question Q-f. `theAppPersistsThreePointersAndNothingElse`
+(`settings-model-tests.swift`) enumerates the exact `UserDefaults` keys, so
+T6-16's `anyAppShortcuts` and T6-15's `captureBar` had to be listed by hand;
+the next device-local key breaks it again. `AppPreference` names which keys are
+pointers and which are device-local, and the test holds the store to that
+enumeration rather than to a literal list.
+*Files:* `apps/macos/sources/kit/app-preferences.swift`,
+`apps/macos/tests/kit/settings-model-tests.swift`.
+*Tests:* **a key outside both sets fails; a device-local key passes**.
+*Accept:* —
+
+*Ruling 2026-10-04 (Q-f):* `UserDefaults` is the store; build as specified.
+
+**X-92 · Dispatch's `REPO_RE` has a misuse test** · S · W5 · deps T4-11 —
+*Spec:* `apps/console/src/dispatch.ts`'s `REPO_RE` refuses `../x` and `x/..`
+for a connection's `config.repo`, but no test holds it, so a loosened pattern
+would pass CI. The misuse test names each shape it refuses (`../x`, `x/..`,
+`./x`, an absolute path, a third segment) and each it accepts.
+*Files:* `apps/console/test/dispatch.test.ts`.
+*Tests:* as spec, **bold: `../x` is refused**.
+*Accept:* —
+
+**X-93 · `socketDestination` keeps IMAP's port** · S · W5 · deps T4-15 —
+*Spec:* `packages/core/src/egress.ts`'s `socketDestination` collapses port 443
+to the bare host, an HTTPS convention; `packages/connections/src/describe.ts`
+calls it for an IMAP host too, so an IMAP server on 443 would be described as
+the host alone and could match an HTTPS allowlist entry. The collapse applies
+to HTTPS only; a socket destination always carries its port.
+*Files:* `packages/core/src/egress.ts`, `packages/connections/src/describe.ts`.
+*Tests:* **an IMAP destination on 443 keeps `:443`; an HTTPS one still
+collapses**.
+*Accept:* —
+
+**X-94 · The wizard's copy templates the configured name** · S · W5 · deps T6-12 —
+*Spec:* `apps/macos/sources/kit/wizard-step-views.swift` and
+`wizard-model.swift` say "the assistant" in copy the owner reads, where the
+rest of the app says the configured name (`identity.yaml`). The wizard reads
+the name once it is known and uses the generic word only before it is.
+*Files:* `apps/macos/sources/kit/wizard-step-views.swift`,
+`apps/macos/sources/kit/wizard-model.swift`.
+*Tests:* **with a name configured, no wizard string contains "the assistant"**.
+*Accept:* —
+
+**X-95 · The Mac's loopback set matches core's** · S · W5 · deps T6-13a —
+*Spec:* `apps/macos/sources/kit/connections-model.swift:314` hand-lists the
+loopback hosts (`localhost`, `127.0.0.1`, `::1`, `[::1]`, …) that core's
+`isLoopbackHost` (`packages/core/src/egress.ts`) decides; the two can drift.
+The Swift set is held to core's by a test that reads core's cases, as the
+"held to core" tests do (X-100).
+*Files:* `apps/macos/sources/kit/connections-model.swift`,
+`apps/macos/tests/kit/connections-view-tests.swift`.
+*Tests:* **every host core calls loopback the Mac calls loopback, and no other**.
+*Accept:* —
+
+**X-96 · A connection's detail says who uses it and when it was checked** · S · W5 · deps T6-13a —
+*Spec:* `GET /api/connections`' `used_by` (`packages/connections/src/describe.ts`,
+`usersOf`) lists syncs only, so an agent or routine granted the connection is
+not shown; `last checked` is not served; and a connection with a header per
+secret shows one. The detail serves every user kind, the last check's time and
+verdict, and each header's secret name.
+*Files:* `packages/connections/src/describe.ts`, `apps/console/src/`,
+`docs/ops/client-api.md`, `apps/macos/sources/kit/connections-model.swift`.
+*Tests:* **an agent granted a connection appears in `used_by`; a check stamps
+`last_checked`; two headers list two secret names**.
+*Accept:* F-7's fixture re-recorded, and the Mac reads the new fields.
+
+**X-97 · Variables: when it was set, the preview an agent sees, and a key's expiry** · S · W5 · deps T6-14 —
+*Spec:* T6-14's leftovers. The Variables pane shows no *set* time; there is no
+preview of a value as an agent sees it after templating; and a provider key's
+expiry, where the provider says one, is not surfaced in Secrets. Each is a
+served field or a read of one — no new route.
+*Files:* `apps/macos/sources/kit/variables-view.swift`,
+`apps/macos/sources/kit/variables-model.swift`,
+`apps/macos/sources/kit/secrets-view.swift`, `docs/ops/client-api.md`.
+*Tests:* **a variable shows when it was set; the preview renders the template;
+a key with an expiry shows it**.
+*Accept:* —
+
+**X-98 · Agents and Compute: the model line, the key note and the download** · S · W5 · deps T6-12, T6-5 —
+*Spec:* three small gaps. `agents-model.swift`'s dropdown labels a model
+`model — provider` while Compute writes `provider/model` everywhere else
+(T6-12's one-way rule); the wizard's `keyNote` (`compute-step.swift`) still
+describes the pre-T4-18 key path; and Compute shows no model size and offers
+no cancel while a model downloads.
+*Files:* `apps/macos/sources/kit/agents-model.swift`,
+`apps/macos/sources/kit/compute-step.swift`,
+`apps/macos/sources/kit/compute-view.swift`.
+*Tests:* **the dropdown's label is the one line T6-12 holds; a download shows
+its size and can be cancelled**.
+*Accept:* —
+
+**X-99 · The phone's writable rows have controls** · S · W5 · deps T7-6 —
+*Spec:* T7-6 leaves rows the phone may change without a control: the
+assistant's model and effort, and Scheduled's pause. Each goes through the
+console route the Mac already uses; nothing that widens the boundary is
+offered (§2.3).
+*Files:* `apps/console/web/`.
+*Tests:* **the phone changes the model and pauses a routine through the
+existing routes; no Secrets or provider control is drawn**.
+*Accept:* —
+
+**X-100 · The "held to core" Swift tests cannot drift** · S · W5 · deps T6-14, T6-5 —
+*Spec:* `autonomyWideningsSaysWhatCoreSays` (`agents-view-tests.swift`) and
+`theKeyShapeCheckIsCoresPatternForPattern` (`secrets-variables-tests.swift`)
+hold Swift to core by hand-copied cases, so a change in core passes until
+someone recopies. The cases are generated from core's tests into a fixture
+the Swift tests read, or pinned by a CI check that diffs the two.
+*Files:* `apps/macos/tests/kit/agents-view-tests.swift`,
+`apps/macos/tests/kit/secrets-variables-tests.swift`, `ops/scripts/`.
+*Tests:* **a changed core case fails CI before the Swift copy is updated**.
+*Accept:* —
+
+**X-101 · Bare `metistry doctor` resolves the product directory it runs from** · S · W5 —
+*Spec:* `resolveProductDir` (`packages/cli/src/env.ts`) falls back to the
+checkout above the package, so a bare `metistry doctor` from an installed CLI
+beside a development checkout reads that checkout's manifests, not the
+release's. Without `--product-dir` or `METISTRY_PRODUCT_DIR`, doctor resolves
+the release the instance runs and says which it read.
+*Files:* `packages/cli/src/env.ts`, `packages/cli/src/doctor.ts`,
+`docs/ops/cli.md`.
+*Tests:* **doctor beside a checkout names the release's product dir, not the
+checkout's**.
+*Accept:* —
+
+**X-102 · The recorder leaves no fixed-id rows behind** · S · W5 · deps X-31 —
+*Spec:* `apps/console/scripts/record-client-fixtures.mjs` inserts rows with
+fixed ids (`work` 41 and 42, `external_ref` `linear:ENG-42`), so a second run
+on the same scratch database — `--check` after a record — collides on them.
+The recorder recreates its database (`recreateScratchDb`) or resets those rows
+before it seeds.
+*Files:* `apps/console/scripts/record-client-fixtures.mjs`.
+*Tests:* **two consecutive runs on one database both pass**.
+*Accept:* —
+
+#### X — Add a Phone (ruled 2026-09-28)
+
+The metistry.ai Download page promises Settings ▸ Devices ▸ Add a Phone, a QR code,
+and a passkey the owner can remove; the owner ruled to build it rather than cut it
+from the site. **Every ticket here builds §2.22** — read it whole; it holds the
+refusal wording, the sheet's states and the acceptance. All five are in W5
+(§3.2, 2026-10-18). Reaching the Mac from
+outside the home is **not** here: it is §2.23–§2.24 and X-103…X-120, below.
+
+**X-75 · `metistry enroll` — an enrolment code minted on this Mac** · M · W5 —
+*Spec:* §2.22 *Minting* and *When `METISTRY_ORIGIN` is not reachable*: the M19
+verb in `packages/cli`, calling `auth-store`'s `mintEnrollmentCode` exactly as
+`apps/console/scripts/enroll.mjs` does; `--json` (`{url, code_id, origin,
+expires_at}`, one document, U7's rule); `--cancel <code_id>`; the four refusals,
+checked before anything is minted, each naming `METISTRY_ORIGIN` and the fix.
+`enroll.mjs`'s enrolment path calls the same function. **No console route**.
+*Files:* `packages/cli/src/` (a new `enroll.ts`, `main.ts`), `apps/console/src/auth-store.ts`
+(a cancel function), `apps/console/scripts/enroll.mjs`, `docs/ops/cli.md` (the verb;
+drop it from "Not yet"), `docs/ops/auth.md`.
+*Tests:* **a loopback, an `http:` and an IP-literal origin are each refused and
+write no `auth_enrollment_codes` row; a code is refused after one use, after 10
+minutes, and after `--cancel`; the console's route table has no route that mints
+a code**; `--json` writes exactly one document.
+*Accept:* `metistry enroll` on the owner's second instance prints a URL that enrols
+a real iPhone.
+
+**X-76 · Removing a device revokes its passkey** · M · W5 —
+*Spec:* §2.22 *Devices*: migration `0038` (`passkeys.revoked_at`, §2.9);
+`getPasskey` refuses a revoked passkey with the uniform 401; `POST
+/api/devices/:id/revoke` revokes the session's passkey and every session under it,
+dropping their push subscriptions; `GET /api/devices` serves a device per passkey
+(label, added, last seen, `this_device`, its sessions) — an additive change to the
+body, recorded in `client-api.md`. Sign Out Everywhere stays sessions-only.
+*Files:* `db/migrations/0038_passkey_revocation.sql`, `apps/console/src/auth-store.ts`,
+`apps/console/src/server.ts`, `docs/ops/client-api.md`, `docs/ops/auth.md`.
+*Tests:* U2; **a removed device's passkey cannot sign in again and its push
+subscription is gone; a revoked passkey's login is indistinguishable from an
+unknown one's; Sign Out Everywhere leaves passkeys valid**.
+*Accept:* F-7's devices fixture re-recorded.
+
+**X-77 · Settings ▸ Devices and the Add a Phone sheet** · L · W5 · deps X-75, X-76 —
+*Spec:* §2.22 *Entry point*, *The QR code* and *The sheet*: a **Devices** pane in
+ACCESS (the list, Remove with its confirm, Sign Out Everywhere moved from Account);
+**Add a Phone…** opens the sheet — Checking, Refused, Ready, Expired, Added — driving
+`metistry enroll --json` and `--cancel` over the CLI transport; the QR from CoreImage
+`CIQRCodeGenerator` (no dependency); *Added* from `GET /api/devices` on live events.
+The app menu's *Set up…* and wizard step 6 open the same sheet; step 6 stops
+showing the `enroll.mjs` command.
+*Files:* `apps/macos/sources/kit/settings-model.swift`, a new
+`apps/macos/sources/kit/devices-pane.swift` and `add-phone-sheet.swift`,
+`apps/macos/sources/kit/wizard-step-views.swift`, `docs/ops/mac-app.md` (drop the
+two "Not yet" rows), `docs/product/design/screen-15-settings.md` §1 (the ACCESS
+group gains Devices).
+*Tests:* **the sheet never draws a QR for a refused origin; closing it in any state
+cancels a live code**; the QR decodes (`CIDetector`) to exactly the verb's URL; the
+countdown reaches Expired on an injected clock.
+*Accept:* U9 — VoiceOver reads the QR's label and the URL; the pane at the
+largest text size.
+
+**X-78 · The phone's half: enrol, install, sign in** · M · W5 —
+*Spec:* §2.22 *The phone, in order*: the PWA removes `#enroll=` from the URL once
+read; after a successful enrolment in a browser that is not standalone, the wall
+hands on to T7-5's install sheet, whose last line says notifications are asked the
+first time something needs the owner; the installed app's sign-in wall uses the
+existing passkey. No new wording beyond the install sheet's line; refusals keep
+`AUTH_WORDS`.
+*Files:* `apps/console/web/app.js`, `apps/console/web/index.html`.
+*Tests:* **the enrolment code is not in `location` or history after it is read**;
+a standalone launch shows sign-in, never the enrolment wall.
+*Accept:* on a real iPhone: scan, Face ID, Add to Home Screen, open, Face ID.
+
+**X-79 · The phone guide, and the website's copy re-checked** · S · W5 · deps X-75, X-76, X-77, X-78 —
+*Spec:* write `docs/ops/phone.md` — the owner's guide to Add a Phone, each Mac
+refusal and its fix, removal, and a pointer to
+`docs/ops/remote-access.md` (X-105) for reaching the Mac from
+outside (the website's Docs are built from this repo's markdown, so this page is
+what metistry.ai renders). Then compare the Download page's *Add your phone* steps
+(`foldedspacelabs/metistry-website`) with the shipped flow — §2.22's three known
+differences first — and open a PR there with the copy that matches.
+*Files:* `docs/ops/phone.md`, `docs/ops/auth.md` (link it).
+*Tests:* —
+*Accept:* the site's four steps describe the shipped flow, and its step 1 no
+longer says Metistry answers on the home network by default.
+
+#### X — Remote access: the owner's choice (ruled 2026-09-30)
+
+The owner ruled for a choice of provider, asked at setup and changeable in
+Settings; Tailscale Funnel is the recommended path; Metistry may bundle or
+install provider tools; and one opt-in, capped FSL relay on AWS follows Funnel.
+**Every ticket here builds §2.23** (X-115…X-118: §2.24)
+— read it whole; it holds the guided flow's wording, the doctor rows, the
+refusals and the acceptance per provider. X-103 and X-104 are bugs whatever the
+owner picks and **block every provider**; X-111 blocks every internet-facing one,
+Funnel included. The fixes, None, Tailscale and the guided flow (X-103…X-107,
+X-111, X-112, X-114) are in W5 (§3.2, 2026-10-18); the rest stay in §3.2's
+*Candidates* row until the owner schedules them. §2.23's recommended order is
+X-103, X-104, X-111 → X-105, X-112, X-106, X-107, X-114 → X-115, X-116, X-117, X-119 (with X-118, X-120) → X-108 → X-113 → X-109 → X-110.
+
+**X-103 · The console's proxy listener — the local owner token never crosses a tunnel** · M · W5 —
+*Spec:* §2.23 *Two fixes*, 1: a second console listener for proxies only — a
+Unix socket at `.metistry/state/console-proxy.sock` (0600) and a loopback TCP
+port `METISTRY_CONSOLE_PROXY_PORT` (default the console port + 1). A request on
+either is **remote by construction**: `local-owner.ts` never honours the local
+owner token there whatever the peer, no `local` route answers, and a `Host`
+that is not the configured remote host is refused. The main listener is
+unchanged. Under `shape: compose` the port is published on `127.0.0.1` only. A
+finding against `docs/ops/auth.md` ("cannot be replayed from off the machine"),
+fixed and the doc corrected.
+*Files:* `apps/console/src/main.ts`, `apps/console/src/server.ts`,
+`apps/console/src/local-owner.ts`, `docker-compose.yml`, `packages/cli/src/env.ts`
+(the env), `docs/ops/auth.md`, `docs/ops/deployment-shapes.md`.
+*Tests:* U2 on the proxy listener; **the local owner token from `127.0.0.1` on
+the proxy port is refused exactly as a remote one is, and audited; a `local`
+route answers 403 there; a wrong `Host` is refused; the socket is 0600**; the
+main listener's local door still works.
+*Accept:* `tailscale serve` pointed at the proxy port on the owner's second
+instance: the Mac's owner token sent from a tailnet device is refused.
+
+**X-104 · Passkeys per origin — the rpID follows the request** · M · W5 —
+*Spec:* §2.23 *Two fixes*, 2: `rpFromOrigin` stops taking the rpID from the
+first `METISTRY_ORIGIN` entry; registration and authentication options use the
+host of the configured origin the request came from (an unconfigured origin is
+refused as today, naming both sides), and verification passes the list as
+`expectedRPID`. Migration `0039` (`passkeys.rp_id text`, nullable; null reads as
+the first origin's host, the value every existing passkey was created under).
+`GET /api/devices` serves each passkey's `rp_id` — additive, recorded in
+`client-api.md`.
+*Files:* `db/migrations/0039_passkey_rp_id.sql`, `apps/console/src/webauthn.ts`,
+`apps/console/src/server.ts`, `apps/console/src/auth-store.ts`,
+`docs/ops/auth.md` (*Passkeys: origins*), `docs/ops/client-api.md`.
+*Tests:* U2; **a passkey created at the second origin signs in there and is
+refused at the first; an origin outside the list is refused; an existing
+passkey with a null `rp_id` still signs in at the first origin**.
+*Accept:* U4's rollback note; F-7's devices fixture re-recorded.
+
+**X-105 · `metistry remote` — the record, the adapter interface, and None** · M · W5 · deps X-103, X-104 —
+*Spec:* §2.23 *Where the choice lives*, *How the origin flows*, *The provider
+adapter*, *CLI parity* and *Doctor rows*: the M20 verbs (`remote [status]`,
+`set`, `authorize`, `test`, `off`) over the six providers with `--json`, `--dry-run`, `--instance`;
+the `RemoteProvider` interface and its registry in `packages/cli/src/remote/`;
+the **None** adapter; `.metistry/deployment.yaml`'s `remote:` block through the
+protected write (preview-then-confirm); the env renderer putting the remote
+origin first in `METISTRY_ORIGIN`; switching configures the new provider and
+revokes the old only once the new origin answers; doctor's `remote` kind with
+None's `ok` row and the two shared rows. §2.22's loopback refusal names Settings
+▸ Remote Access. A tokens-on-stdin helper shared with `secrets set`.
+*Files:* `packages/cli/src/remote/` (new: `index.ts`, `provider.ts`, `none.ts`),
+`packages/cli/src/main.ts`, `packages/cli/src/deployment.ts`,
+`packages/cli/src/env.ts`, `packages/cli/src/doctor.ts`, `docs/ops/cli.md`,
+`docs/ops/remote-access.md` (new: None, the choices, the proxy listener).
+*Tests:* **a token given in argv is refused and not echoed; a failed `configure`
+writes nothing; `set none` from a provider runs that provider's revoke; with
+None, `METISTRY_ORIGIN` is loopback only; doctor fails a provider whose upstream
+is the main console port**; a fake provider exercises switch ordering (the old
+one is revoked only after the new origin answers).
+*Accept:* a fresh install's `metistry remote --json` says `none` and doctor's
+row is `ok`.
+
+**X-106 · The Tailscale adapter — Funnel by default, tailnet as the alternative** · L · W5 · deps X-105, X-111, X-112 —
+*Spec:* §2.23 *Tailscale*: two modes, `funnel` (the default) and `tailnet`. The
+node is the bundled userspace `tailscaled` from X-112 — `--tun=userspace-networking`,
+state and socket under `.metistry/state/tailscale/` (0700), hostname
+`metistry-<instance>`, a supervised job — unless the owner chooses `--use-app`,
+in which case the owner's Tailscale app is detected and driven through its CLI.
+Sign-in: the node's login URL opened in the browser, completion detected from
+`BackendState`. Then `tailscale funnel` (or `serve` for tailnet) to the proxy
+port; each Tailscale approval page it offers (HTTPS, Funnel) is surfaced as the
+flow's one step; the public name is awaited (up to 10 minutes). Revoke turns off
+the handler, logs the node out and stops it. The doctor rows listed there.
+*Files:* `packages/cli/src/remote/tailscale.ts`, `packages/cli/src/launchd.ts`
+(the node's job), `packages/cli/test/remote-tailscale.test.ts` (recorded
+`status --json` and `funnel status --json` fixtures), `docs/ops/remote-access.md`.
+*Tests:* **each `BackendState` maps to its row and sentence; a handler pointing
+at the main port fails doctor; funnel mode refuses to configure before X-111's
+limits are on; revoke leaves no handler and a logged-out node; the node's state
+directory is 0700**; the fixtures pin the JSON fields read.
+*Accept:* §2.23's Tailscale acceptance — a real iPhone on cellular with **no
+Tailscale app** reaches *Opened on your phone* through Funnel; tailnet mode with
+the app does the same.
+
+**X-107 · Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access** · L · W5 · deps X-105, X-106, X-112, X-77 —
+*Spec:* §2.23 *Set Up Remote Access* and *Settings ▸ Remote Access*: the
+**Remote Access** wizard step between *Services* and *Door* (`FirstRunStep`) and
+the pane in ACCESS before Devices run one flow — choose (None preselected,
+*Tailscale — Any browser* marked *Recommended*), get the tool (pack progress),
+sign in (the provider's page in the browser, completion detected), approve (the
+provider's own one-click pages), expose, check (*answers from this Mac*), then
+**Add a Phone…**. The pane adds **Test** and **Turn Off** with its confirm. A
+provider whose adapter has not shipped is listed as *Not yet available*. Devices
+marks a passkey whose `rp_id` is no longer a configured host. Everything drives
+`metistry remote` over the CLI transport.
+*Files:* `apps/macos/sources/kit/first-run-model.swift`,
+`apps/macos/sources/kit/wizard-step-views.swift`,
+`apps/macos/sources/kit/settings-model.swift`, new
+`apps/macos/sources/kit/remote-access-flow.swift`, `remote-access-pane.swift` and
+`remote-access-model.swift`, the Devices pane (X-77), `docs/ops/mac-app.md`,
+`docs/product/design/screen-15-settings.md` §1.
+*Tests:* **None is preselected and Continue satisfies the step; Add a Phone is
+not offered before the check passes; the check is never worded as reaching the
+phone; a pasted token never reaches the CLI's argv; Turn Off's confirm names what
+revoke undoes**; each step's failure shows its doctor sentence.
+*Accept:* U9; on a fresh install with no Tailscale anywhere, the wizard's flow
+ends with Add a Phone ready, through Funnel.
+
+**X-111 · A console on the internet — rate limits and headers on the proxy listener** · M · W5 · deps X-103 —
+*Spec:* §2.23 *A console on the internet*: per-client rate limits on every
+unauthenticated route, keyed on the provider's client-address header read
+**only** on the proxy listener and only for limiting; a global ceiling; HSTS
+(no preload), CSP, `X-Content-Type-Options`, `Referrer-Policy` and frame denial
+on the proxy listener; one `runs` row per refused burst. No credential decision
+reads any forwarded header.
+*Files:* `apps/console/src/server.ts`, `apps/console/src/http-util.ts`, a new
+`apps/console/src/rate-limit.ts`, `docs/ops/auth.md`.
+*Tests:* **a forwarded-address header on the main listener changes nothing; a
+burst past the limit is refused with 429 and audited once; no header can raise
+a principal; through the proxy listener, the routes answering without a session
+are exactly the shell's static files, `GET /health`, `GET /api/identity` and the
+four passkey ceremony routes, and no route serves a public share link**; the main listener's behaviour is unchanged.
+*Accept:* —
+
+**X-108 · The Cloudflare Tunnel adapter** · L · deps X-105, X-111, X-112 —
+*Spec:* §2.23 *Cloudflare Tunnel*: refuses an account with no zone and any
+Quick Tunnel, by name; sign-in by OAuth with PKCE when R-1 has passed (else
+`cloudflared tunnel login`, then a pasted token); a remotely-managed tunnel,
+ingress to the proxy socket, the proxied CNAME, and `cloudflared tunnel run`
+as a supervised job, the token in `TUNNEL_TOKEN` (X-112's pinned binary); `--access` off by default until R-2; revoke deletes
+the tunnel and the record by id; the doctor rows listed there.
+*Files:* `packages/cli/src/remote/cloudflare.ts`, `packages/cli/src/launchd.ts`
+(the job), `packages/cli/test/remote-cloudflare.test.ts` (a recorded API
+fixture), `docs/ops/remote-access.md`.
+*Tests:* **a Quick Tunnel hostname is refused; ingress pointing anywhere but the
+proxy socket fails doctor; revoke deletes only the record it created; the token
+is read from the Keychain, never argv**; a 403 from the API reads as *no longer
+allowed*.
+*Accept:* §2.23's Cloudflare acceptance with a test zone and a real iPhone.
+
+**X-109 · The ngrok adapter** · M · deps X-105, X-111 —
+*Spec:* §2.23 *ngrok*: waits on the owner's ngrok-route question (§2.23 open
+question 3). The authtoken pasted on stdin into the Keychain; the account's dev
+domain; the owner's `ngrok` agent — or the `@ngrok/ngrok` SDK if approved — run
+to the proxy socket, supervised; the free plan's warning page said in the
+chooser (and the free plan refused, if R-3 rules so); the `ERR_NGROK_*` codes
+mapped to their sentences; revoke stops the job and deletes the token.
+*Files:* `packages/cli/src/remote/ngrok.ts`, `packages/cli/src/launchd.ts`,
+`packages/cli/test/remote-ngrok.test.ts`, `docs/ops/remote-access.md`.
+*Tests:* **105, 107 and 334 each map to their sentence; the token never appears
+in argv or a log; an upstream other than the proxy socket fails doctor**.
+*Accept:* §2.23's ngrok acceptance with the owner's ngrok account.
+
+**X-110 · The port-forwarding adapter** · L · deps X-105, X-111 —
+*Spec:* §2.23 *Port forwarding*: waits on the owner's dependency ruling (§2.23
+open question 1). PCP → NAT-PMP → UPnP-IGD with renewal; CGNAT and double NAT
+refused by name before mapping; an IPv6 pinhole where offered; a deSEC (or
+Cloudflare-zone) name kept current; ACME DNS-01 with ARI renewal; TLS served on
+the mapped port to the proxy socket; revoke deletes the mapping and its records;
+*reachable from outside* is reported as not checked, never `ok`.
+*Files:* `packages/cli/src/remote/port-forward/` (new: `mapping.ts`, `ddns.ts`,
+`acme.ts`, `index.ts`), `packages/cli/src/launchd.ts`,
+`docs/ops/remote-access.md`.
+*Tests:* **an external address in `100.64.0.0/10` or RFC 1918 space refuses
+before any mapping; a granted port different from the request becomes the
+origin's port; revoke sends lifetime 0; the outside-reachability row is never
+`ok`**; renewal fires in ARI's window on an injected clock.
+*Accept:* §2.23's port-forwarding acceptance on a NAT-PMP or UPnP router and one
+CGNAT line.
+
+**X-112 · Provider tool packs — pinned, signed, fetched on choice** · M · W5 · deps X-105 —
+*Spec:* §2.23 *How each is set up*: `ops/release/build-runtime-deps.sh` (or a
+sibling) builds one pack per tool — `tailscaled` + `tailscale` from a pinned
+upstream tag (BSD-3), the official `cloudflared` release binary, and the zrok
+CLI — each pinned with a sha256 in `ops/release/runtime-versions.env`, its
+licence shipped beside it, every Mach-O signed with the runtime pack's rule (FSL
+Developer ID, hardened runtime, secure timestamp), and uploaded as its own
+release asset covered by `checksums.txt`. `metistry remote set <provider>`
+fetches and unpacks the provider's pack through `runtime-deps.ts`'s
+verify-then-unpack code into `runtime/remote/<tool>/`; `metistry update` moves a
+fetched pack forward with the release; `METISTRY_RUNTIME_DEPS=0` keeps it off
+the network and the adapter names the manual install instead. Nothing is fetched
+for a provider the owner did not pick, and nothing goes in the DMG.
+*Files:* `ops/release/build-runtime-deps.sh`, `ops/release/runtime-versions.env`,
+`.github/workflows/release.yml`, `packages/cli/src/runtime-deps.ts`,
+`docs/ops/bundled-runtime.md`.
+*Tests:* **a checksum mismatch leaves `runtime/remote/` as it was; a provider
+not chosen fetches nothing; every Mach-O in a pack is signed with the release
+identity**; the pins match the asserted versions.
+*Accept:* a release's assets include the three packs, and a fresh install's
+`remote set tailscale` runs the bundled node.
+
+**X-113 · The zrok adapter** · M · deps X-105, X-111, X-112 —
+*Spec:* §2.23 *zrok*: the account token pasted on stdin; `enable` into
+`.metistry/state/zrok/` with X-112's CLI; a reserved name in the `public`
+namespace (v2 names; `--name`, default `metistry-<instance>`), refused by name
+when taken; a headless public share to the proxy listener, supervised; the
+warning page and the card that removes it said in the chooser; the doctor rows
+listed there; revoke stops the share, deletes the name and disables the
+environment.
+*Files:* `packages/cli/src/remote/zrok.ts`, `packages/cli/src/launchd.ts`,
+`packages/cli/test/remote-zrok.test.ts`, `docs/ops/remote-access.md`.
+*Tests:* **a 401 on enable maps to its sentence and writes nothing; a taken name
+is refused; an upstream other than the proxy listener fails doctor; revoke
+leaves no environment**.
+*Accept:* §2.23's zrok acceptance with a free zrok.io account, after R-5.
+
+**X-114 · Add a Phone sees the phone arrive — *Opened on your phone*** · S · W5 · deps X-75, X-77, X-103 —
+*Spec:* §2.23 *Set Up Remote Access*, step 7: migration `0040`
+(`auth_enrollment_codes.opened_at timestamptz`, `opened_via text`) — `POST
+/auth/enroll/start` with a live code stamps them, `opened_via` naming the
+listener (`proxy` or `main`); `metistry enroll --status <code_id> [--json]`
+reads them; the sheet shows **Opened on your phone** between *Ready* and
+*Added* when `opened_via` is `proxy`, and on expiry without it says the phone did
+not reach the origin. A code is still single-use; stamping is not using.
+*Files:* `db/migrations/0040_enrollment_opened.sql`, `apps/console/src/server.ts`,
+`apps/console/src/auth-store.ts`, `packages/cli/src/enroll.ts` (X-75's),
+`apps/macos/sources/kit/add-phone-sheet.swift` (X-77's), `docs/ops/cli.md`,
+`docs/ops/auth.md`.
+*Tests:* U2; **a start through the proxy listener stamps `proxy`; a start on the
+main listener stamps `main` and never shows *Opened on your phone*; stamping
+does not consume the code; an unknown code stamps nothing**.
+*Accept:* U4's rollback note; on a real iPhone the sheet turns to *Opened on your
+phone* before *Added*.
+
+**X-115 · Metistry Relay data plane — the PoC, then the instance** · L · deps X-112 —
+*Spec:* §2.24 *Data plane* and *PoC first*: one $7 Lightsail instance with a
+static IP; the SNI-routing TLS-passthrough relay (frp `https` vhost or HAProxy
+`ssl_preread` + a reverse-tunnel client — **decided by the PoC**); forwarding
+only registered, active **device labels** (the bare `<id>.u.metistry.app` and
+unknown labels refused, by SNI); per-id byte counters, the 5 GB monthly cap, the
+~2 Mbps throttle and the ~0.9 TB global cap enforced at the relay; per-instance
+limits on distinct client IPs per day (about 15) and concurrent connections, and
+tighter limits during a new instance's probation — numbers from the PoC; snapshots and
+a scripted rebuild. The PoC runs a month with two FSL instances and reports the
+§2.24 gate before the instance is offered to anyone else.
+*Files:* the private `foldedspacelabs/metistry-relay` repo (the instance, its
+deploy); the public forwarding configuration in `ops/relay/` here, deployed
+verbatim; `docs/ops/metistry-relay.md` here (what it is, what FSL sees, the
+caps).
+*Tests:* **an unregistered SNI, the bare instance name and an unknown label are
+each refused without a byte forwarded; the distinct-IP limit refuses the 16th
+address of the day; a TLS
+session through the relay cannot be decrypted with anything on the relay; an
+id past its cap is refused; the global cap refuses everyone**.
+*Accept:* the PoC report — bytes per owner, SSE through the relay, reconnect
+after sleep — and the owner's go.
+
+**X-116 · Metistry Relay control plane — CDK, Lambda, DynamoDB, the ACME helper** · L · deps X-115 —
+*Spec:* §2.24 *Control plane* and *Cost guards*: CDK in the private
+`foldedspacelabs/metistry-relay` repo, deployed to FSL's AWS account —
+API Gateway HTTP API + Lambda + DynamoDB — for register (an opaque id and a
+hashed, revocable relay token), usage, revoke and the per-id kill switch;
+device labels (register pending, activate, revoke; at most 10 per instance);
+a per-instance `*.<id>.u.metistry.app` record created at registration and deleted
+on revoke or kill (no global wildcard — R-9); Certificate Transparency monitoring
+for unexpected `*.u.metistry.app` issuance; the relay's terms of use (Metistry
+only) and abuse contact;
+per-day registration limits; the ACME DNS-01 helper writing only
+`_acme-challenge.<id>.u.metistry.app` in zone `Z03790842KLR6UEFALDPY` for the
+authenticated id (the `u.` label, never directly under `metistry.app`); the
+`*.u.metistry.app` record to the static IP (apex and `www` untouched; the
+explanatory page is the website infra's follow-up); an AWS Budgets alert at $10 and the optional stop Lambda; registrations
+capped at about 40 a week until X-118's PSL entry lands.
+*Files:* the relay's infrastructure repo; `docs/ops/metistry-relay.md`.
+*Tests:* **the helper refuses a name that is not the caller's id; an 11th label
+is refused; a killed instance's name stops resolving; a revoked token
+registers, renews and reads nothing; the IAM policy grants Route 53 changes only
+on `_acme-challenge.*.u.metistry.app` TXT records**; the registration limits hold.
+*Accept:* `cdk diff` reviewed by the owner; the budget alert fires on a test
+threshold.
+
+**X-117 · The Metistry Relay adapter — client, certificate, allowance** · M · deps X-105, X-111, X-112, X-116 —
+*Spec:* §2.24 *In the product*: provider id `relay` in `packages/cli/src/remote/`;
+register (opt-in, the token on the Keychain), the client from its X-112 pack —
+**hard-wired to the proxy listener, with no setting to point it elsewhere** — a
+Let's Encrypt wildcard certificate for `*.<id>.u.metistry.app` through the helper, the TLS terminator in front of the
+proxy listener and the tunnel as supervised jobs; the rows *registered*,
+*tunnel connected*, *certificate expiry* and **allowance** (`degraded` at 80%,
+`failed` at the cap, the reset date and **Switch to Tailscale Funnel**); revoke
+deletes the registration, the certificate and the jobs. Shares the TLS
+terminator and ACME client with X-110, behind the same dependency ruling.
+*Files:* `packages/cli/src/remote/relay.ts`, `packages/cli/src/launchd.ts`,
+`packages/cli/test/remote-relay.test.ts`, `docs/ops/remote-access.md`.
+*Tests:* **the private key never leaves the Mac; the client's upstream is the
+proxy listener and no configuration changes it; the allowance row reads the
+reset date from usage, not the clock alone; at the cap the pane offers Funnel;
+the token never appears in argv or a log**.
+*Accept:* §2.24's acceptance on a real iPhone on cellular.
+
+**X-118 · `u.metistry.app` on the Public Suffix List** · S —
+*Spec:* §2.24 *Abuse and isolation*: a pull request to `publicsuffix/list`'s
+private section for **`u.metistry.app`** (not the apex, which FSL's own names
+share), with the `_psl` TXT record its guidelines require in the Route 53 zone,
+and the rationale: per-owner cookie and rpID isolation, and Let's Encrypt's
+per-registered-domain limit applying per `<id>.u.metistry.app`. The
+explanatory page at `metistry.app`/`u.metistry.app` (owners' names are not
+FSL's; an abuse link) is filed with it as a metistry-website follow-up. **Permanent and slow
+(weeks): the owner confirms before it is filed.** Until it lands, X-116's weekly
+registration cap holds.
+*Files:* `docs/ops/metistry-relay.md` (the status of the entry).
+*Tests:* —
+*Accept:* the entry merged upstream and shipped in a browser release; the entry
+is the plain rule `u.metistry.app`, **never** `*.u.metistry.app` (which would
+break the shared passkey rpID of §2.24's device labels).
+
+**X-119 · Device-only relay addresses — one label per phone** · L · deps X-75, X-77, X-104, X-116, X-117 —
+*Spec:* §2.24 *Keeping the relay Metistry-only*, 1: migration `0041`
+(`relay_labels`); `metistry enroll` with the relay chosen registers a pending
+label with the control plane before minting, and its URL is
+`https://<label>.<id>.u.metistry.app/#enroll=<code>`; the label turns active
+when the passkey is created and is released on cancel or expiry; **Remove** in
+Settings ▸ Devices revokes the label at the relay with the passkey; at most 10;
+X-104's per-request rpID maps every label host to `<id>.u.metistry.app`; the
+relay's allowed origins are the active labels, read per request.
+*Files:* `db/migrations/0041_relay_device_labels.sql`, `apps/console/src/webauthn.ts`,
+`apps/console/src/server.ts`, `apps/console/src/auth-store.ts`,
+`packages/cli/src/enroll.ts`, `packages/cli/src/remote/relay.ts`,
+`apps/macos/sources/kit/add-phone-sheet.swift`, the Devices pane,
+`docs/ops/auth.md`, `docs/ops/client-api.md`.
+*Tests:* U2; **a passkey created at one label signs in at another of the same
+instance and is refused at another instance's; a revoked label fails the origin
+check; a cancelled code releases its label; the QR's host is the new label**;
+an 11th device is refused by name.
+*Accept:* U4's rollback note; two real iPhones, each on its own label, one
+passkey synced between them signing in at both; removing one phone kills only
+its address.
+
+**X-120 · App Attest at relay registration — an extra layer** · M · deps X-116, X-117 —
+*Spec:* §2.24 *Keeping the relay Metistry-only*, 3: waits on R-8. If App Attest
+works for a Developer ID app, the Mac app attests a key with
+`DCAppAttestService` and the control plane verifies the attestation before
+issuing a relay token; a failure to attest is refused by name. If R-8 fails,
+this ticket is closed with the finding and the gate stays the terms of use.
+Never a dependency of X-117: the relay works without it.
+*Files:* `apps/macos/sources/kit/relay-attest.swift`, the relay's
+infrastructure repo, `docs/ops/metistry-relay.md`.
+*Tests:* **an unattested registration is refused when attestation is required;
+the relay works with attestation turned off**.
+*Accept:* R-8's finding recorded, and, if positive, a signed build registers and
+a source build is refused.
+
+#### X — Follow-ups ruled 2026-10-04
+
+What the owner's 2026-10-04 rulings (`docs/product/decisions-log.md`, *Rulings
+made by the owner, recorded at W5*), that evening's session on the live
+instance, and the Hindsight, Context Mode and Mods reviews asked for. X-121,
+X-122, X-126 and X-127 are in W5 (§3.2); the rest stay in §3.2's *Candidates*
+row until the owner schedules them. Each is its own PR, outside any track's
+files.
+
+**X-121 · The complexity fixtures, generated and blind-relabelled** · M · W5 · deps T9-3 —
+*Spec:* the owner ruled (Q-g) to run T9-3's eval and accept T9-4, but has no
+time to author `complexity.jsonl`'s 150-plus items, and C11 forbids a
+Claude-authored label. A generator in `packages/eval` writes them with two
+non-Claude models through OpenRouter, the key read from the environment at
+run time (the owner's; never stored, never in argv). A **writer** model sees
+only the three class names and §7.2's structural rules of
+`docs/ops/dynamic-router.md` — at least 50 items per class, the long-simple and
+short-demanding traps, at least five D08-class items — and never the class
+descriptions (that file's §2) or the planner's wording. A **relabeller**, a second non-Claude
+model, labels every item blind, from the class names alone. An item both label
+alike is kept; a disagreement either becomes an `accept` or goes to an owner
+adjudication pile, never silently resolved; every D08-class item goes to the
+pile, since §7.2 has the owner label each. A length-against-label check holds
+|r| < 0.2, and a stats report gives the counts per class and trap, the
+agreement rate, the pile and r. The output is
+`<instance>/.metistry/eval/complexity.generated.jsonl`, apart from anything the
+owner wrote; the owner spot-checks it, and `metistry-eval complexity` scores
+generated and owner-written fixtures **separately**, each against the bar (the
+Routr review's lesson, #492). Amending §7.2's "the owner's, never the
+product's" for generated items only is the coordinator's proposal, reading Q-g's
+"Run it and then accept" as covering it — for the owner to confirm; the
+shipped example stays empty, and no agent runs the generator against the live
+instance.
+*Files:* `packages/eval/src/generate.ts` (new), `packages/eval/src/main.ts`,
+`packages/eval/src/complexity.ts`, `docs/ops/dynamic-router.md` (§7.2).
+*Tests:* offline, on recorded model responses: **no request carries the class
+descriptions or the planner's wording; an item the two models label
+differently is never kept under one label alone; every D08-class item lands in
+the pile**; the two fixture sets report separately.
+*Accept:* the owner spot-checks a generated set and runs the eval (§3.4).
+
+**X-122 · Doctor waits out a job it has just started** · S · W5 —
+*Spec:* two doctor runs failed a healthy install on 2026-10-04. After
+`metistry update`, doctor reported 16 schedule rows failed ("last ran … over
+2× its interval — the console's runner is not running it") because the console
+had just been kickstarted and its scheduler had not ticked yet
+(`packages/cli/src/doctor.ts`, the `OVERDUE_FACTOR` row); at `up`, doctor raced
+the recorder helper's socket. A check that depends on a job kickstarted moments
+before, or on the console's first scheduler tick, re-probes for a bounded grace
+before it fails: inside the grace the row reads pending, with why; past it, it
+fails as now. The grace comes from configuration or carries R4's
+`// limit: fixed — <reason>` (`ops/scripts/audit-limits.mjs`).
+*Files:* `packages/cli/src/doctor.ts`, `packages/cli/src/up.ts`,
+`packages/cli/src/update.ts`, `docs/ops/cli.md`.
+*Tests:* **a schedule row whose console started inside the grace is not
+failed, and the same row past the grace is; a recorder socket that answers
+within the grace passes**.
+*Accept:* —
+
+**X-123 · `metistry doctor` repairs what it finds** · L · deps X-122, X-48 —
+*Spec:* the owner, 2026-10-04: "regardless of the problems found, the user only
+needs to run `metistry doctor` to fix it". Spec in the self-managing-instance
+design note (W5), which the owner confirms; its proposed contract: every check
+is classified **fixable**, **your hand** or **informational**; plain `doctor`
+applies each fixable row's fix and re-checks it; `--check` is read-only, for
+`update`, CI and the wave checkpoint; a destructive fix previews and asks first;
+every fix is audited as `up`'s steps are; one pass, never a loop. X-122 and
+X-48 land first, so no fix is applied to a false reading.
+*Files:* `packages/cli/src/doctor.ts`, `packages/cli/src/up.ts`,
+`packages/cli/src/update.ts`, `docs/ops/cli.md`.
+*Tests:* **`--check` changes nothing; a destructive fix never runs without its
+confirm; a your-hand row applies nothing and says what the owner does; each
+applied fix is re-checked once**.
+*Accept:* the design note is merged and the owner has confirmed the contract.
+
+**X-124 · `.env` is derived, never hand-edited** · M —
+*Spec:* M7 reversed (2026-10-04): secrets and config manage themselves.
+`.metistry/state/.env` becomes a derived file, written only from
+`.metistry/*.yaml` and the login Keychain by `up`, `update` and the app's
+actions. A hand edit is detected (the file carries the hash it was written
+with) and doctor's row offers to derive it again, naming the lines that
+differed. Gated on the self-managing-instance design note (W5), which says
+which keys are derived and where each comes from.
+*Files:* `packages/cli/src/up.ts`, `packages/cli/src/secrets.ts`,
+`packages/cli/src/doctor.ts`, `docs/ops/cli.md`.
+*Tests:* **two derivations from the same yaml and Keychain are byte-identical;
+a hand-edited line is reported, never silently kept or silently lost**.
+*Accept:* the design note is merged.
+
+**X-125 · Fix All in the Status window** · S · deps X-123 —
+*Spec:* X-123's app half: the Status window gains **Fix All**, one closed-set
+action (invariant 10) that runs `metistry doctor` through the CLI door (§2.2,
+M6) and shows each fix and its re-check, generalising the `open_secrets` row
+action. A destructive fix keeps its confirm in the app; a your-hand row shows
+what to do and runs nothing.
+*Files:* `apps/macos/sources/kit/status-panel.swift`,
+`apps/macos/sources/kit/doctor-report.swift`, `docs/ops/mac-app.md`.
+*Tests:* §2.18; **Fix All runs the fixable rows only, and a destructive fix
+asks first**.
+*Accept:* —
+
+**X-126 · The policy mirror's rename-revoke test is deterministic** · S · W5 —
+*Spec:* `apps/reconciler/test/policy-mirror.test.ts`'s "mirrors at start,
+follows a hand-edited revoke written by rename, and removes the mirror when the
+policy is deleted" failed intermittently on #456. Its `until` helper waits a
+fixed 2 s of wall clock for an interval-driven mirror — the likely cause on a
+loaded runner, to be proven first. Remove the race; the behaviour it pins
+stays. The other #456 flake, `collectors/test/linear.integration.test.ts`'s
+"an issue closed or given to someone else …", is X-26's (the sync's reads are
+unordered, `collectors/linear/run.ts`), not this ticket's.
+*Files:* `apps/reconciler/test/policy-mirror.test.ts`,
+`apps/reconciler/src/policy-mirror.ts` only if the race is there.
+*Tests:* **the test passes 50 runs in a row**.
+*Accept:* —
+
+**X-127 · Every terminal read behaves like `secrets set`** · S · W5 —
+*Spec:* #486 gave `secrets set` and `secrets replace` a terminal reader —
+prompt on stderr, one hidden line, Ctrl-C exits 130 (`readHiddenLine`,
+`packages/cli/src/secrets.ts`). Three stdin reads still wait for EOF in a
+terminal: `connect-repo --auth token` (`packages/cli/src/connect-repo.ts`)
+says the token is "never echoed" while a terminal echoes it, and
+`console call --body -` and `agents define --prompt-file -`
+(`packages/cli/src/main.ts`) wait silently for Ctrl-D. The token takes
+`readHiddenLine`. A body and a prompt are neither secret nor one line, so in a
+terminal they prompt on stderr that input ends with Ctrl-D, and keep the echo.
+Piped stdin is unchanged everywhere. `compute providers add`'s "then Ctrl-D"
+line (`packages/cli/src/compute.ts`), stale since #486 routed it through
+`secrets set`, says what happens now.
+*Files:* `packages/cli/src/connect-repo.ts`, `packages/cli/src/main.ts`,
+`packages/cli/src/compute.ts`, `packages/cli/src/secrets.ts`, `docs/ops/cli.md`.
+*Tests:* **a token typed at a terminal is never echoed; piped stdin reads to
+EOF as before; a terminal `--body -` prompts on stderr, never stdout**.
+*Accept:* —
+
+**X-128 · A session-start briefing: handles and the owner's text** · M · deps X-130, X-131, X-133 —
+*Spec:* the Context Mode review's CM-1 (`docs/research/2026-10-04-context-mode-review.md`
+§5–§6), shaped by the owner's rulings (Hindsight Q1: evaluate a push; Context
+Mode Q1: handles plus owner-written text). The console assembles a briefing
+with no model (invariant 4), from named queries and `canSeeUnder` under the
+caller's grant: the project page's own summary and links (X-130), open tasks
+in the project, the latest `Journal/Fold/` lines naming it, and the recent
+sessions in this repository (X-131). Owner-written text (`source: user` pages,
+the project page's summary) appears as text; whatever the assistant wrote
+appears as a handle only — path, title, date — never synthesized prose, never an
+imperative. The budget is the owner's (default ≈ 1,200 tokens by chars/4);
+every string passes `sanitizeForAgent`, inside a labelled reference block that
+addresses nobody, with `as_of` and each note's `sha256`; one `runs` row per
+briefing carries the handles and a hash of what was sent. It is assembled once
+per session start and never changes mid-session. Served to external principals
+as a read — a route, or behind `queries_run`, is the first design choice, since
+named queries do not apply knowledge tiers by themselves.
+*Files:* `apps/console/src/`, `seed/queries/`, `packages/core/src/`,
+`docs/ops/client-api.md`.
+*Tests:* U2; **a `none` grant gets an empty briefing; an `index` grant gets
+titles from its tier only; no assistant-written line appears as text**.
+*Accept:* —
+
+**X-129 · Plugins deliver the briefing at session start, on by default** · S · deps X-128 —
+*Spec:* CM-2, with the owner's 2026-10-04 override of the review's opt-in:
+**on by default for every agent with a read grant, opt-out per agent** —
+"getting the right knowledge to the right place" is the core feature. A
+`SessionStart` hook in `plugins/claude-code` sends the cwd and the repository
+and emits the briefing as context; `plugins/opencode` does the same through its
+system transform; Cursor and Devin are documented as unsupported until
+verified. A failure exits 0 and injects nothing. The opt-out is the owner's,
+per agent, and lives with the agent's grants so it goes where a revoke goes;
+how it is set is this ticket's first choice. Each harness's delivery is one
+entry in X-133's harness registry. A mod is the display layer, later and in
+addition (the Mods review's MD-6), not this ticket.
+*Files:* `plugins/claude-code/`, `plugins/opencode/`,
+`docs/ops/claude-code-plugin.md`, `packages/cli/src/connect.ts`.
+*Tests:* **an opted-out agent's session starts with nothing injected; a console
+that does not answer injects nothing and the hook exits 0**.
+*Accept:* —
+
+**X-130 · A repository maps to a project page** · S —
+*Spec:* CM-3: `repos:` frontmatter on `Projects/<slug>.md`, written by the
+owner, so the mapping is git-durable (invariant 1) and editable in Obsidian.
+The reconciler fills a derived column (an additive migration, its number
+reserved in §2.9 first), and a named query `project_for_repo {remote}`
+normalises the remote — scheme, a trailing `.git`, the host's case.
+*Files:* `apps/reconciler/src/`, `db/migrations/`, `seed/queries/`,
+`docs/ops/projects.md`.
+*Tests:* U4; **two spellings of one remote resolve to one project; a
+repository no page names resolves to none**.
+*Accept:* —
+
+**X-131 · Last time in this repository** · S · deps X-130 —
+*Spec:* CM-4 under the owner's ruling (Context Mode Q3): a captured session is
+served back **before the fold only to agents in the same project**, and after
+the fold to any agent its grant allows. A named query
+`recent_sessions {repo, days}` over captured `kind: session` rows returns the
+date, the tool, files, turns and the owner's first prompt, clipped — never the
+agent's last reply, which is agent-written and stays a handle.
+*Files:* `seed/queries/`, `docs/ops/claude-code-plugin.md`.
+*Tests:* U2; **an unfolded session never reaches an agent outside its project;
+no agent-written reply is returned as text**.
+*Accept:* —
+
+**X-132 · `connections_call` folds a large answer** · M —
+*Spec:* CM-6, allowed by the owner (Context Mode Q4). `connections_call`
+returns an upstream answer whole (`packages/mcp-brain/src/connections-tools.ts`).
+After redaction, a deterministic fold is applied once, as a pure function of
+the text: a JSON array over N items becomes its first k, its last one and a
+count; repeated lines become counts; anything else gets a head-and-tail byte
+cap. The whole answer goes to a derived, short-lived table keyed by the run and
+readable only by the same principal; read-back is an optional `page` on
+`connections_call` or a named query — **no new tool** (X-49). `runs.meta`
+records bytes in, bytes out and the handle; the owner can turn folding off per
+connection; N, k and the cap are configuration (R4).
+*Files:* `packages/mcp-brain/src/connections-tools.ts`,
+`packages/connections/src/`, `db/migrations/`, `docs/ops/connections.md`.
+*Tests:* U4; **one answer folds identically twice; another principal cannot
+read the stored answer back; with folding off the answer comes whole**.
+*Accept:* —
+
+**X-133 · `connect claude-code` reads as well as writes** · S —
+*Spec:* the Hindsight review's HS-1 (`docs/research/2026-09-30-hindsight-review.md`
+§6), one-command wiring: besides the capture `export` lines, `connect
+claude-code` registers the console's `/mcp` for Claude Code with the bearer
+taken from the Keychain-backed variable — never written literally into a
+config file — and `connect --list` shows both halves. The owner ruled
+(Hindsight Q2) for a harness registry built for growth, with the main
+harnesses supported now: each harness is one registry entry with its own
+conformance test. The first test decides whether Claude Code expands `${VAR}`
+in a user-scope MCP header (write the entry) or not (print the
+`claude mcp add` line).
+*Files:* `packages/cli/src/connect.ts`, `docs/ops/cli.md`,
+`docs/ops/claude-code-plugin.md`.
+*Tests:* **no file `connect` writes contains a bearer's value; each registry
+entry passes its conformance test**.
+*Accept:* —
+
+**X-134 · `connect --remove`, and a reconnect after a revoke** · M · deps X-133 —
+*Spec:* HS-7 and the owner's Hindsight Q3 ruling — reconnecting after an
+accidental revoke is allowed. `metistry connect --remove <tool>` removes exactly
+the entries `connect` wrote (the Cursor and OpenCode config keys, the Keychain
+item) and revokes the agent's row; it is idempotent. A reconnect after a revoke
+mints a new agent (`claude-code-2`) rather than reviving the revoked id, which
+stays revoked so old proposals keep their provenance;
+`packages/cli/src/connect.ts` refuses the reconnect today.
+*Files:* `packages/cli/src/connect.ts`, `docs/ops/cli.md`.
+*Tests:* **a second `--remove` changes nothing; a revoked id is never minted
+again; a reconnect after a revoke takes one command**.
+*Accept:* —
+
+#### X — Follow-ups found in W5
+
+What the W5 builders and reviewers reported outside their tickets (PRs
+#536–#555; `docs/product/decisions-log.md`, *Open for the owner at the W5
+checkpoint*). None is scheduled: each stays in §3.2's *Candidates* row until
+the owner assigns it a wave. Every candidate was checked against `main` on
+2026-10-19 before it was written here; what W5 had already fixed is not
+listed. Each is its own PR, outside any track's files.
+
+**X-135 · The Mac's accessibility text probes read macOS 27** · S —
+*Spec:* six tests that probe the accessibility tree for a view's text pass on
+CI's `macos-15` and fail on macOS 27.0.1, the version the owner runs:
+`connection-editor-tests.swift:84` (the choice's default by name),
+`run-detail-view-tests.swift:177` (a refused call's result),
+`secrets-variables-tests.swift:366` (the key-shape sheet's sentence),
+`shell-accessibility-tests.swift:138` (the console refusal, verbatim),
+`connections-view-tests.swift:333` (the secret's egress line) and the editor's
+largest-text probe. The tree the newer OS exposes differs in where a static
+text's `value` and `name` land, not in what the view says; the probe helper
+reads both, so one assertion holds on both versions, and no test's expectation
+weakens. First prove it is the tree and not the view (dump both).
+*Files:* `apps/macos/tests/kit/` (the probe helper and the six tests).
+*Tests:* **the six pass on macOS 27 and on `macos-15` with the same
+assertions**.
+*Accept:* —
+
+**X-136 · The Mac tests wait on state, never on a count** · M · deps X-28 —
+*Spec:* X-28 made the chat viewport test state-driven; the rest of the suite
+still counts: `chat-view-tests.swift`'s `waitUntil(seconds: 2)` and the
+`capture-bar` and `capture-view` copies poll a condition for a fixed budget,
+and the remaining `Task.sleep` literals wait for "enough" time. Under load —
+another `swift test`, a CI runner at capacity — `aWorkingTurn…`,
+`ticksThatPileUp…`, `aSendsOwnTick…`, `aWorkingTurnFirstSeenByTheScreensClock…`
+and `everyStoreMethodSpeaksItsRoute…` reach the 60 s harness limit. One shared
+helper awaits the model's own signal (a published change, a continuation the
+store resolves) with a generous ceiling that only a hang reaches; every counted
+wait and literal sleep in `apps/macos/tests` goes through it.
+*Files:* `apps/macos/tests/kit/` (one helper; the suites that wait).
+*Tests:* **no test in `apps/macos/tests` sleeps for a literal duration (a
+test enforces it); the five named tests pass ten runs in a row with a second
+`swift test` running beside them**.
+*Accept:* —
+
+**X-137 · A fresh install's `up` applies the pending migrations** · M · deps X-123 —
+*Spec:* `metistry up` (`packages/cli/src/up.ts`) never runs the migration
+runner: on a fresh launchd install (the W5 checkpoint's scratch instance on
+`main` at `a715ddc9`, section 4) `up` **exits 1** — the console starts against
+an empty schema and crash-loops until the owner's first `update` — or, since
+X-123, a `doctor` that offers the `migrate` repair. The release's own first
+step must not need a repair: either `up` migrates itself, or it runs doctor's
+fixable set once the database answers (the same closed table, no new code
+path), and in both cases it exits 0 on a fresh instance. Once the database answers (the bundled Postgres on the launchd shape;
+compose's container), `up` applies `db/migrations/*.sql` not yet in
+`schema_migrations` through `runMigrations` under the same advisory lock
+`update` and doctor's fixer take, before the console is started, and says what
+it applied. A database that does not answer stays a note, as today.
+*Files:* `packages/cli/src/up.ts`, `docs/ops/cli.md`.
+*Tests:* **a fresh scratch instance's `up` leaves no pending migration; a
+second `up` applies nothing; a database that does not answer leaves a note
+and no error**.
+*Accept:* —
+
+**X-138 · `init --shape launchd` prints a second instance's own ports** · S —
+*Spec:* `init` prints the console and reconciler lines from `loadNamespace(dir)`
+(`packages/cli/src/init.ts`), but the namespace file is written later, by
+`up --namespace`, so on a second instance `init` prints the live instance's
+7812 and 8080 and the owner is told to open a console that is not theirs.
+Either `init` takes `--namespace` and records the block `up` will read, or the
+printed lines name no port until `up` has chosen one. The first keeps one
+source for the ports; take it unless the namespace's shape forbids it.
+*Files:* `packages/cli/src/init.ts`, `packages/cli/src/namespace.ts`,
+`docs/ops/cli.md`, `docs/ops/deployment-shapes.md`.
+*Tests:* **`init --shape launchd --namespace` prints the namespaced ports and
+`up` reads the same block; without a namespace the defaults print; a compose
+`init` is unchanged**.
+*Accept:* —
+
+**X-139 · The fixture recorder's fixed work ids advance the sequence** · S —
+*Spec:* `apps/console/scripts/record-client-fixtures.mjs` inserts two `work`
+rows with `OVERRIDING SYSTEM VALUE` (ids 41 and 42, so the fixtures are
+stable) and never moves `work_id_seq` past them: on a database other suites
+share, the next identity insert collides on `work_pkey` — X-25 (#543) saw the
+collision and could not reproduce it. The recorder sets the sequence past the
+ids it forced (`setval`) in the same transaction, or inserts by the sequence
+and rewrites the fixture's ids on the way out. The fixtures stay byte-stable
+either way.
+*Files:* `apps/console/scripts/record-client-fixtures.mjs`.
+*Tests:* **after a recording, an identity insert into `work` succeeds; the
+recorded fixtures are unchanged (`--check`)**.
+*Accept:* —
+
+**X-140 · Two DB-backed suites leave their siblings' rows alone** · S · deps X-25 —
+*Spec:* two suites still reach past their own rows on a shared database.
+`apps/console/test/crews.integration.test.ts` calls `syncCrews` with its own
+map, and the sync's last statement revokes every `crew` row the map does not
+name — another file's crews, mid-test. `apps/console/test/sessions-purge.integration.test.ts`
+clears with `DELETE FROM session_archive WHERE ts <= $1`, which takes every
+suite's rows under that bound. `syncCrews` is right for the product (a crew
+absent from the manifests is gone); the tests are not. The crews test scopes
+its sync (a registry of its own crews, or X-88's per-package database) and the
+purge test deletes only the sessions it inserted.
+*Files:* `apps/console/test/crews.integration.test.ts`,
+`apps/console/test/sessions-purge.integration.test.ts`.
+*Tests:* **a sibling crew row planted before the crews suite is still live
+after it; a sibling `session_archive` row older than the bound survives the
+purge suite**.
+*Accept:* —
+
+**X-141 · Every capture attempt names its own file** · S —
+*Spec:* `captureToInbox` (`packages/mcp-brain/src/capture.ts`) names an
+unplaced capture `<ms>-<name>`, so two attempts in one millisecond — the two
+Add-to-Today presses #549 fixed — still meet on one path: #549 stopped the
+loser deleting the winner's file; the names still collide, and `vaultSink`'s
+create-only `put` throws for the second. The name carries a per-attempt
+component (a short random suffix), the row records the path that was written,
+and the idempotency answer is unchanged.
+*Files:* `packages/mcp-brain/src/capture.ts`, `packages/core/src/` (the sink).
+*Tests:* **a thousand same-millisecond attempts write a thousand files and no
+`put` throws; every inbox row names a file that exists**.
+*Accept:* —
+
+**X-142 · The `.env` render's line hashes are keyed** · S · deps X-124 —
+*Spec:* X-124's drift record (`env-render.json`) holds, per line, the name and
+an unsalted sha256 of `NAME=value`, so a short or low-entropy value — a port,
+a flag, a weak token — is recoverable by dictionary from a file that is
+0600 but outside the Keychain. Record an HMAC under a key only this instance
+holds (a Keychain item `up` mints with the others, X-80's pattern), or a salted
+hash with the salt in the same file; doctor's `env` row still names the
+changed line, and nothing about a value is derivable from the record.
+*Files:* `packages/cli/src/env-render.ts`, `packages/cli/src/doctor.ts`,
+`docs/ops/cli.md`.
+*Tests:* **the same line in two instances records two different hashes; a
+changed line is still named; the record contains no sha256 of any
+`NAME=value`**.
+*Accept:* X-124 merged.
+
+**X-143 · The hidden read restores the terminal in `finally`, and Ctrl-C is tested on `connect-repo`** · S · deps X-127 —
+*Spec:* `readHiddenLine` (`packages/cli/src/stdin-value.ts`) turns raw mode on
+and turns it back on the happy path and on Ctrl-C, but not in a `finally`: a
+throw between the two leaves the owner's terminal raw with echo off. X-127's
+Ctrl-C test covers `secrets set`; `connect-repo --auth token`'s path, which
+shares the reader, has none. The restore moves into `finally`; the Ctrl-C
+test (exit 130, terminal restored, nothing written) runs for each reader.
+*Files:* `packages/cli/src/stdin-value.ts`, `packages/cli/test/`.
+*Tests:* **a reader that throws mid-line leaves raw mode and echo as it found
+them; Ctrl-C on `connect-repo --auth token` exits 130 and writes no token**.
+*Accept:* —
+
+**X-144 · No fixture spells the assistant's name** · S —
+*Spec:* an `.example` test hostname carrying the assistant's name sits in ten
+files — `apps/console/test/passkey-origins.integration.test.ts`,
+`apps/console/test/webauthn.test.ts`, `apps/macos/tests/kit/console-session-tests.swift`,
+`apps/macos/tests/kit/devices-pane-tests.swift`, `packages/cli/test/console-client.test.ts`,
+`packages/cli/src/instances.ts`, `packages/cli/src/main.ts`, `docs/ops/auth.md`,
+`docs/ops/cli.md` and a research note — a hardcoded name `CLAUDE.md` calls a
+bug, and one the X-1 sweep did not reach because it is a hostname. Rename it
+to a neutral example host everywhere, and add the name check CI does not have:
+one grep over fixtures, tests and docs for the configured name outside
+`identity.yaml`.
+*Files:* the ten files above, `ops/scripts/` (the name check).
+*Tests:* **the name check fails on the old hostname in any of the ten and
+passes once they are renamed**.
+*Accept:* —
+
+**X-145 · The devices-pane stubs speak `enroll`'s current refusals** · S · deps X-79 —
+*Spec:* `apps/macos/tests/kit/devices-pane-tests.swift` scripts `metistry
+enroll`'s two refusals by hand (lines 43 and 48), and X-79 then moved the
+refusals' pointer from `docs/ops/auth.md` to the phone guide — the stubs kept
+the old words, so the sheet is tested against text the CLI no longer prints.
+The stubs become recorded output of the CLI's own refusal paths (X-100's
+"held to core" pattern: a fixture the CLI writes and the Swift test reads),
+so a reworded refusal fails the Mac test instead of passing it.
+*Files:* `apps/macos/tests/kit/devices-pane-tests.swift`,
+`packages/cli/test/` (the recorder of the two refusals), the client
+fixtures directory (`FIXTURE_DIR`, `apps/console/scripts/client-fixtures.mjs`).
+*Tests:* **a stub whose text differs from `enroll.ts`'s refusal fails
+`macos-app`**.
+*Accept:* —
+
+**X-146 · `connect --remove`'s help names what it refuses** · S · deps X-134 —
+*Spec:* `packages/cli/src/main.ts`'s `connect` help shows `--remove`'s form
+and says nothing of its two refusals, which `docs/ops/cli.md` and
+`connect.ts` carry: a flag that mints, widens or enrols beside `--remove` is
+refused, and an entry under the same key that names something `connect` did
+not write is left alone. The help says both in one line each, in the words
+the refusals print.
+*Files:* `packages/cli/src/main.ts`, `docs/ops/cli.md`.
+*Tests:* **the help text test asserts both sentences; the refusal's words and
+the help's are one constant**.
+*Accept:* —
+
+**X-147 · A reconnected agent starts without its predecessor's declines** · S · deps X-134 —
+*Spec:* `consecutiveDeclines` (`packages/mcp-brain/src/access.ts`) counts an
+agent's refused access requests by `agents.id`. #516 revives a revoked id in
+place, so an agent reconnected after an accidental revoke inherits every
+decline the old row collected and may start on the escalation path. The count
+reads from the reconnect: declines dated before the row's revival do not
+count. If the owner rules for a new id instead (W5 checkpoint question 1),
+this ticket closes with no change.
+*Files:* `packages/mcp-brain/src/access.ts`, `db/migrations/` if the revival
+time is not already recorded.
+*Tests:* **three declines, a revoke, a reconnect, one decline: the count is
+one**.
+*Accept:* the W5 checkpoint's ruling on X-134.
+
+**X-148 · An opted-out agent's briefing says so, not `tier: none`** · S · deps X-128 —
+*Spec:* `apps/console/src/briefing-route.ts` renders an agent with
+`briefing: false` at `tier: "none"` to empty the briefing, so the answer
+claims a tier the agent does not have and a client cannot tell an opt-out
+from an agent with no read grant. The answer carries the agent's real tier
+and `opted_out: true`, with every section empty; the hooks already read
+`opted_out`.
+*Files:* `apps/console/src/briefing-route.ts`, `docs/ops/client-api.md`.
+*Tests:* **an opted-out agent at the private tier is answered `tier:
+"private"`, `opted_out: true`, no handles; an agent with no read grant is
+answered `tier: "none"` without `opted_out`**.
+*Accept:* —
+
+**X-149 · `GET /api/briefing` is bounded per bearer and answered from a short cache** · S · deps X-128 —
+*Spec:* one briefing call is one `runs` row and four named queries, and
+nothing bounds how often a bearer may ask — X-129's once-per-session marker
+is the client's promise, not the server's rule. The route takes a per-bearer
+limit from the console's `RateLimiter` (a small number per minute; `429` with
+`Retry-After`, one audit row per refused burst, X-111's shape) and answers a
+repeated ask for the same agent and repository within a short window from a
+cache, running no query. The owner's budget and the handles' content are
+unchanged.
+*Files:* `apps/console/src/briefing-route.ts`, `apps/console/src/rate-limit.ts`,
+`docs/ops/client-api.md`.
+*Tests:* U2; **the (N+1)th call in a window is `429`; a second identical call
+inside the cache window runs no query and writes no `runs` row**.
+*Accept:* —
+
+**X-150 · The briefing's marker directory is the user's own** · S · deps X-129 —
+*Spec:* the Claude Code hook's `claimSession`
+(`plugins/claude-code/scripts/briefing.mjs`) creates `<tmpdir>/metistry-briefing`
+with `recursive: true, mode: 0o700`; on a shared `/tmp` (Linux, a multi-user
+Mac) a directory another user made is reused silently, the mode is never
+applied, and the create-only marker then fails with `EACCES`, which the hook
+reads as "deliver" — every session start delivers, or a planted marker
+suppresses the owner's briefing. The directory is the user's own
+(`$XDG_RUNTIME_DIR`, else a uid-suffixed directory the hook creates and
+verifies it owns) and an unowned directory is refused, not reused. The hook's
+`MAX_BRIEFING_CHARS` backstop (32 000) is read against the server's budget
+(`METISTRY_BRIEFING_TOKENS`) so the two cannot disagree silently.
+*Files:* `plugins/claude-code/scripts/briefing.mjs`,
+`plugins/opencode/scripts/briefing.mjs`, `docs/ops/claude-code-plugin.md`.
+*Tests:* **a pre-existing directory owned by another uid is refused and the
+briefing still delivers once; the marker is created `0600` in a `0700`
+directory the user owns**.
+*Accept:* —
+
+**X-151 · The CLI's slow tests declare their timeouts** · S —
+*Spec:* `packages/cli` runs on vitest's default 5 s, and three tests that
+spawn or wait for a process reach it on a slow runner:
+`migrate-shape.test.ts` "refuses on a platform that has no launchd",
+`up.launchd.test.ts`'s missing-Postgres case, and `tcc-pin.test.ts` without
+the database variables. Each either fakes the slow step through the seam it
+already has, or declares its own timeout with the reason beside it; the
+package's default stays 5 s so a new slow test is noticed.
+*Files:* `packages/cli/test/migrate-shape.test.ts`,
+`packages/cli/test/up.launchd.test.ts`, `packages/cli/test/tcc-pin.test.ts`.
+*Tests:* **the three pass ten runs in a row with the suite run at half the
+runner's cores**.
+*Accept:* —
+
+**X-152 · M6 admits `doctor` by its exact form, not by prefix** · S · deps X-123, X-125 —
+*Spec:* the Mac's management door lists its verbs as argument prefixes
+(`management-runner.swift`, `case .doctor: return [["doctor"]]`), which was
+harmless while `doctor` only read. X-123 gave it `--fix --yes`, so the prefix
+now admits a repairing, non-asking run through the one door §2.2 says only
+reads. M6 names the exact forms it admits — `doctor --json`, `doctor --check
+--json` — and X-125's Fix All adds `doctor --fix --json` behind the app's own
+confirm; anything else under `doctor` is refused by the admission check, not
+by the CLI.
+*Files:* `apps/macos/sources/kit/stores/management-runner.swift`,
+`apps/macos/tests/kit/`, `docs/ops/mac-app.md`.
+*Tests:* **`doctor --fix --yes` is refused by M6's admission check; `doctor
+--check --json` is admitted**.
+*Accept:* —
+
+**X-153 · Doctor's restart fixer takes the path `metistry restart` takes** · S · deps X-123 —
+*Spec:* doctor-fix.ts's `restart` fixer calls `controlServices` without the
+instance's env file, so under compose it reaches the project through
+`loadEnv`'s environment while the verb passes `--env-file` explicitly; the two
+agree today by luck and will not after X-124 (the derived `.env`). The fixer
+builds its call exactly as the verb does — one function both use — so the
+compose command doctor runs is the command the owner would type.
+*Files:* `packages/cli/src/doctor-fix.ts`, `packages/cli/src/service-control.ts`.
+*Tests:* **the restart fix's compose command equals `metistry restart
+<svc>`'s, under compose and under launchd**.
+*Accept:* —
+
+**X-154 · Doctor's rules 4, 7 and 9** · M · deps X-123 —
+*Spec:* X-123 shipped the repair contract without three of the design note's
+rules, each named in #554's body: **rule 4**, two readings at least the grace
+apart before a restart (today one failed reading after X-122's grace restarts,
+bounded only by rule 5's 30-minute window); **rule 7**, never interrupt a
+recording (unbuilt because no probe cause restarts a mid-recording bridge
+today — a code path, not a test, should say so); **rule 9**, refuse to repair
+when the release is unknown (`metistry.lock` absent or unreadable), which the
+PR did not list. Each becomes a code path with a test; doctor's `--json` says
+which rule held a fix back.
+*Files:* `packages/cli/src/doctor.ts`, `packages/cli/src/doctor-fix.ts`,
+`docs/ops/cli.md`.
+*Tests:* **one failed reading restarts nothing; two readings a grace apart do;
+a bridge whose `check()` reports a recording is never restarted; with no
+readable release every fixable row becomes your-hand and `--fix` exits
+non-zero**.
+*Accept:* —
+
+**X-155 · Connection check stamps survive two writers** · S · deps X-96 —
+*Spec:* `packages/connections/src/stamps.ts` keeps every connection's
+last-checked stamp in one file, read-modify-written atomically and serialised
+within one process — but the CLI (`connections test`, `doctor`), the Mac's
+Test and the console all write it, and two processes stamping at once lose one
+stamp to the other's rename. One file per connection under the same directory
+(a stamp is a name, a time and a word) removes the shared write; the reader
+lists the directory and stays tolerant of a garbled file.
+*Files:* `packages/connections/src/stamps.ts`, `docs/ops/connections.md`.
+*Tests:* **two processes stamping two connections at once keep both stamps;
+a garbled stamp file reads as never checked**.
+*Accept:* —
+
+**X-156 · `used_by` lists only who can reach a connection** · S · deps X-96 —
+*Spec:* `connectionGrants` (`apps/console/src/connections-route.ts`) lists a
+crew under a connection when `grants.connections` names it, but a crew calls a
+connection only through the `connections` tool group
+(`CREW_TOOL_GROUPS`, `packages/core/src/manifest.ts`), and a crew whose
+manifest grants the connection without the group can never call it — the
+listing says it is used when nothing can use it. A crew is listed only when
+its tool groups include `connections`; an agent's row is unchanged.
+*Files:* `apps/console/src/connections-route.ts`, `docs/ops/client-api.md`.
+*Tests:* **a crew granted the connection without the `connections` group is
+not listed; one with the group is**.
+*Accept:* —
+
+**X-157 · The compose shape carries every proxy-listener variable** · S · deps X-111 —
+*Spec:* X-111's limits are configuration — `METISTRY_CONSOLE_PROXY_CLIENT_HEADER`,
+`_CLIENT_LIMIT`, `_GLOBAL_LIMIT`, `_WINDOW_S` (`apps/console/src/main.ts`) —
+but `docker-compose.yml` passes the console only `METISTRY_CONSOLE_PROXY_PORT`,
+and `docs/ops/deployment-shapes.md` names only the port, so an owner who sets
+a limit under compose sets nothing. The compose file passes the four through
+with the port; the shapes page lists them once, beside the port.
+*Files:* `docker-compose.yml`, `docs/ops/deployment-shapes.md`,
+`.env.example`.
+*Tests:* **the compose config renders every `METISTRY_CONSOLE_PROXY_*` name
+the console reads (a test lists both and compares)**.
+*Accept:* —
+
+**X-158 · Linear's planner test resets what it `SET`** · S · deps X-26 —
+*Spec:* `collectors/test/linear.integration.test.ts` turns `enable_indexscan`,
+`enable_indexonlyscan` and `enable_bitmapscan` off on a pooled client to force
+a plan, and releases the client without resetting them: every later test the
+pool hands that client runs on sequential scans, and a timing or plan
+assertion downstream inherits the setting. The test uses `SET LOCAL` inside a
+transaction it ends, or `RESET` in `finally`; either way the client is
+returned as it was taken.
+*Files:* `collectors/test/linear.integration.test.ts`.
+*Tests:* **after the test, `SHOW enable_indexscan` on the same client is
+`on`**.
+*Accept:* —
+
+**X-159 · The Add a Phone sheet cancels its code when its window closes** · S · deps X-77 —
+*Spec:* the sheet cancels a live code on Done, Escape and `onDisappear`
+(`add-phone-sheet.swift`), but X-77's review noted that closing the Settings
+window with the sheet open may skip the presenter's `close()`, leaving a
+minted code live for its full ten minutes with no view showing it. Prove it
+first (a window-close test against the recorded fixtures); if it stands, the
+model cancels on the window's close as it does on the sheet's, and Devices
+reopens with no stale code.
+*Files:* `apps/macos/sources/kit/add-phone-model.swift`,
+`apps/macos/sources/kit/settings-panes/devices-pane.swift`,
+`apps/macos/tests/kit/devices-pane-tests.swift`.
+*Tests:* **closing the window with a live code runs `enroll --cancel` once;
+reopening Devices shows no code**.
+*Accept:* —
+
+**X-160 · The recorder's refusal of a non-scratch database has a test** · S —
+*Spec:* `record-client-fixtures.mjs` opens its database through `testDb()`,
+which refuses anything but a `metistry_test_*` name — a property the recorder
+relies on and nothing tests end to end: a future recorder that opened `pg`
+directly would pass CI (`check-test-db.mjs` reads test files, not scripts)
+and could record against an install's database. A spawn test under
+`ops/scripts/test/` runs the recorder with `METISTRY_TEST_DB_NAME` set to a
+non-scratch name and asserts the refusal before any connection is made;
+`check-test-db.mjs` takes `apps/console/scripts/` into its scan.
+*Files:* `ops/scripts/test/`, `ops/scripts/check-test-db.mjs`.
+*Tests:* **the recorder exits non-zero and opens no connection on a
+non-scratch name; a `new pg.Pool` in the scripts directory fails CI**.
+*Accept:* —
+
+**X-161 · The watchdog's all-ok test is deterministic** · S —
+*Spec:* `apps/watchdog/test/watchdog.integration.test.ts`'s "all-ok on a
+healthy system (probe names are the doctor contract)" failed intermittently in
+W4, reported beside the hourly-cost probe; the cause is unproven. As with
+X-126: find the race (a probe's clock, an interval that fires before the
+fixture is in place, a shared row), remove it, and keep the behaviour the test
+pins.
+*Files:* `apps/watchdog/test/watchdog.integration.test.ts`,
+`apps/watchdog/src/probes.ts` only if the race is there.
+*Tests:* **the test passes 50 runs in a row**.
+*Accept:* —
+
+**X-162 · A namespaced instance's doctor names only its own ports** · S —
+*Spec:* doctor on a namespaced scratch instance (its own ports, `metistry up
+--namespace`; the W5 checkpoint on `main` at `a715ddc9`, section 4) names the
+default install's live URLs in its rows — `127.0.0.1:1234`, `:11434`,
+`:7810`, `:7811`, `:7813`, `:7815` — so a second instance's owner reads
+another instance's bridges and model servers as their own. Doctor does apply
+the namespace (`applyPorts`, `packages/cli/src/doctor.ts`), but only into
+variables nothing has set, and the bridge and local-model derivations do not
+all read it: a `.env` `init` wrote before the namespace existed (X-138) carries
+the defaults, and the local-model discovery scan of X-123 is skipped only when
+`compute.yaml` names an on-machine provider, which a fresh instance does not.
+Prove which path names each port first; then every probe URL and every
+remediation on a namespaced instance derives from the namespace, and the
+default-port discovery scan runs only on an instance that has no namespace.
+*Files:* `packages/cli/src/doctor.ts`, `packages/cli/src/local-models.ts`,
+`packages/cli/src/namespace.ts`, `docs/ops/deployment-shapes.md`.
+*Tests:* **a namespaced instance's doctor never names another instance's
+ports — no row, URL or remediation carries a port outside its block; an
+un-namespaced instance's rows are unchanged**.
 *Accept:* —
 
 #### W5 — Acceptance
@@ -3459,7 +5703,7 @@ the designer.
 | W2 | answers the *Tidy Me/profile.md* proposal; re-grants Calendar if the eventkit helper's signature changed; creates a **Linear personal API key** and stores it (`metistry secrets set linear_api_key`) on the second instance |
 | W3 | mints a fine-grained GitHub PAT with pull-request write and stores it as `github_write`; creates an **iCloud or Fastmail app password** for CalDAV; reviews the session-fold prompt |
 | W4 | grants Screen Recording, Microphone and Audio Capture on each Mac; records one real meeting; creates a **Gmail app password** (2-Step Verification on) for IMAP; connects Google Calendar through the shipped client |
-| W5 | the acceptance walkthrough; decides 1.0 |
+| W5 | provides an OpenRouter key at run time and spot-checks X-121's generated fixtures, then runs the eval and accepts or holds T9-4 (Q-g); confirms the self-managing-instance design note (M7 reversed, doctor repairs); the acceptance walkthrough; decides 1.0 |
 | when the first confidential-only provider is scheduled (after this program) | deploys the token broker to `auth.metistry.app` and publishes its build hash (§2.6, §5) |
 
 ### 3.5 Effort
@@ -3470,9 +5714,9 @@ the designer.
 | W1 | 44 | 119.5 |
 | W2 | 35 | 128.5 |
 | W3 | 46 | 127.5 |
-| W4 | 17 | 65 |
-| W5 | 1 | 1 |
-| **Total** | **162** | **≈ 479.5** (±30 %) |
+| W4 | 22 | 73 |
+| W5 | 39 | 69 |
+| **Total** | **205** | **≈ 555.5** (±30 %) |
 
 **Revised from ≈ 411.** Added by the answers and the additions: real-time events
 (10: T2-18, T5-7, T7-7), vault git (22.5: T10), Linear (10: T4-24…T4-26), Tomorrow's
@@ -3513,7 +5757,7 @@ coordinator should not have to hold it.
    *Design-heavy* regardless of size, because a wrong call there is expensive:
    F-1…F-8, T2-6 (the section operation), T2-18 (events), T4-6 (actors), T4-9
    (`connection_call`), T9-2 (the policy), T10-3 (integrate before pushing), T10-6
-   (rollback).
+   (rollback), X-75 (minting a first credential) and X-76 (passkey revocation).
 4. **A status on every ticket**, in its frontmatter — `todo`, `in-progress`,
    `in-review`, `merged`, `blocked` — plus `pr:`. The implementing agent sets it in
    its own PR; the generator preserves it. After a compaction the coordinator
@@ -3634,6 +5878,16 @@ places later, with no ticket in this program:
 item for everything else — GitHub pull request reviews, calendar invites and the
 like — with Needs You as a sidebar on Inbox. Designed after the UX build
 completes; no ticket (`decisions-log.md`, *Later*).
+
+**Remote access for the phone — specified** (ruled 2026-09-28; re-ruled
+2026-09-30)**.** The 2026-09-28 item asked for research into an opt-in FSL relay.
+The owner rejected an uncapped FSL-hosted service — its cost grows with users,
+for a free app — and ruled for the owner's choice of provider instead (None,
+Tailscale, Cloudflare Tunnel, zrok, ngrok, port forwarding), plus one opt-in,
+capped FSL relay on AWS (§2.24). It is no longer "after this
+program": §2.23 and §2.24 specify it and X-103…X-120 are its candidates. The research
+is `docs/research/2026-09-28-reaching-your-mac-remotely.md` (revised
+2026-09-30): §3.9 is the capped relay, §6 the rejected designs.
 
 **Also after this program:** the **token broker** (§2.6), built when Slack, Notion,
 Atlassian or another confidential-only provider is scheduled; **OAuth from the

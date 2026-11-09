@@ -12,6 +12,9 @@ import type { Exec, ExecOptions } from "../src/exec.js";
 import { interactiveLine } from "../src/keychain.js";
 import { main } from "../src/main.js";
 import { accountFor, isSecretVar, listSecrets, mintSecret, purgeSecrets, renderSecretList, rewriteEnv, serviceAnswers, sharedScopeSecretName, syncSecrets, wasSharedScope } from "../src/secrets.js";
+import { tokenHash } from "@foldedspacelabs/metistry-core";
+import { inspectEnvText } from "../src/env-render.js";
+import { parseDotEnv } from "../src/env.js";
 import { decodeSecurity } from "./fake-security.js";
 
 /** One instance's id — the account its own secrets are filed under. */
@@ -88,7 +91,7 @@ describe("isSecretVar", () => {
 });
 
 describe("metistry secrets sync", () => {
-  it("round-trips .env → Keychain → .env, preserving every other line byte-for-byte", async () => {
+  it("round-trips .env → Keychain → .env: every secret from the Keychain, every other assignment carried with its value", async () => {
     const file = await envFile();
     const kc = fakeSecurity();
     const lines: string[] = [];
@@ -113,26 +116,27 @@ describe("metistry secrets sync", () => {
     kc.store.set(key(USER, "METISTRY_DB_PASSWORD"), "rotated-in-the-keychain");
     const back = await syncSecrets("env", opts);
     expect(back.changed.sort()).toEqual(["METISTRY_DB_PASSWORD", "METISTRY_VAPID_PRIVATE"]);
-    // no instance_id, so no owner-named store to fill it from: its .env line is left exactly as it was
-    expect(back.skipped).toEqual(["METISTRY_OPENROUTER_API_KEY", "METISTRY_GITHUB_TOKEN"]);
+    // no instance_id, so no owner-named store to fill it from: its .env line is
+    // carried as it was (never lost); the commented declaration has no value to carry
+    expect(back.skipped).toEqual(["METISTRY_GITHUB_TOKEN"]);
 
+    // the file is DERIVED (X-124): stamped, every secret from the Keychain,
+    // every other assignment carried with the value it had
     const after = readFileSync(file, "utf8");
-    expect(after).toBe(ENV_TEXT.replace("METISTRY_DB_PASSWORD=change-me", "METISTRY_DB_PASSWORD=rotated-in-the-keychain"));
-    // every comment, blank line and non-secret assignment is identical
-    const untouched = (t: string) => t.split("\n").filter((l) => !l.startsWith("METISTRY_DB_PASSWORD="));
-    expect(untouched(after)).toEqual(untouched(ENV_TEXT));
+    expect(inspectEnvText(after).kind).toBe("rendered");
+    expect(parseDotEnv(after)).toEqual({ ...parseDotEnv(ENV_TEXT), METISTRY_DB_PASSWORD: "rotated-in-the-keychain" });
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
-  it("appends a secret .env never declared (the name comes from .env.example) under one marker", async () => {
+  it("renders a secret .env never declared (the name comes from .env.example) from the Keychain", async () => {
     const file = await envFile("METISTRY_DB_HOST=127.0.0.1\n");
     const example = join(file, "..", ".env.example");
     await writeFile(example, "METISTRY_DB_HOST=\n# METISTRY_ASSISTANT_TOKEN=\n");
     const kc = fakeSecurity({ [key(USER, "METISTRY_ASSISTANT_TOKEN")]: "tok" });
     await syncSecrets("env", { envFile: file, exampleFile: example, exec: kc.exec, out: () => {}, platform: "darwin", env: {} });
-    expect(readFileSync(file, "utf8")).toBe(
-      "METISTRY_DB_HOST=127.0.0.1\n\n# --- written by `metistry secrets sync --to env` from the Keychain ---\nMETISTRY_ASSISTANT_TOKEN=tok\n",
-    );
+    const after = readFileSync(file, "utf8");
+    expect(inspectEnvText(after).kind).toBe("rendered");
+    expect(parseDotEnv(after)).toEqual({ METISTRY_DB_HOST: "127.0.0.1", METISTRY_ASSISTANT_TOKEN: "tok" });
   });
 
   // GENERATED_SECRETS: an install that predates a variable gains it on the
@@ -155,7 +159,7 @@ describe("metistry secrets sync", () => {
     expect(r.minted).toEqual(["METISTRY_LOCAL_OWNER_TOKEN"]);
     expect(kc.store.get(key(INSTANCE_ID, "METISTRY_LOCAL_OWNER_TOKEN"))).toBe("MINTED-OWNER-TOKEN");
     expect(kc.store.has(key(USER, "METISTRY_LOCAL_OWNER_TOKEN"))).toBe(false); // instance-scoped, not the person's
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_DB_HOST=127.0.0.1\nMETISTRY_LOCAL_OWNER_TOKEN=MINTED-OWNER-TOKEN\n");
+    expect(parseDotEnv(readFileSync(file, "utf8"))).toEqual({ METISTRY_DB_HOST: "127.0.0.1", METISTRY_LOCAL_OWNER_TOKEN: "MINTED-OWNER-TOKEN" });
     expect(out.join("\n")).toContain("minted METISTRY_LOCAL_OWNER_TOKEN");
     expect(out.join("\n")).not.toContain("MINTED-OWNER-TOKEN"); // a value is never printed
     for (const c of kc.calls) for (const a of c.argv) expect(a).not.toContain("MINTED-OWNER-TOKEN");
@@ -179,7 +183,8 @@ describe("metistry secrets sync", () => {
     expect(r.minted).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
     expect(r.skipped).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER"]);
     expect(kc.store.get(key(INSTANCE_ID, "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"))).toBe("MINTED-OWNER-BEARER");
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_BRIDGE_TOKEN_RECONCILER=\nMETISTRY_BRIDGE_TOKEN_RECONCILER_USER=MINTED-OWNER-BEARER\n");
+    // the empty declaration has no value to carry, so the derived file has one line
+    expect(parseDotEnv(readFileSync(file, "utf8"))).toEqual({ METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "MINTED-OWNER-BEARER" });
     expect(out.join("\n")).not.toContain("MINTED-OWNER-BEARER");
     expect(out.join("\n")).toContain("restart");
   });
@@ -188,7 +193,7 @@ describe("metistry secrets sync", () => {
   // the values the running console and reconciler were started with — but
   // whose Keychain did not. Minting there rotated both behind the running
   // services, and every Mac app write came back 401 / `unauthenticated`.
-  it("**adopts a generated token .env already holds into the Keychain — never mints over it, .env byte-for-byte unchanged**", async () => {
+  it("**adopts a generated token .env already holds into the Keychain — never mints over it, every value unchanged**", async () => {
     const text = "METISTRY_DB_HOST=127.0.0.1\nMETISTRY_LOCAL_OWNER_TOKEN=running-console-token\n# the reconciler's owner bearer\nMETISTRY_BRIDGE_TOKEN_RECONCILER_USER='running-owner-bearer'\n";
     const file = await envFile(text);
     const kc = fakeSecurity();
@@ -207,15 +212,16 @@ describe("metistry secrets sync", () => {
     });
     expect(mints).toBe(0);
     expect(r.minted).toEqual([]);
-    expect(r.adopted).toEqual(["METISTRY_LOCAL_OWNER_TOKEN", "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
+    expect(r.adopted).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER_USER", "METISTRY_LOCAL_OWNER_TOKEN"]);
     expect(r.rotated).toEqual([]);
     expect(r.restart).toEqual([]);
     expect(probed).toEqual([]); // nothing changed, so nothing to ask about
     expect(kc.store.get(key(INSTANCE_ID, "METISTRY_LOCAL_OWNER_TOKEN"))).toBe("running-console-token");
     expect(kc.store.get(key(INSTANCE_ID, "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"))).toBe("running-owner-bearer");
-    expect(readFileSync(file, "utf8")).toBe(text);
+    // the derived file holds exactly the values the running services were started with
+    expect(parseDotEnv(readFileSync(file, "utf8"))).toEqual(parseDotEnv(text));
     const said = out.join("\n");
-    expect(said).toContain("adopted METISTRY_LOCAL_OWNER_TOKEN");
+    expect(said).toContain("adopted into the login Keychain from the file (the value the running services hold is kept): METISTRY_BRIDGE_TOKEN_RECONCILER_USER, METISTRY_LOCAL_OWNER_TOKEN");
     expect(said).not.toContain("minted");
     expect(said).not.toContain("running-console-token");
     expect(said).not.toContain("running-owner-bearer");
@@ -236,7 +242,7 @@ describe("metistry secrets sync", () => {
     expect(mints).toBe(1);
     expect(r.minted).toEqual(["METISTRY_LOCAL_OWNER_TOKEN"]);
     expect(r.adopted).toEqual([]);
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_LOCAL_OWNER_TOKEN=MINTED-1\n");
+    expect(parseDotEnv(readFileSync(file, "utf8"))).toEqual({ METISTRY_LOCAL_OWNER_TOKEN: "MINTED-1" });
     await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {}, mint: () => `MINTED-${++mints}` });
     expect(mints).toBe(1);
   });
@@ -248,7 +254,7 @@ describe("metistry secrets sync", () => {
     expect(r.minted).toEqual([]);
     expect(r.adopted).toEqual([]);
     expect(r.rotated).toEqual(["METISTRY_LOCAL_OWNER_TOKEN"]);
-    expect(readFileSync(file, "utf8")).toBe("X=1\nMETISTRY_LOCAL_OWNER_TOKEN=keychain-value\n");
+    expect(parseDotEnv(readFileSync(file, "utf8"))).toEqual({ X: "1", METISTRY_LOCAL_OWNER_TOKEN: "keychain-value" });
   });
 
   it("under an installed launchd shape the restart is the verb's own (env-follow.ts): no `metistry restart`, which would respawn the child with supervisor.json's stale environment", async () => {
@@ -269,8 +275,8 @@ describe("metistry secrets sync", () => {
     const out: string[] = [];
     const running = { console: true, reconciler: true } as const;
     const r = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: (l) => out.push(l), platform: "darwin", env: {}, mint: () => "FRESH", serviceRunning: async (svc) => running[svc] });
-    expect(r.rotated).toEqual(["METISTRY_LOCAL_OWNER_TOKEN", "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
-    expect(r.restart).toEqual(["console", "reconciler"]);
+    expect(r.rotated).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER_USER", "METISTRY_LOCAL_OWNER_TOKEN"]);
+    expect(r.restart.sort()).toEqual(["console", "reconciler"]);
     const said = out.join("\n");
     expect(said).toMatch(/RESTART NEEDED: the console is running with the previous METISTRY_LOCAL_OWNER_TOKEN .* `metistry restart console`/);
     expect(said).toMatch(/RESTART NEEDED: the reconciler is running with the previous METISTRY_BRIDGE_TOKEN_RECONCILER_USER .* `metistry restart reconciler`/);
@@ -306,7 +312,10 @@ describe("metistry secrets sync", () => {
     const r = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {} });
     expect(r.minted).toEqual([]);
     expect(r.skipped.sort()).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER", "METISTRY_GITHUB_TOKEN", "METISTRY_OPENROUTER_API_KEY"]);
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_GITHUB_TOKEN=\nMETISTRY_OPENROUTER_API_KEY=\nMETISTRY_BRIDGE_TOKEN_RECONCILER=\n");
+    // nothing to render and nothing to carry: a stamped file with no assignment
+    const after = readFileSync(file, "utf8");
+    expect(inspectEnvText(after).kind).toBe("rendered");
+    expect(parseDotEnv(after)).toEqual({});
   });
 
   it("uncomments a documented-but-unset declaration in place", () => {
@@ -319,7 +328,7 @@ describe("metistry secrets sync", () => {
     const file = await envFile("METISTRY_DB_PASSWORD=x\n");
     const kc = fakeSecurity({ [key(USER, "METISTRY_DB_PASSWORD")]: "pass word # not a comment" });
     await syncSecrets("env", { envFile: file, exec: kc.exec, out: () => {}, platform: "darwin", env: {} });
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_DB_PASSWORD='pass word # not a comment'\n");
+    expect(readFileSync(file, "utf8")).toContain("\nMETISTRY_DB_PASSWORD='pass word # not a comment'\n");
 
     kc.store.set(key(USER, "METISTRY_DB_PASSWORD"), "has'quote");
     await expect(syncSecrets("env", { envFile: file, exec: kc.exec, out: () => {}, platform: "darwin", env: {} })).rejects.toThrow(/single quote/);
@@ -463,13 +472,14 @@ describe("instance-scoped secrets", () => {
     const r = await syncSecrets("env", { envFile: file, envTarget: target, exec: kc.exec, out: (l) => lines.push(l), platform: "darwin", env: {}, instanceId: INSTANCE_ID });
 
     expect(r.wrote).toBe(target);
-    // every line of the old file is carried over, not just the secrets
+    // every assignment of the old file is carried over, not just the secrets — into a derived, stamped file
     const moved = readFileSync(target, "utf8");
-    expect(moved).toBe(ENV_TEXT.replace("METISTRY_DB_PASSWORD=change-me", "METISTRY_DB_PASSWORD=rotated"));
+    expect(inspectEnvText(moved).kind).toBe("rendered");
+    expect(parseDotEnv(moved)).toEqual({ ...parseDotEnv(ENV_TEXT), METISTRY_DB_PASSWORD: "rotated" });
     expect(statSync(target).mode & 0o777).toBe(0o600);
     // and the running install's file is untouched
     expect(readFileSync(file, "utf8")).toBe(ENV_TEXT);
-    expect(lines.join("\n")).toContain("LEFT IN PLACE");
+    expect(lines.join("\n")).toContain("the old file is left in place");
   });
 
   it("mint files the new token under the instance's account", async () => {
@@ -519,8 +529,8 @@ describe("instance-scoped secrets", () => {
   });
 });
 
-describe("metistry secrets sync --to env — a sync-read connection's secret (T4-24)", () => {
-  it("delivers the Linear key as METISTRY_SECRET_LINEAR_API_KEY for the console's sync — and never an MCP connection's", async () => {
+describe("metistry secrets sync --to env — a connection's secret the console fills (T4-24, T4-10)", () => {
+  it("delivers the Linear key for the console's sync, and an MCP connection's for the pool the console holds — never one nothing fills", async () => {
     const dir = await mkdtemp(join(tmpdir(), "metistry-sync-linear-"));
     const files: Record<string, string> = {
       ".metistry/identity.yaml": `name: Aide\ninstance_id: "${INSTANCE_ID}"\n`,
@@ -528,6 +538,8 @@ describe("metistry secrets sync --to env — a sync-read connection's secret (T4
       ".metistry/connections/linear.yaml":
         "name: linear\ntype: tracker\nprovider: linear\nreach:\n  http:\n    url: https://api.linear.app/graphql\n    auth: { scheme: api_key, header: Authorization, secret: linear_api_key }\nsecrets: [linear_api_key]\n",
       ".metistry/connections/gh.yaml": "name: gh\ntype: mcp\nprovider: custom\nreach:\n  http:\n    url: https://mcp.example.test/mcp\n    auth: { scheme: bearer, secret: github_read }\nsecrets: [github_read]\n",
+      // a secret this instance holds that no connection lists stays in the Keychain
+      ".metistry/secrets.yaml": "secrets:\n  unused_key: { hosts: [x.example.test] }\n",
     };
     for (const [rel, text] of Object.entries(files)) {
       await mkdir(join(dir, rel, ".."), { recursive: true });
@@ -535,7 +547,8 @@ describe("metistry secrets sync --to env — a sync-read connection's secret (T4
     }
     const kc = fakeSecurity({
       [`${INSTANCE_ID}/metistry:secret:linear_api_key`]: "linear-value-for-the-sync",
-      [`${INSTANCE_ID}/metistry:secret:github_read`]: "mcp-value-stays-in-the-keychain",
+      [`${INSTANCE_ID}/metistry:secret:github_read`]: "mcp-value-for-the-pool",
+      [`${INSTANCE_ID}/metistry:secret:unused_key`]: "unused-value-stays-in-the-keychain",
     });
     const out: string[] = [];
     const code = await main(["secrets", "sync", "--to", "env", "--instance", dir, "--product-dir", fileURLToPath(new URL("../../..", import.meta.url))], {
@@ -551,8 +564,10 @@ describe("metistry secrets sync --to env — a sync-read connection's secret (T4
     expect(code, out.join("\n")).toBe(0);
     const env = readFileSync(join(dir, ".metistry/state/.env"), "utf8");
     expect(env).toContain("METISTRY_SECRET_LINEAR_API_KEY=linear-value-for-the-sync");
-    expect(env).not.toContain("mcp-value-stays-in-the-keychain"); // the pool fills an MCP connection's secret where it dials
-    expect(env).not.toContain("METISTRY_SECRET_GITHUB_READ");
+    // the console holds the pool the proxy dials through (T4-10): an MCP connection's secret is filled there, at the door
+    expect(env).toContain("METISTRY_SECRET_GITHUB_READ=mcp-value-for-the-pool");
+    expect(env).not.toContain("unused-value-stays-in-the-keychain");
+    expect(env).not.toContain("METISTRY_SECRET_UNUSED_KEY");
     for (const l of out) expect(l).not.toContain("linear-value-for-the-sync");
   });
 });
@@ -667,5 +682,91 @@ describe("metistry secrets list", () => {
     expect(table).toContain("METISTRY_GITHUB_TOKEN");
     // presence is checked WITHOUT -w, so `security` is never even asked for a value
     for (const c of kc.calls) expect(c.args).not.toContain("-w");
+  });
+});
+
+// X-80: `secrets mint` with no variable makes the recorder's three tokens
+// (the same idempotent code `up` runs); with a variable it replaces that one,
+// as ever — and the inbox token is only a credential once the console has its hash.
+describe("metistry secrets mint — the recorder's tokens (X-80)", () => {
+  const RECORDER = ["METISTRY_LIVE_CAPTURE_CONTROL_TOKEN", "METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE", "METISTRY_LIVE_CAPTURE_INBOX_TOKEN"];
+  const instance = async (env: string) => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-mint-recorder-"));
+    for (const [rel, text] of Object.entries({ ".metistry/identity.yaml": `name: Aide\ninstance_id: "${INSTANCE_ID}"\n`, ".metistry/state/.env": env })) {
+      await mkdir(join(dir, rel, ".."), { recursive: true });
+      await writeFile(join(dir, rel), text, { mode: 0o600 });
+    }
+    return dir;
+  };
+  const ownerTokens = () => {
+    const rows: Array<{ token_hash: string; label: string }> = [];
+    return {
+      rows,
+      openSession: async () => ({
+        query: async (text: string, values: unknown[] = []) => {
+          if (text.startsWith("SELECT")) return { rows: rows.filter((r) => r.token_hash === values[0]) };
+          rows.push({ token_hash: values[0] as string, label: values[1] as string });
+          return { rows: [] };
+        },
+        end: async () => {},
+      }),
+    };
+  };
+  const mint = async (dir: string, kc: ReturnType<typeof fakeSecurity>, db: ReturnType<typeof ownerTokens>, ...rest: string[]) => {
+    const out: string[] = [];
+    try {
+      const code = await main(["secrets", "mint", ...rest, "--instance", dir, "--product-dir", fileURLToPath(new URL("../../..", import.meta.url))], {
+        out: (l) => out.push(l),
+        err: (l) => out.push(l),
+        exec: kc.exec,
+        platform: "darwin",
+        openSession: db.openSession,
+      });
+      return { code, text: out.join("\n") };
+    } finally {
+      // loadInstallEnv writes the (temp) instance's .env into the environment; an earlier mint must not answer for the next
+      for (const n of [...RECORDER, "METISTRY_LIVE_CAPTURE_URL", "METISTRY_INSTANCE_DIR"]) delete process.env[n];
+    }
+  };
+
+  it("**bare, with the recorder configured: makes all three, records the inbox token, keeps them on a rerun**", async () => {
+    const dir = await instance("METISTRY_LIVE_CAPTURE_URL=http://127.0.0.1:7815\n");
+    const kc = fakeSecurity();
+    const db = ownerTokens();
+    const first = await mint(dir, kc, db);
+    expect(first.code, first.text).toBe(0);
+    const held = RECORDER.map((n) => kc.store.get(key(INSTANCE_ID, n))!);
+    for (const v of held) expect(v).toBeTruthy();
+    const env = readFileSync(join(dir, ".metistry/state/.env"), "utf8");
+    RECORDER.forEach((n, i) => expect(env).toContain(`${n}=${held[i]}`));
+    expect(db.rows).toEqual([{ token_hash: tokenHash(held[2]!), label: "live-capture" }]);
+    for (const v of held) expect(first.text).not.toContain(v);
+
+    const stored = new Map(kc.store);
+    const again = await mint(dir, kc, db);
+    expect(again.code, again.text).toBe(0);
+    expect(kc.store).toEqual(stored);
+    expect(readFileSync(join(dir, ".metistry/state/.env"), "utf8")).toBe(env);
+    expect(db.rows).toHaveLength(1);
+  });
+
+  it("**bare, without the recorder configured: refuses and mints nothing**", async () => {
+    const dir = await instance("METISTRY_DB_HOST=127.0.0.1\n");
+    const kc = fakeSecurity();
+    const r = await mint(dir, kc, ownerTokens());
+    expect(r.code).toBe(2);
+    expect(r.text).toContain("METISTRY_LIVE_CAPTURE_URL");
+    expect(kc.calls).toEqual([]);
+  });
+
+  it("naming the inbox token replaces it and records the new one as a capture owner token", async () => {
+    const dir = await instance("METISTRY_LIVE_CAPTURE_URL=http://127.0.0.1:7815\n");
+    const kc = fakeSecurity();
+    const db = ownerTokens();
+    const r = await mint(dir, kc, db, "METISTRY_LIVE_CAPTURE_INBOX_TOKEN");
+    expect(r.code, r.text).toBe(0);
+    expect(db.rows).toEqual([{ token_hash: tokenHash(kc.store.get(key(INSTANCE_ID, "METISTRY_LIVE_CAPTURE_INBOX_TOKEN"))!), label: "live-capture" }]);
+    // the other two are not touched by naming one
+    expect(kc.store.has(key(INSTANCE_ID, "METISTRY_LIVE_CAPTURE_CONTROL_TOKEN"))).toBe(false);
   });
 });

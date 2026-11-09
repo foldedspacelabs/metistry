@@ -77,7 +77,7 @@ import Testing
     #expect(model.blockedCount("metistry") == 1, "the board's Blocked column, counted")
     // The instance's own agent inherits nothing and is not counted as joined (T4-7).
     #expect(model.agentCount(p) == 1)
-    let row = ProjectRowWords(p, agents: model.agentCount(p), blocked: model.blockedCount(p.id), now: recordedNow)
+    let row = ProjectRowWords(p, agents: model.agentCount(p), blocked: model.blockedCount(p.id), now: fixtureNow)
     #expect(row.facts == "1 agent · 4 open · 1 blocked · active 1 hour ago")
     #expect(row.spend.line == "$0.00 today · no budget")
     #expect(row.spoken == "Metistry, Review, 1 agent, 4 open, 1 blocked, active 1 hour ago, $0.00 today · no budget")
@@ -122,7 +122,7 @@ import Testing
 @MainActor
 @Test func oldSpendSaysWhenItIsFromAndOffersSyncNow() async throws {
     let console = ProjectsConsole()
-    let (model, session) = projectsModel(console, now: recordedNow.addingTimeInterval(40 * 60))
+    let (model, session) = projectsModel(console, now: fixtureNow.addingTimeInterval(40 * 60))
     defer { withExtendedLifetime(session) {} }
     await model.load()
     guard case .content(let since?) = model.paint else { Issue.record("\(model.paint)"); return }
@@ -426,8 +426,11 @@ import Testing
 // MARK: - Helpers
 
 private let utc = TimeZone(identifier: "UTC")!
-/// An hour after the recorded projects fixture.
+/// The clock the scripted projects are read at.
 private let recordedNow = WireTime.date("2026-09-28T23:04:20.779Z")!
+/// An hour after the recorded projects fixture — read from the fixture, since
+/// every recording stamps its project at its own wall clock (X-29).
+private let fixtureNow = ConsoleFixture.asOf("get-api-projects").addingTimeInterval(60 * 60)
 
 /// 27 Sep at a UTC clock time.
 private func at(_ hhmm: String) -> Date {
@@ -443,7 +446,7 @@ private func projectsModel(_ console: any ConsoleCallTransport, now: Date = reco
 @MainActor
 private func fixtureModel() async throws -> (ProjectsModel, FixtureConsole, ConsoleSession) {
     let console = try FixtureConsole.recorded()
-    let (model, session) = projectsModel(console)
+    let (model, session) = projectsModel(console, now: fixtureNow)
     await model.load()
     return (model, console, session)
 }

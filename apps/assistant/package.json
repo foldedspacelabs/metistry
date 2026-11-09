@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/assistant",
   "private": true,
-  "version": "0.15.1",
+  "version": "0.17.2",
   "description": "Metistry assistant engine: Agent SDK host draining inbound messages, resuming sessions by thread. Ships as a container image.",
   "license": "Apache-2.0",
   "type": "module",
@@ -17,16 +17,16 @@
   "dependencies": {
     "@foldedspacelabs/metistry-core": "workspace:*",
     "@foldedspacelabs/metistry-queries": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.30.1",
-    "chokidar": "^5.0.0",
-    "pg": "^8.16.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "chokidar": "^6.0.0",
+    "pg": "^8.23.1",
     "yaml": "^2.9.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.6",
     "@types/pg": "^8.16.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.1.0"
   }
 }

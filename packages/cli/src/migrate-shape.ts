@@ -43,7 +43,7 @@ import { findPgToolchain, pgCandidates, pgDataDir, pgIsReady, pgSocketDir, type 
 import { runtimeDir, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
 import { pinTccHelpers } from "./tcc-pin.js";
 import { StepFailed, StepRunner } from "./steps.js";
-import { composeEnvArgs, COMPOSE_TIMEOUT_MS, instanceLock, runDirFor, stateRoot, up, type UpOptions, type UpResult } from "./up.js";
+import { composeEnvArgs, prepareComposePolicy, COMPOSE_TIMEOUT_MS, instanceLock, runDirFor, stateRoot, up, type UpOptions, type UpResult } from "./up.js";
 
 /** The services that actually change supervisor. `reconciler` and `watchdog` are host jobs in either shape (invariant 6). */
 export const SHAPE_SERVICES = ["db", "console", "assistant"] as const;
@@ -750,7 +750,8 @@ async function restoreCompose(ctx: Ctx, opts: MigrateShapeOptions, cause: StepFa
   r.section("compensating: bring the compose stack back");
   r.note(`the launchd side failed after the compose db was stopped — restoring compose rather than leaving neither shape running: ${cause.message}`);
   const up1 = compose(ctx, ["up", "-d"]);
-  await r.run(up1.cmd, up1.args, { cwd: up1.cwd, timeoutMs: COMPOSE_TIMEOUT_MS, tolerateFailure: true, comment: "bringing the compose stack back after the launchd attempt failed" });
+  // the same secrets.yaml mount `up` gives compose (X-7), or the recreated containers would come back with none
+  await r.run(up1.cmd, up1.args, { cwd: up1.cwd, env: { ...r.env, ...(await prepareComposePolicy(r, ctx.instanceDir || undefined)) }, timeoutMs: COMPOSE_TIMEOUT_MS, tolerateFailure: true, comment: "bringing the compose stack back after the launchd attempt failed" });
   const set = await (opts.setShapeFn ?? setDeploymentShape)({
     productDir: ctx.productDir,
     instanceDir: ctx.instanceDir,

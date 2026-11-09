@@ -351,8 +351,13 @@ export const CREW_GROUP_ALIASES: Readonly<Record<string, CrewToolGroup>> = { "br
  * sync (apps/console/src/crews.ts). An approved ask would be undone by that
  * sync, so widening a crew is an edit to its manifest, in the user's hand,
  * and the console refuses the widening as well (docs/ops/actions.md).
+ *
+ * `recording_review` (T8-4, plan §2.15) is the live-capture bridge's
+ * re-review of a recording: it reads what other people said in a meeting,
+ * and only the assistant — whose turn runs on the `private` tier while a
+ * capture session is in scope — may ask for it. No crew ever holds it.
  */
-export const CREW_NEVER_TOOLS = ["knowledge_write", "agents_delegate", "queries_list", "queries_run", "request_access"] as const;
+export const CREW_NEVER_TOOLS = ["knowledge_write", "agents_delegate", "queries_list", "queries_run", "request_access", "recording_review"] as const;
 
 /** Resolve a `uses` entry to its group; undefined when it names nothing known. */
 export function crewGroupOf(entry: string): CrewToolGroup | undefined {

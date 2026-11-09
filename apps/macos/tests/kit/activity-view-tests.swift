@@ -101,7 +101,9 @@ import Testing
     let items = model.items
     let turn = try #require(items.first { if case .turn = $0 { return true } else { return false } })
     guard case .turn(let head, let turnID, let calls) = turn else { return }
-    #expect(turnID == "turn-FsBUg1CO")
+    // the turn whose calls the recorder seeded: the turn_id its tool rows carry
+    let seeded = try #require(try recordedFeed().first { $0["kind"]?.stringValue == "tool" }?["turn_id"]?.stringValue)
+    #expect(turnID == seeded)
     #expect(calls.map(\.subject) == ["knowledge_search", "tasks_update"])
     // the calls are not rows of their own
     #expect(!items.contains { $0.head.kind == "tool" })
@@ -119,7 +121,7 @@ import Testing
     console.reset()
     await model.setExpanded(turn, true)
     let asked = try #require(console.calls.first { $0.path.hasPrefix("/api/q/activity_feed") })
-    #expect(query(asked.path)["turn_id"] == "turn-FsBUg1CO", "\(asked.path)")
+    #expect(query(asked.path)["turn_id"] == seeded, "\(asked.path)")
     #expect(model.presentation(turn, assistantName: "Aide").spoken.contains("expanded"))
     #expect(!model.calls(of: turn).rows.contains { $0.kind == "turn" }, "the turn is the disclosure, not one of its calls")
 }
@@ -454,7 +456,12 @@ import Testing
 
 private let utc = TimeZone(identifier: "UTC")!
 /// Two minutes after the recorded feed's `as_of`.
-private let recordedNow = WireTime.date("2026-09-28T23:07:56.988Z")!
+private let recordedNow = ConsoleFixture.asOf("get-api-q-activity_feed").addingTimeInterval(2 * 60)
+
+/// The rows of the recorded feed, as the console served them.
+private func recordedFeed() throws -> [JSONValue] {
+    try #require(ConsoleFixture.load("get-api-q-activity_feed").replyJSON?["rows"]?.arrayValue)
+}
 
 @MainActor
 private func activityModel(_ console: any ConsoleCallTransport) -> (ActivityModel, ConsoleSession) {
@@ -467,7 +474,7 @@ private func fixtureModel() async throws -> (ActivityModel, FixtureConsole, Cons
     let console = try FixtureConsole.recorded()
     let (model, session) = activityModel(console)
     await model.load()
-    #expect(model.rows.count == 44, "the recorded feed")
+    #expect(model.rows.count == (try recordedFeed()).count, "the recorded feed, every row of it")
     return (model, console, session)
 }
 

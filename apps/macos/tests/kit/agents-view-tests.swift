@@ -82,25 +82,108 @@ import Testing
 
 // MARK: - core's arithmetic, carried over
 
-@Test func autonomyWideningsSaysWhatCoreSays() {
+/// The kinds core's arithmetic speaks of that the app's carried copy does not:
+/// none. The app carries every kind core has, `connection_call` and its own
+/// ceiling (`propose` at every level) included — a kind missing here is one the
+/// editor cannot show, cannot confirm a widening of, and (the PUT replaces the
+/// whole record) would erase from the owner's record on an unrelated edit. The
+/// test below fails the moment core grows a kind, until the app carries it.
+private let kindsCoreHasThatTheAppCarriesNot: [String] = []
+
+@Test func autonomyWideningsSaysWhatCoreSays() throws {
     typealias R = AgentAutonomy.Record
-    // packages/core/test/actions.test.ts, "autonomyWidenings — what the owner's hand is required for"
-    #expect(AgentAutonomy.widenings(R(), R(level: "propose")) == [
-        "level observe → propose", "actions.dispatch deny → propose", "actions.task_update deny → propose", "actions.comment deny → propose", "actions.capture deny → propose",
-    ])
-    #expect(AgentAutonomy.widenings(R(level: "propose"), R(level: "act_within_scope", actions: ["dispatch": "allow"])) == [
-        "level propose → act_within_scope", "actions.dispatch propose → allow", "actions.task_update propose → allow", "actions.comment propose → allow", "actions.capture propose → allow",
-    ])
-    #expect(AgentAutonomy.widenings(R(level: "act_within_scope"), R(level: "propose")) == [])
-    #expect(AgentAutonomy.widenings(R(level: "propose"), R(level: "propose")) == [])
-    #expect(AgentAutonomy.widenings(R(level: "act_within_scope"), R(level: "act_within_scope", actions: ["comment": "deny"])) == [])
-    // an entry raised under a ceiling that refuses it changes nothing
-    #expect(AgentAutonomy.widenings(R(level: "propose"), R(level: "propose", actions: ["comment": "allow"])) == [])
-    // a stored key the console does not know is dropped, never widened
+    // packages/core/test/held-to-core/autonomy-widenings.json — core's own
+    // actions.test.ts runs every case through the real functions
+    let core = try HeldToCore.cases("autonomy-widenings")
+    #expect(HeldToCore.strings(core["levels"]) == AgentAutonomy.levels, "levels are ranked by their order")
+    #expect(HeldToCore.strings(core["modes"]) == AgentAutonomy.modes, "modes are ranked by their order")
+    let coreKinds = HeldToCore.strings(core["kinds"])
+    #expect(coreKinds.filter { !AgentAutonomy.kinds.contains($0) } == kindsCoreHasThatTheAppCarriesNot, "core's kinds: \(coreKinds)")
+    #expect(AgentAutonomy.kinds.allSatisfy(coreKinds.contains))
+    let notCarried = kindsCoreHasThatTheAppCarriesNot
+
+    let widenings = HeldToCore.array(core["widenings"])
+    #expect(widenings.count >= 10, "the shared cases did not load")
+    for c in widenings {
+        let why = c["why"]?.stringValue ?? "?"
+        // a stored record as the console reads it: what the app does not model is dropped
+        let got = AgentAutonomy.widenings(R(json: c["prev"]), R(json: c["next"]))
+        let want = HeldToCore.strings(c["expect"]).filter { line in !notCarried.contains { line.hasPrefix("actions.\($0) ") } }
+        #expect(got == want, "\(why)")
+    }
+
+    let effective = HeldToCore.array(core["effective"])
+    #expect(effective.count >= 5, "the shared cases did not load")
+    for c in effective {
+        let why = c["why"]?.stringValue ?? "?"
+        let want = HeldToCore.object(c["expect"]).compactMapValues(\.stringValue).filter { !notCarried.contains($0.key) }
+        #expect(AgentAutonomy.effective(R(json: c["record"])) == want, "\(why)")
+    }
+
+    // a stored key the console does not know is dropped, never widened (the app's own, not core's)
     #expect(R(json: .object(["level": .string("root"), "actions": .object(["dispatch": .string("always")])])) == R())
-    // effectiveActions agrees with the recorded `scope.autonomy.actions`
-    #expect(AgentAutonomy.effective(R(level: "propose")) == ["dispatch": "propose", "task_update": "propose", "comment": "propose", "capture": "propose"])
-    #expect(AgentAutonomy.effective(R(level: "act_within_scope")) == ["dispatch": "propose", "task_update": "allow", "comment": "allow", "capture": "allow"])
+
+    // the app's own, beyond core's cases: a stored KIND it does not know rides
+    // through unchanged — core may have grown a sixth; the PUT replaces the
+    // record, so dropping it would erase it
+    let sixth = R(json: .object(["level": .string("propose"), "actions": .object(["dispatch": .string("deny"), "teleport": .string("allow"), "odd": .number(1)])]))
+    #expect(sixth == R(level: "propose", actions: ["dispatch": "deny", "teleport": "allow"]))
+    #expect(AgentAutonomy.effective(sixth)["teleport"] == nil, "what it does not know it does not compute")
+    #expect(AgentAutonomy.widenings(R(level: "propose"), sixth) == [], "nor call a widening")
+    // the recorded registry's own table (GET /api/agents, scope.autonomy.actions) has the same kinds
+    let recorded = try ConsoleFixture.load("get-api-agents")
+    let cursor = recorded.replyJSON?["agents"]?.arrayValue?.first { $0["id"]?.stringValue == "cursor" }
+    #expect(cursor?["scope"]?["autonomy"]?["actions"]?.objectKeys.sorted() == coreKinds.sorted(), "\(String(describing: cursor?["scope"]?["autonomy"]?["actions"]))")
+    // the editor never offers a mode a kind's own ceiling would swallow
+    #expect(AgentAutonomy.offeredModes("connection_call") == ["deny", "propose"])
+    #expect(AgentAutonomy.offeredModes("dispatch") == AgentAutonomy.modes)
+}
+
+
+@MainActor
+@Test func aStoredConnectionCallDenySurvivesAnUnrelatedEdit() async throws {
+    // THE REGRESSION. PUT /api/agents/:id/autonomy replaces the record. The
+    // app once carried four kinds, so an owner's `connection_call: deny` was
+    // dropped on read and absent from the body: editing a folder or a comment
+    // mode silently turned asking back on — a widening the confirm never listed.
+    let stored: JSONValue = .object([
+        "level": .string("propose"),
+        "actions": .object(["connection_call": .string("deny"), "teleport": .string("allow")]),
+        "max_open_bundles": .number(2),
+        "accept_from": .array([.string("user")]),
+    ])
+    let console = AgentsConsole()
+    console.registry = registry { agents in agents["opencode"]?["autonomy"] = stored }
+    let (model, session) = agentsModel(console)
+    defer { withExtendedLifetime(session) {} }
+    await model.load()
+    await model.open("opencode")
+    model.beginAccessEdit("opencode")
+    let draft = try #require(model.access)
+    #expect(draft.autonomy == AgentAutonomy.Record(level: "propose", actions: ["connection_call": "deny", "teleport": "allow"]), "the deny and the kind this build does not know are both read")
+
+    // an unrelated edit: comment → Never, a narrowing
+    model.access?.autonomy.actions["comment"] = "deny"
+    console.reset()
+    await model.commitAccess()
+    #expect(model.widening == nil, "a narrowing confirms nothing")
+    let put = try #require(console.calls.first { $0.method == "PUT" })
+    #expect(put.path == "/api/agents/opencode/autonomy")
+    #expect(put.body == .object([
+        "level": .string("propose"),
+        "actions": .object(["comment": .string("deny"), "connection_call": .string("deny"), "teleport": .string("allow")]),
+        "max_open_bundles": .number(2),
+        "accept_from": .array([.string("user")]),
+    ]), "the whole record goes back: the deny the owner set, the kind this build does not know, the §4.21 keys")
+
+    // and taking the deny off IS a widening the confirm sheet lists, in core's words
+    var widened = draft
+    widened.autonomy.actions["connection_call"] = nil
+    #expect(widened.widenings == ["actions.connection_call deny → propose"])
+    let confirm = try #require(WideningConfirmation(widened)?.confirmation)
+    #expect(confirm.costs == ["actions.connection_call deny → propose"])
+    #expect(confirm.confirm == "Widen")
+    #expect(confirm.presentation().controls.map(\.label) == ["Cancel", "Widen"])
 }
 
 @Test func reachWideningsNameWhatIsAddedAndNothingForANarrowing() {
@@ -229,7 +312,13 @@ import Testing
     #expect(choices.first == AgentModelChoice(value: AgentModelChoice.sameAsDefaultWire, label: "Same as Aide"))
     #expect(choices.map(\.value).contains("lmstudio/gemma"))
     #expect(choices.map(\.value).contains("lmstudio/qwen"))
-    #expect(choices.last?.label == "anthropic/claude-sonnet-5 — openrouter", "the definition's own model, when compute does not name it")
+    // T6-12: a model is written one way. The dropdown's label is the Compute
+    // pane's line (name, provider, the provider's tag), never `model — provider`.
+    #expect(choices.last?.label == "anthropic/claude-sonnet-5 openrouter \u{00B7} Cloud", "the definition's own model, when compute does not name it")
+    #expect(choices.last?.label == ComputeModelLine.bare(ref: "openrouter/anthropic/claude-sonnet-5", tag: { _ in nil }).text)
+    #expect(choices.dropFirst().allSatisfy { !$0.label.contains(" — ") }, "the retired spelling is gone: \(choices.map(\.label))")
+    let local = try #require(choices.first { $0.value == "lmstudio/gemma" })
+    #expect(local.label == "gemma lmstudio \u{00B7} Local", "the provider's own tag, as Compute writes it")
     #expect(AgentModelChoice.sameAsDefault(nil).label == "Same as the default model", "never a default name")
 }
 
@@ -394,6 +483,12 @@ import Testing
     #expect(access.unlabeledBesidesFields.isEmpty, "access editor unlabeled: \(access.unlabeledBesidesFields)")
     #expect(access.fieldsWithoutAPrompt.isEmpty)
     #expect(access.controlNames.contains("Remove Projects"), "\(access.controlNames)")
+    // every kind core has gets a row, the fifth included — a kind with no row
+    // is one the owner cannot see, set, or be asked about
+    for kind in AgentAutonomy.kinds {
+        let label = "\(AgentAutonomy.kindLabel(kind)) — now"
+        #expect(access.nodes.contains { $0.name.hasPrefix(label) }, "no row for \(kind): \(access.nodes.map(\.name).filter { $0.contains(" — now") })")
+    }
 
     let chooser = try await AccessibilityProbe.snapshot(NewAgentChooser(model: model, onOpenConnections: {}).frame(width: 460))
     defer { chooser.close() }

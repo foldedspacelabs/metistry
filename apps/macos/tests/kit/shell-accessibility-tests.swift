@@ -97,7 +97,8 @@ import Testing
         #expect(tree.headings.contains(heading), "headings: \(tree.headings)")
     }
     // the chart is one element that speaks one sentence (its table is the rotor's)
-    #expect(tree.labels.contains("Spend each day, Sep 1 to today: highest $0.02 on Sep 1"), "labels: \(tree.labels)")
+    let month = UsageFixture.month // the recording's month (X-29)
+    #expect(tree.labels.contains("Spend each day, \(month) 1 to today: highest $0.02 on \(month) 1"), "labels: \(tree.labels)")
     // a ranked row is one element: its name and its amount
     #expect(tree.labels.contains("fixtures, $0.02"), "labels: \(tree.labels)")
     #expect(tree.labels.contains("Chat, $0.00"))

@@ -72,14 +72,14 @@ function base(instanceDir: string, fetchFn: typeof fetch) {
 
 describe("origins (pure, misuse)", () => {
   it("refuses anything that is not a bare http(s) origin", () => {
-    for (const bad of ["metis.example.com", "ftp://metis.example.com", "https://metis.example.com/api", "https://metis.example.com/x/y", "", "   "]) {
+    for (const bad of ["assistant.example.com", "ftp://assistant.example.com", "https://assistant.example.com/api", "https://assistant.example.com/x/y", "", "   "]) {
       expect(() => normalizeOrigin(bad), bad).toThrow();
     }
   });
 
   it("normalizes the spellings a person actually types", () => {
-    expect(normalizeOrigin("https://metis.example.com/")).toBe("https://metis.example.com");
-    expect(normalizeOrigin("  https://metis.example.com  ")).toBe("https://metis.example.com");
+    expect(normalizeOrigin("https://assistant.example.com/")).toBe("https://assistant.example.com");
+    expect(normalizeOrigin("  https://assistant.example.com  ")).toBe("https://assistant.example.com");
     expect(normalizeOrigin("http://127.0.0.1:8080")).toBe("http://127.0.0.1:8080");
   });
 

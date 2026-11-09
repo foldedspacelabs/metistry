@@ -767,6 +767,35 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     }
   });
 
+  // CM-3/CM-4: `project_for_repo` is a vault path and the owner's title for a
+  // page they wrote; `recent_sessions` is vault paths, the files the owner
+  // touched and their own first prompt. Both are `expose: route` on the
+  // 2026-09-19 rule, so the door's misuse set is pinned for each: no
+  // credential → 401; an agent bearer (whatever its grant) → 403; the capture
+  // owner token → the unknown-query answer, byte for byte; the local owner
+  // token and the passkey session read it.
+  it("serves project_for_repo and recent_sessions to the owner at the generic door, and to no other credential", async () => {
+    for (const q of ["project_for_repo?remote=git%40github.com%3Afoldedspacelabs%2Fmetistry.git", "recent_sessions?repo=metistry"]) {
+      const noCredential = await fetch(`${base}/api/q/${q}`);
+      expect(noCredential.status, q).toBe(401);
+      expect(await noCredential.json()).toEqual({ error: { code: "unauthenticated", message: "authentication required" } });
+
+      const agent = await get(`/api/q/${q}`, { authorization: `Bearer ${agentToken}` });
+      expect(agent.status, q).toBe(403);
+      expect((await agent.json()).error).toEqual({ code: "forbidden", message: "not granted" });
+
+      const capture = await get(`/api/q/${q}`, { authorization: `Bearer ${ownerToken}` });
+      expect(capture.status, q).toBe(404);
+      expect(await capture.json()).toEqual(await (await get("/api/q/no_such_query_at_all", { authorization: `Bearer ${ownerToken}` })).json());
+
+      for (const headers of [{ authorization: `Bearer ${localOwnerToken}` }, owner()]) {
+        const r = await get(`/api/q/${q}`, headers);
+        expect(r.status, q).toBe(200);
+        expect(await r.json()).toMatchObject({ rows: expect.any(Array), as_of: expect.any(String) });
+      }
+    }
+  });
+
   it("pages refuses an out-of-range limit, a negative offset and an unusable filter — each by name", async () => {
     for (const [qs, needle] of [
       ["?limit=0", "between 1 and 500"],

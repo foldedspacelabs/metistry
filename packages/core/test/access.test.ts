@@ -26,6 +26,7 @@ import {
   formatRefusal,
   grantedScope,
   isVaultPath,
+  underAreas,
   may,
   type Principal,
 } from "../src/index.js";
@@ -162,6 +163,21 @@ describe("grantedScope: an agent's grants, as a vault scope", () => {
     expect(canSee("now.md", scope)).toBe(true);
     expect(canSee("Areas/Finance/tax.md", scope)).toBe(true);
     expect(canSee(".metistry/compute.yaml", scope)).toBe(false); // still not knowledge, for anyone
+  });
+
+  it("keeps a recording's transcript out of every default grant: `Journal` does not reach Journal/Transcripts/, the folder's own grant or the whole vault does (T8-4)", () => {
+    const t = "Journal/Transcripts/2026-09-28-20260928-120000-00ab.md";
+    const journal = grantedScope({ grants: { tier: "areas", areas: ["Journal"] } });
+    expect(canSee("Journal/2026-09-28.md", journal)).toBe(true);
+    expect(canSee(t, journal)).toBe(false);
+    expect(canSee(t, grantedScope({ grants: { tier: "areas", areas: ["Journal/"] } }))).toBe(false);
+    expect(canSee(t, grantedScope({ grants: { tier: "areas", areas: ["Journal/Transcripts"] } }))).toBe(true);
+    expect(canSee(t, grantedScope({ grants: { tier: "areas", areas: ["Journal/Transcripts/"] } }))).toBe(true);
+    expect(canSee(t, grantedScope({ grants: { tier: "areas", areas: ["/"] } }))).toBe(true); // the owner's own assistant
+    expect(canSee(t, OWNER_SCOPE)).toBe(true);
+    // a sibling that only shares the prefix is an ordinary Journal path
+    expect(canSee("Journal/TranscriptsOld/x.md", journal)).toBe(true);
+    expect(underAreas(t, ["Journal"])).toBe(false);
   });
 
   it("narrows exactly like the filter it feeds — the sibling prefix is not granted", () => {

@@ -11,7 +11,7 @@
 // that answer through another system (F-5's `pr_review`, `rsvp`, `draft`,
 // `resolve_conflict`, `act`, `today`, `delegate`) each add their describe here
 // when they land (the ticket's acceptance) — `resolve_conflict` has (T2-10),
-// and `pr_review` (T2-13).
+// `pr_review` (T2-13), and `rsvp` and `draft` (T4-17).
 //
 // Failures that cannot be provoked honestly through the API — a unique
 // violation in the tasks service, a grants write that throws — are injected
@@ -179,6 +179,9 @@ describe.skipIf(!hasDb)("C45 — a failed answer leaves the request pending, wit
           return { path: "Areas/C45/Note.md", copy: path, kept: keep, sha256: "a".repeat(64), bytes: 1, recorded: null };
         },
       },
+      // Respond and Draft Reply (T4-17): a calendar that cannot answer, a mailbox that cannot be opened
+      calendars: async (connection: string) => ({ ok: false, status: "no_capability", why: `connection ${connection}'s provider ics cannot answer an invitation (no rsvp capability)` }),
+      mail: async () => ({ ok: false, status: "failed", why: "connection c45-mail is failed: reach.imap: 127.0.0.1:25 is a mail submission port — nothing sends mail" }),
     });
     bareServer = makeServer(pool, new QueryStore(pool), common);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -508,6 +511,88 @@ describe.skipIf(!hasDb)("C45 — a failed answer leaves the request pending, wit
       const r = await review(number, "approve", "");
       expect(r.status).toBe(409);
       expect(await r.json()).toMatchObject({ reason: "stale", pull: { head_sha: "e".repeat(40) } });
+      const row = await rowOf(id);
+      expect(row.decision).toBe("pending");
+      expect(row.payload.error).toBeUndefined();
+      await stillAnswerable(id);
+    });
+  });
+
+  // ---- Accept · Maybe · Decline on an invitation, and Draft Reply on a message: the rsvp and draft doors (T4-17) ----
+
+  describe("Accept, Maybe and Decline on an invitation (the rsvp door, T4-17)", () => {
+    const EVENT = `c45-evt-${suffix}`;
+    const UID = `c45-${suffix}@example.com`;
+    const invitation = async () => {
+      const { id } = await raiseMirror(pool, { kind: "invitation", source_agent: reconciler, trust: "external", source: { kind: "calendar", external_ref: `invite:uid/${UID}`, person: "dana@example.com" }, payload: { title: "c45 invitation", event_id: EVENT, connection: "c45-feed" } });
+      return id;
+    };
+    const respond = (body: Record<string, unknown>, at = base) => owner("POST", `/api/calendar/invitations/${EVENT}/respond`, body, at);
+
+    beforeAll(async () => {
+      await pool.query(`INSERT INTO calendar_events (connection, event_id, ical_uid, starts_at, ends_at, title, organizer, attendees, self_status) VALUES ('c45-feed', $1, $2, now() + interval '1 day', now() + interval '25 hours', 'c45', 'dana@example.com', '[]'::jsonb, 'pending')`, [EVENT, UID]);
+    });
+    afterAll(async () => {
+      await pool.query(`DELETE FROM proposals WHERE source->>'external_ref' = $1`, [`invite:uid/${UID}`]);
+      await pool.query(`DELETE FROM calendar_events WHERE connection = 'c45-feed'`);
+    });
+
+    it("no calendars in this deployment: 503, pending with the reason — Accept is the request's `allow`", async () => {
+      const id = await invitation();
+      const error = await expectLeftPending(id, await respond({ response: "accepted" }, bare), "not_available", "allow", { status: 503 });
+      expect(error).toMatchObject({ door: "rsvp", response: "accepted" });
+      await stillAnswerable(id);
+    });
+
+    it("no connection holding it can answer: 503 (Open in Calendar), pending — Decline is the request's `deny`", async () => {
+      const id = await invitation();
+      const error = await expectLeftPending(id, await respond({ response: "declined" }), "not_available", "deny", { status: 503 });
+      expect(error).toMatchObject({ door: "rsvp", response: "declined" });
+      expect(String(error.message)).toMatch(/open it in Calendar/);
+      await stillAnswerable(id);
+    });
+
+    it("a stale or malformed answer is not a failed one: nothing written on the row", async () => {
+      const id = await invitation();
+      expect((await respond({ response: "accepted", confirm_token: "never-minted" })).status).toBe(409);
+      expect((await respond({ response: "maybe" })).status).toBe(400);
+      expect((await respond({ response: "accepted", to: "x@y.z" })).status).toBe(400);
+      const row = await rowOf(id);
+      expect(row.decision).toBe("pending");
+      expect(row.payload.error).toBeUndefined();
+      await stillAnswerable(id);
+    });
+  });
+
+  describe("Draft Reply on a message (the draft door, T4-17)", () => {
+    const REF = `c45-mail/INBOX/7/${suffix.length + 1}`;
+    const message = async () => {
+      const { id } = await raiseMirror(pool, { kind: "message", source_agent: reconciler, trust: "external", source: { kind: "mail", external_ref: `mail:c45-mail:<c45-${suffix}@example.com>`, person: "ada@example.net" }, payload: { title: "c45 message", ref: REF, connection: "c45-mail" } });
+      return id;
+    };
+    const draft = (body: Record<string, unknown>, at = base) => owner("POST", `/api/mail/messages/${encodeURIComponent(REF)}/draft`, body, at);
+    afterAll(async () => {
+      await pool.query(`DELETE FROM proposals WHERE source->>'external_ref' = $1`, [`mail:c45-mail:<c45-${suffix}@example.com>`]);
+    });
+
+    it("no mail in this deployment: 503, pending with the reason — Draft Reply is the request's `allow`", async () => {
+      const id = await message();
+      const error = await expectLeftPending(id, await draft({ body: "Thanks" }, bare), "not_available", "allow", { status: 503 });
+      expect(error).toMatchObject({ door: "draft" });
+      await stillAnswerable(id);
+    });
+
+    it("the mailbox cannot be opened: 503, pending with the connection's reason", async () => {
+      const id = await message();
+      const error = await expectLeftPending(id, await draft({ body: "Thanks" }), "not_available", "allow", { status: 503 });
+      expect(String(error.message)).toMatch(/nothing sends mail/);
+      await stillAnswerable(id);
+    });
+
+    it("a stale or malformed draft is not a failed answer: nothing written on the row", async () => {
+      const id = await message();
+      expect((await draft({ confirm_token: "never-minted" })).status).toBe(409);
+      expect((await draft({ body: "x", to: ["someone@else.example"] })).status).toBe(400);
       const row = await rowOf(id);
       expect(row.decision).toBe("pending");
       expect(row.payload.error).toBeUndefined();

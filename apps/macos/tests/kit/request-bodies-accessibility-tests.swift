@@ -115,7 +115,7 @@ private func tree(_ model: RequestAnswering, allowsDecisions: Bool = true) async
 
 @MainActor
 @Test func theMeetingCardSpeaksItsTwoVerbs() async throws {
-    let parts = try (1...3).map { try requestRow($0, "knowledge", payload: #"{"title":"To-do \#($0)","meeting":"Vendor review"}"#) }
+    let parts = try (1...3).map { try requestRow($0, "knowledge", payload: #"{"title":"To-do \#($0)","meeting":{"session_id":"20260928-120000-00ab","session_title":"Vendor review","started_at":"2026-09-28T12:00:00.000Z","ended_at":null,"event_id":null,"event":null}}"#) }
     let model = GroupAnswering(MeetingGroup(id: "g", parts: parts), store: ConsoleStores(transport: AnswerConsole { _, _ in AnswerConsole.ok() }), assistantName: assistantName)
     let t = try await AccessibilityProbe.snapshot(
         MeetingCardView(model, assistantName: assistantName, allowsDecisions: true, today: SampleClock.today, now: SampleClock.now, clock: SampleClock.clock).frame(width: 520)

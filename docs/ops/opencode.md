@@ -128,8 +128,19 @@ metistry connect --list                # each tool's row, bearer and config
 opencode mcp list                      # OpenCode's own view: the server and whether it connected
 ```
 
-Revocation (`POST /api/agents/opencode/revoke`) is permanent by design: the row
-stays so old proposals keep their provenance, and the id cannot be re-minted.
+`metistry connect --remove opencode` is the way back: it revokes the row
+(`POST /api/agents/opencode/revoke` is the same step alone), deletes the
+Keychain item, and puts `opencode.json` (or `.jsonc`) back exactly as it was
+before the first `connect` — from the copy `connect` keeps beside it
+(`opencode.json.metistry.bak`), or, if you have edited the file since, by
+removing only the `mcp.metistry` entry (and the `$schema` line `connect`
+added). A file `connect` created is deleted again; other servers are never
+touched; running it twice is safe.
+
+A revoked row can be registered again: `metistry connect opencode` revives it
+under the same id (old proposals keep their provenance) with a **new** token and
+default-deny grants — nothing it held comes back, so an accidental revoke
+needs no new install.
 
 **If `opencode mcp list` says `failed`:** the usual cause is the variable never
 reaching the process, so the header goes out as `Bearer ` and the console
@@ -226,6 +237,38 @@ With that set, a session whose capture cannot reach the console is written there
 instead of dropped (SHOULD-10: one silent drop ends the trust) — the same folder
 `docs/ops/capture-shortcut.md` uses, and the same caveat applies: `inbox-drain`
 does not sweep it yet, so those notes wait until it does.
+
+## Session-start briefing
+
+Unlike the session capture, which is off until `METISTRY_CAPTURE_ON_STOP=1`, the
+briefing is **on by default** for an agent with a read grant (the owner's ruling,
+2026-10-04), once the plugin is linked. OpenCode has no session-start event, so
+`plugins/opencode/plugin.js` returns a `"experimental.chat.system.transform"`
+hook: on a session's first turn it calls `GET /api/briefing?repo=<checkout>&remote=<origin>`
+with `METISTRY_AGENT_TOKEN_OPENCODE` (else `METISTRY_OWNER_TOKEN`) and adds the
+text to the system prompt; every later turn of that session adds the **same**
+text from memory, so the console is asked once and the cached prompt prefix is
+not churned. A deleted session forgets its text.
+
+```sh
+metistry connect opencode --briefing off   # opt this agent out (on takes it back)
+```
+
+The opt-out is `briefing: false` in the agent's grants on the console, so it is
+the console that answers an opted-out agent the empty briefing — nothing is
+added. `METISTRY_BRIEFING=off` silences the hook for one profile. A console that
+is down, a refusal, a body that is not a briefing, or a redirect adds nothing,
+throws nothing at OpenCode, and logs one redacted `client.app.log` line.
+
+**What is verified, and what is not.** The hook's name and shape
+(`input: { sessionID?, model }`, `output: { system: string[] }`) are read from
+`@opencode-ai/plugin`'s `Hooks` type as installed with OpenCode **1.18.30**, and
+the plugin is tested against a stand-in for the console with the hook driven the
+way OpenCode calls it. A *running* OpenCode was not driven through a model turn
+to see the text arrive (that needs a provider call), and the hook is marked
+`experimental` upstream — so if a later OpenCode renames it, the briefing stops
+appearing and nothing else breaks. `metistry connect --list` shows the setting,
+not proof of delivery.
 
 ## The types package
 

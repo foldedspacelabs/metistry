@@ -75,11 +75,23 @@ public struct DoctorRow: Codable, Sendable, Identifiable, Equatable {
     /// nothing more specific than `remediation` — never derived here by
     /// reading the prose.
     public let action: DoctorAction?
+    /// Who puts the row right (X-123): doctor (`fixable`), the owner (`hand`),
+    /// or nobody, because it is a fact (`info`). `nil` from a CLI older than
+    /// the class, or one that sent a class this build does not know — and a row
+    /// with no class is never offered to Fix All (P5: state is reported, never
+    /// inferred, and never read off the remediation sentence).
+    public let fix: FixClass?
+    /// After a fix ran for this row: whether the re-check cleared it. `nil`
+    /// when no fix ran for it.
+    public let fixed: Bool?
+    /// The fix doctor applies for a `fixable` row: what it does, and whether it
+    /// asks first. The app shows it; the CLI decides and runs it.
+    public let repair: DoctorRepair?
 
     public var id: String { "\(kind)/\(name)" }
 
     enum CodingKeys: String, CodingKey {
-        case name, kind, status, probe, remediation, meta, action
+        case name, kind, status, probe, remediation, meta, action, fix, fixed, repair
         case latencyMs = "latency_ms"
     }
 
@@ -91,7 +103,10 @@ public struct DoctorRow: Codable, Sendable, Identifiable, Equatable {
         probe: String,
         remediation: String? = nil,
         meta: JSONValue? = nil,
-        action: DoctorAction? = nil
+        action: DoctorAction? = nil,
+        fix: FixClass? = nil,
+        fixed: Bool? = nil,
+        repair: DoctorRepair? = nil
     ) {
         self.name = name
         self.kind = kind
@@ -101,6 +116,9 @@ public struct DoctorRow: Codable, Sendable, Identifiable, Equatable {
         self.remediation = remediation
         self.meta = meta
         self.action = action
+        self.fix = fix
+        self.fixed = fixed
+        self.repair = repair
     }
 
     public init(from decoder: any Decoder) throws {
@@ -115,7 +133,112 @@ public struct DoctorRow: Codable, Sendable, Identifiable, Equatable {
         // An action of a kind this build does not know is no button, never a
         // report that fails to decode: the row and its remediation still show.
         action = try? c.decodeIfPresent(DoctorAction.self, forKey: .action)
+        // The same for the repair contract: a class or a repair this build does
+        // not understand is a row Fix All leaves alone, not a failed report.
+        fix = try? c.decodeIfPresent(FixClass.self, forKey: .fix)
+        fixed = try? c.decodeIfPresent(Bool.self, forKey: .fixed)
+        repair = try? c.decodeIfPresent(DoctorRepair.self, forKey: .repair)
     }
+
+    /// A finding doctor can fix, and says how. Fix All is made of exactly these
+    /// rows: an `ok` row has nothing to fix, a `hand` or `info` row is never
+    /// run, and a `fixable` row with no `repair` has no named fix to show.
+    public var isFixable: Bool { fix == .fixable && repair != nil && status != .ok }
+
+    /// A finding only the owner can put right; the row says what to do.
+    public var isYoursToDo: Bool { fix == .hand && status != .ok }
+}
+
+/// `packages/cli/src/doctor.ts`'s `FixClass` (X-123).
+public enum FixClass: String, Codable, Sendable, Equatable {
+    case fixable
+    case hand
+    case info
+}
+
+/// `packages/cli/src/doctor.ts`'s `Repair` (X-123): an entry of doctor's closed
+/// table of fixes, as the row names it. The app never builds one and never
+/// sends one back — it displays `does`, and the CLI door runs the table's own
+/// function (`doctor --fix --yes --json`, M6).
+public struct DoctorRepair: Codable, Sendable, Equatable {
+    /// The table's id (`restart`, `migrate`, `render`, …). Held as text: an id
+    /// this build does not know is still a fix to show, and the app never maps
+    /// an id to anything to run.
+    public let id: String
+    /// What the fix acts on — the service name for `restart`.
+    public let target: String?
+    /// Moves files or restarts a running service: previewed and asked first.
+    public let confirm: Bool
+    /// One line: what applying it does.
+    public let does: String
+
+    public init(id: String, target: String? = nil, confirm: Bool, does: String) {
+        self.id = id
+        self.target = target
+        self.confirm = confirm
+        self.does = does
+    }
+
+    /// One run of the fix per id and target, however many rows asked for it —
+    /// the CLI's own `fixKey`.
+    public var key: String { target.map { "\(id):\($0)" } ?? id }
+}
+
+/// One entry of `doctor --fix --json`'s `fixes[]`: what ran for which rows,
+/// how it went, and the statuses either side of the one re-check.
+public struct DoctorFixRecord: Codable, Sendable, Equatable, Identifiable {
+    /// The table's id, as `DoctorRepair.id`.
+    public let repairID: String
+    public let target: String?
+    public let rows: [String]
+    public let does: String
+    public let confirm: Bool
+    /// `fixed` · `applied` · `failed` · `declined` · `needs_confirm`.
+    public let outcome: String
+    /// Every command and action the fix ran, in order — the CLI's own ledger.
+    public let steps: [String]
+    public let error: String?
+    public let before: [String: String]
+    public let after: [String: String]?
+
+    enum CodingKeys: String, CodingKey {
+        case repairID = "id"
+        case target, rows, does, confirm, outcome, steps, error, before, after
+    }
+
+    public init(
+        repairID: String, target: String? = nil, rows: [String], does: String, confirm: Bool, outcome: String,
+        steps: [String] = [], error: String? = nil, before: [String: String] = [:], after: [String: String]? = nil
+    ) {
+        self.repairID = repairID
+        self.target = target
+        self.rows = rows
+        self.does = does
+        self.confirm = confirm
+        self.outcome = outcome
+        self.steps = steps
+        self.error = error
+        self.before = before
+        self.after = after
+    }
+
+    /// What the owner reads: the CLI's own outcome, said plainly. An outcome
+    /// this build does not know is printed as it came.
+    public var outcomeLabel: String {
+        switch outcome {
+        case "fixed": return "Fixed"
+        case "applied": return "Ran — still failing"
+        case "failed": return "Failed"
+        case "declined": return "Not run"
+        case "needs_confirm": return "Not run — waiting for a confirm"
+        default: return outcome
+        }
+    }
+
+    public var cleared: Bool { outcome == "fixed" }
+
+    /// One per id and target, as the CLI runs them.
+    public var id: String { target.map { "\(repairID):\($0)" } ?? repairID }
 }
 
 /// `packages/cli/src/doctor.ts`'s `DoctorAction` (T4-21). `command` is argv
@@ -169,19 +292,26 @@ public struct DoctorReport: Codable, Sendable, Equatable {
     public let shape: String
     public let ok: Bool
     public let rows: [DoctorRow]
+    /// `check` or `fix` (X-123); absent from a CLI that predates the modes.
+    public let mode: String?
+    /// A `fix` run only: what ran, in order, and how each went. The rows above
+    /// are the re-check's — the rows as they are now.
+    public let fixes: [DoctorFixRecord]?
 
     enum CodingKeys: String, CodingKey {
-        case shape, ok, rows
+        case shape, ok, rows, mode, fixes
         case asOf = "as_of"
         case productDir = "product_dir"
     }
 
-    public init(asOf: String, productDir: String, shape: String, ok: Bool, rows: [DoctorRow]) {
+    public init(asOf: String, productDir: String, shape: String, ok: Bool, rows: [DoctorRow], mode: String? = nil, fixes: [DoctorFixRecord]? = nil) {
         self.asOf = asOf
         self.productDir = productDir
         self.shape = shape
         self.ok = ok
         self.rows = rows
+        self.mode = mode
+        self.fixes = fixes
     }
 
     public static func decode(from data: Data) throws -> DoctorReport {
@@ -362,4 +492,72 @@ public extension DoctorReport {
     /// lists these; an `absent` one is not configured, which is a fact
     /// (§3.13) and the wizard's bridge step is where it gets configured.
     var bridges: [DoctorRow] { rows.filter { $0.kind == "bridge" } }
+}
+
+// MARK: - Fix All (X-125)
+
+/// What Fix All would apply, read off a doctor report — the preview the owner
+/// sees BEFORE the door runs, and the thing the run is held to afterwards.
+///
+/// Built only from rows doctor itself classified `fixable` and gave a `repair`
+/// (never from the remediation text), grouped the way the CLI runs them: once
+/// per repair id and target, however many rows asked for it. The CLI decides
+/// the order and prunes a fix another makes moot; this lists what it may run,
+/// not a schedule the app keeps.
+public struct FixAllPlan: Sendable, Equatable {
+    public struct Item: Sendable, Equatable, Identifiable {
+        /// The repair's `id` and `target`, as the CLI's `fixKey`.
+        public let id: String
+        public let does: String
+        /// The rows this fix is for, in doctor's order.
+        public let rows: [String]
+        /// Moves files or restarts a running service: asked first.
+        public let confirm: Bool
+    }
+
+    public let items: [Item]
+
+    /// Nil when no row is fixable — Fix All is not offered, never drawn dead.
+    public init?(report: DoctorReport) {
+        var order: [String] = []
+        var byKey: [String: Item] = [:]
+        for row in report.rows where row.isFixable {
+            guard let repair = row.repair else { continue }
+            if let existing = byKey[repair.key] {
+                // one row asking to confirm makes the shared fix a confirm — the CLI's own rule
+                byKey[repair.key] = Item(id: existing.id, does: existing.does, rows: existing.rows + [row.name], confirm: existing.confirm || repair.confirm)
+            } else {
+                order.append(repair.key)
+                byKey[repair.key] = Item(id: repair.key, does: repair.does, rows: [row.name], confirm: repair.confirm)
+            }
+        }
+        guard !order.isEmpty else { return nil }
+        self.items = order.compactMap { byKey[$0] }
+    }
+
+    /// Whether any of it moves files or restarts a running service — the
+    /// destructive case, which keeps its confirm in the app.
+    public var asks: Bool { items.contains { $0.confirm } }
+
+    /// Every fix a finished run executed that this plan did not name, or named
+    /// as one that does not ask. `--yes` answers a CLI question, so a confirm
+    /// that appeared between the read and the run (a service that went down in
+    /// between) would run unpreviewed; the app cannot stop that without a flag
+    /// the CLI does not have, so it says so, loudly, after.
+    public func unpreviewed(in fixes: [DoctorFixRecord]) -> [DoctorFixRecord] {
+        let known = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        return fixes.filter { fix in
+            guard fix.outcome != "declined", fix.outcome != "needs_confirm" else { return false }
+            guard let planned = known[fix.id] else { return true }
+            return fix.confirm && !planned.confirm
+        }
+    }
+}
+
+public extension DoctorReport {
+    /// Fix All's preview of this report, or nil when nothing is fixable.
+    var fixAllPlan: FixAllPlan? { FixAllPlan(report: self) }
+
+    /// Findings only the owner can put right.
+    var yoursToDo: [DoctorRow] { rows.filter(\.isYoursToDo) }
 }

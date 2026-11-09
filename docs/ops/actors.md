@@ -68,7 +68,7 @@ resolver does no I/O. Core imports no Postgres, no vault and no config.
 | `registry(id)` | one `agents` row | `listAgents` / a single-row read; `AgentRow` is assignable to `ActorRegistryRow` |
 | `crew(id)` | a loaded manifest, prompt and file | `CrewRegistry.get(id)`, with `where` made relative |
 | `compute` | `compute.yaml`, parsed | the console's compute loader; `emptyCompute()` when absent |
-| `connections(id)` | the connection names this actor may reach | `() => []` until F-3 / T4-8 |
+| `connections(id)` | the connections this actor might reach: names, or `{ name, tools, offered }` — then `may()` decides which it does (T4-10) | the console hands every connection from the proxy's listing to every actor |
 | `grantHistory(id)` | approvals and per-run routine grants | 0023 + `access_request` proposals; `routines` from the New Routines in a valid `.metistry/scheduled.yaml` that name the actor (T3-8) |
 | `projectGrants` | every project's own read grant (0032) | `listProjectGrants` (`apps/console/src/projects.ts`); absent = no project holds one |
 
@@ -107,7 +107,7 @@ Resolution, in order:
 | `permissions.source` | `"environment"` | `{ manifest: file.path }` | `"registry"` |
 | `permissions.lines` | `describePermissions()` (below) | same | same |
 | `tools.groups` | `null` | manifest `uses` → `crewGroupOf`, deduplicated, in `CREW_TOOL_GROUPS` order | `null` |
-| `tools.connections` | `connections(id)` | `connections(id)` | `connections(id)` |
+| `tools.connections` | `connections(id)` | `connections(id)` that `may()` admits | `connections(id)` that `may()` admits |
 | `compute` | `{ kind: "router" }` | see *Crew compute* | `null` |
 | `limits` | `null`: the engine's defaults and `compute.yaml`'s budgets apply | `{ maxTurns: manifest.max_turns, budgetUsdPerRun: manifest.budget_usd_per_run }` | `null` |
 
@@ -248,8 +248,12 @@ Rules for filling the cells:
 - **`null` and `[]` render differently.** `areas: null` is *The whole vault*;
   an empty area list is no Knowledge entry. `projects: null` is *All tasks*;
   `projects: []` is no Work entry.
-- **Connections** (F-3, T4-8): one row per `tools.connections` name, labelled
-  with the name and marked ⧉ by the renderer. There is one entry per tool whose
+- **Connections** (F-3, T4-8; T4-10): one row per connection the actor
+  reaches — a connection that says whether it is offered is drawn only when
+  `may(principal, "act", {kind: "connection"})` admits it (the assistant
+  always; a borrower when offered and granted; a crew with its `connections`
+  group too), so the table and the proxy cannot disagree — labelled with the
+  name and marked ⧉ by the renderer. There is one entry per tool whose
   mode is `on` or `ask` (`asks` for `ask`). A tool in group `reads` goes in Read,
   one in `changes` goes in Write, and `off` is absent. The connection file's
   schema is F-3's; this table fixes only where connections land. (A
@@ -264,6 +268,7 @@ entries that are not `base`:
 | `{ kind: "base", source }` | how the actor holds it by default: every verb, project and query entry, and every area not listed below. `source` is `permissions.source`. | nothing. For the assistant, `source: "environment"` reads as *configuration, not a grant* (C52, `sourceLabel`). |
 | `{ kind: "approved", proposalId }` | an area in `grantHistory.approved`. For an internal row that is `agent_grant_overrides` (0023). For an external row it is an approved `access_request` proposal's `payload.granted.area` that the row still holds. | *approved in Needs You · #n* |
 | `{ kind: "routine", routine }` | an area a routine's per-run grant adds (`grantHistory.routines`). It is shown as an extra Knowledge · Read entry, computed as if that grant were applied, and only when the knowledge read tools would then be admitted (for a crew, `knowledge` ∈ `uses`). One entry per (area, routine). It is not in `permissions.scope`, which is the base. | *during \<routine\> only* |
+| `{ kind: "proxy" }` | every entry of a connection row (T4-10): the tool is called by Metistry with the owner's credential, through the proxy — *Through Metistry* (screen 7 §10). | nothing in the cell: the row's ⧉ says *reached through Metistry* once |
 | `{ kind: "project", project }` | reach the actor holds only through a project it is a member of (T4-7; `grantHistory.projects`, `inheritGrants`'s `via`): an area, *Titles only* when the project's tier is `index`, or *Named queries* when the project grants `queries`. The first project (by slug) that supplies it names it. It IS in `permissions.scope` — the door grants it. | *via project \<slug\>* |
 
 **In words.** The rows are data; one function says a cell —

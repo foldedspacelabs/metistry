@@ -46,6 +46,7 @@ import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-
 import { THREAD_TOOL_NAMES, registerThreadTools } from "./thread-tools.js";
 import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
 import { CONNECTIONS_TOOL_NAMES, registerConnectionsTools, type ConnectionLimits, type ConnectionsProxy } from "./connections-tools.js";
+import type { ConnectionFold } from "./connection-fold.js";
 import { ACTION_TOOL_NAMES, registerActionTools, type ActionExecutor } from "./action-tools.js";
 import { requestAccess } from "./access.js";
 import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
@@ -97,6 +98,8 @@ export interface BrainConfig {
   connections?: ConnectionsProxy | undefined;
   /** The proxy's confirm-token lifetime and hourly limits, each counted from `runs` (T4-9). Absent → connections-tools.ts' defaults. */
   connectionLimits?: ConnectionLimits | undefined;
+  /** The proxy's fold: the threshold a large answer is folded over, the array shape, how long the whole is kept for its caller (X-132). Absent → connection-fold.ts' defaults. */
+  connectionFold?: ConnectionFold | undefined;
   /** The host's action executor for `propose_action` at mode `allow` (apps/console/src/actions.ts). Absent → an allowed action answers `not_available`; the tool itself is offered only to a credential the owner has given room (docs/ops/actions.md). */
   actions?: ActionExecutor | undefined;
   /** Nudge when a held lease has this many seconds or fewer left (default 120). */
@@ -633,7 +636,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // lazy pair — eager themselves, the upstream definitions behind a call.
     // The caller's bearer travels to the proxy ONLY so a call that carries it
     // in its arguments is refused; it is never sent upstream.
-    registerConnectionsTools(reg, cfg.connections, principal, callerBearer, { db, limits: cfg.connectionLimits });
+    registerConnectionsTools(reg, cfg.connections, principal, callerBearer, { db, limits: cfg.connectionLimits, fold: cfg.connectionFold });
 
     // propose_action (docs/ops/actions.md): registered ONLY when this
     // credential's autonomy table admits something — nobody, until the owner

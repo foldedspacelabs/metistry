@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/console",
   "private": true,
-  "version": "0.15.1",
+  "version": "0.17.2",
   "description": "Metistry console: web door API (capture, message, status, named queries) + passkey owner auth. Ships as a container image, not npm.",
   "license": "Apache-2.0",
   "type": "module",
@@ -25,19 +25,19 @@
     "@foldedspacelabs/metistry-tasks": "workspace:*",
     "@metistry-apps/collectors": "workspace:*",
     "@metistry-apps/routines": "workspace:*",
-    "chokidar": "^5.0.0",
+    "chokidar": "^6.0.0",
     "@simplewebauthn/browser": "^14.0.0",
-    "@simplewebauthn/server": "^14.0.2",
-    "pg": "^8.16.0",
+    "@simplewebauthn/server": "^14.0.3",
+    "pg": "^8.23.1",
     "web-push": "^3.6.7",
     "yaml": "^2.9.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.6",
     "@types/pg": "^8.16.0",
     "@types/web-push": "^3.6.4",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.1.0"
   }
 }

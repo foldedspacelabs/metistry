@@ -84,3 +84,36 @@ export {
   type OpenedTracker,
   type TrackerOpener,
 } from "./linear/complete.js";
+
+// Invitation requests and Respond (T4-17): what the calendar syncs raise,
+// and the service behind `POST /api/calendar/invitations/:id/respond` —
+// through a connection whose provider declares `rsvp`, refused without one.
+export {
+  CALENDAR_SOURCE_KIND,
+  INVITATION_KIND,
+  RESPOND_REFUSAL_CODES,
+  RespondRefused,
+  calendarRsvpOpener,
+  confirmInvitationReply,
+  previewInvitationReply,
+  type OpenedRsvp,
+  type RespondBinding,
+  type RespondPreview,
+  type RespondRefusalCode,
+  type RsvpConnection,
+  type RsvpOpener,
+} from "./invitations.js";
+
+// Draft Reply (T4-17): the service behind `POST /api/mail/messages/:id/draft`
+// — a reply APPENDed to the owner's Drafts through the connection's `draft`
+// capability, addressed from the message's own headers; nothing sends.
+export {
+  DRAFT_REFUSAL_CODES,
+  DraftRefused,
+  appendReplyDraft,
+  previewReplyDraft,
+  type DraftBinding,
+  type DraftRefusalCode,
+  type ReplyDraftPreview,
+} from "./mail-messages/draft.js";
+export { MAIL_SOURCE_KIND, MESSAGE_KIND } from "./mail-messages/run.js";

@@ -59,7 +59,7 @@ function fakeV1(content: (prompt: string) => string | { status: number; body: un
 
 const ctxFor = (compute: Compute, fetchFn: typeof fetch, usesModel = "applefm/foundation-model"): CollectorCtx => ({
   compute: () => compute,
-  secretEnv: { METISTRY_BRIDGE_TOKEN_APPLE_FM: "t" },
+  secretEnv: { METISTRY_BRIDGE_TOKEN_APPLE_FM: "bridge-token-fm-tier-0001" }, // a realistic bearer: the egress door refuses a model body that carries it (X-7), and a one-letter one is in every body
   usesModel,
   fetchFn,
 });
@@ -76,7 +76,7 @@ describe("inbox-drain's on-device tier (ruled 2026-09-01; a provider since PR 4)
 
     expect(v1.sent).toHaveLength(1); // only the ambiguous one crossed
     expect(v1.sent[0]!.url).toBe("http://127.0.0.1:7810/v1/chat/completions");
-    expect(v1.sent[0]!.headers.authorization).toBe("Bearer t");
+    expect(v1.sent[0]!.headers.authorization).toBe("Bearer bridge-token-fm-tier-0001");
     expect(v1.sent[0]!.body.model).toBe("foundation-model");
     expect(v1.sent[0]!.body.response_format).toEqual({ type: "json_schema", json_schema: { name: "classification", strict: true, schema: FM_SCHEMA } });
     expect(v1.sent[0]!.body.messages[1].content).toBe("thoughts on the migration approach");

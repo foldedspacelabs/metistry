@@ -35,8 +35,10 @@ final class SourceSink {
     private let finishTranscriber: (() -> Void)?
     private(set) var observedAudio = false
 
-    /// `url` is `<session>/<source>.m4a`: AAC at 64 kb/s — about 29 MB an
-    /// hour, well inside C137's ~150 MB/h budget.
+    /// `url` is `<session>/<source>.m4a` (`-2`, `-3`… after a wake — never
+    /// the first file again: AVAudioFile truncates what it opens for
+    /// writing): AAC at 64 kb/s — about 29 MB an hour, well inside C137's
+    /// ~150 MB/h budget.
     init(url: URL, format: AVAudioFormat, onSegment: @escaping (Double, Double, String) -> Void) throws {
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,

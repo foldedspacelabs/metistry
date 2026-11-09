@@ -58,6 +58,17 @@ struct ConsoleFixture: Sendable {
     /// The directory, from this file's own path.
     static let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("fixtures")
 
+    /// When a fixture was recorded: its body's `as_of`. The recorder stamps
+    /// that — and every row it seeds with Postgres's `now()` — with the wall
+    /// clock, so a test's clock is read from here rather than pinned to a
+    /// date the next full re-record moves (X-29).
+    static func asOf(_ stem: String) -> Date {
+        guard let text = (try? load(stem))?.replyJSON?["as_of"]?.stringValue, let date = WireTime.date(text) else {
+            preconditionFailure("fixture \(stem) has no as_of")
+        }
+        return date
+    }
+
     static func loadAll() throws -> [ConsoleFixture] {
         let names = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".json") }.sorted()
         return try names.map { try load(String($0.dropLast(5))) }

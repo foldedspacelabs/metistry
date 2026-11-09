@@ -213,9 +213,10 @@ describe("providers add", () => {
     const text = await readFile(file(dir), "utf8");
     expect(text).toContain("{{ secret.openrouter_api_key }}");
     expect(text).not.toContain(KEY);
-    // its name and policy are in secrets.yaml, as `metistry secrets set` writes them: sent only to the provider's host, granted to no one
+    // its name and policy are in secrets.yaml, as `metistry secrets set` writes them: sent only to the provider's host,
+    // and granted to that provider and no one else (X-7: the engine attaches a provider key only on this grant)
     const policy = parseSecretsFile(await readFile(join(dir, ".metistry", "secrets.yaml"), "utf8")).secrets.openrouter_api_key;
-    expect(policy).toMatchObject({ hosts: ["openrouter.ai"], grants: {} });
+    expect(policy).toEqual({ hosts: ["openrouter.ai"], grants: { "provider:openrouter": "on" } });
     expect(await readFile(join(dir, ".metistry", "secrets.yaml"), "utf8")).not.toContain(KEY);
     expect(lines.join("\n")).toContain("METISTRY_SECRET_OPENROUTER_API_KEY"); // where the engine will read it
 

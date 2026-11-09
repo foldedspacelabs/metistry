@@ -22,7 +22,7 @@ This page describes the file, the verbs over it, and — since PR 3 — the
 engine that dials a provider. Deliberately still absent, each a named PR in
 `docs/plan-refresh-2026-09-13.md` §4:
 
-- **No app pane.** The Compute pane, and wizard step 7 becoming "Choose your
+- **No app pane.** The Compute pane, and wizard step 8 becoming "Choose your
   compute", are PR 1a — deliberately split so the verb surface settles first.
   The *server* half is no longer missing: five of the verbs are console routes
   ("From the console", below), so the pane is a client to write rather than an
@@ -188,7 +188,7 @@ the allow-list the dynamic router chooses from (docs/ops/dynamic-router.md,
 plan §2.4) — and Settings ▸ Compute ▸ Advanced is where it is edited: `assign
 <tier>` adds or changes one, `unassign <tier>` removes it. `default` is
 reassigned, never removed; a turn that still names a removed tier runs on
-`default`, the rule `resolveAssignment` has always followed. **Metis uses** in
+`default`, the rule `resolveAssignment` has always followed. **The assistant uses** in
 Compute is `assignments.default`.
 
 ### Secrets
@@ -238,14 +238,57 @@ it off before the next `metistry up`. The console's collectors read the same
 names through the same resolver. The rejected alternative was a console door
 that handed the engine a value: §2.2 M7 says a value never crosses the API.
 
-**Not wired yet: the egress guard on compute calls.** §2.14 fills a secret at
-egress, checked against its *Sent only to* hosts (core's `guardedFetch`, T4-2).
-The engine does not call through it yet — it sends the key it was delivered —
-because a provider key has no grantee in `secrets.yaml`'s vocabulary
-(`connection:<name>` or `agent:<id>`; per-actor grants would mean granting every
-crew the key) and the engine's sandbox does not read `secrets.yaml`. The
-install's egress proxy still refuses any host `compute.yaml` does not name.
-`providers add` records the host so the policy is truthful for the day it is.
+**Every compute call goes through the egress door** (ruling 2 of the W2
+checkpoint, 2026-09-27; X-7). A provider key has a grantee of its own in
+`secrets.yaml` — `provider:<name>`, beside `connection:<name>` and
+`agent:<id>` (a per-actor grant would mean granting every crew the key) —
+and the engine, the collectors' `completeJson`, the router's `scoreChoice`
+and the embedder all call through core's door (`computeFetch`,
+`packages/core/src/egress.ts`). The caller never puts the key on a request:
+the door does, and refuses before anything is sent when
+
+- the URL's host (and port) is not the provider's `base_url` destination —
+  `not_provider_host`; this binds every credential, `env:` ones included;
+- a `{{ secret.x }}` key is not granted to `provider:<name>` — `not_granted`
+  for Off or no grant, `needs_approval` for Ask (a model call has no one to
+  ask) — or does not list the provider's host in *Sent only to* —
+  `host_not_listed`;
+- the key is in the model's body — `secret_in_model_body`.
+
+The engine reads `secrets.yaml` (names and policy, never a value) on **every
+call**, so `metistry secrets grant <key> provider:<name> off` stops the next
+request with no restart; its sandbox grants that one file by name
+(`CONFIG_SECRETS`, `ops/sandbox/assistant.sb`), beside the four config files
+it already read. A `secrets.yaml` it cannot read is no grant. `providers add`
+writes `provider:<name>: on` with the host, `providers set --secret` writes it
+for the secret it names, and `metistry update` (and `secrets migrate-scope`)
+backfill it for every key `compute.yaml` already references that has no grant
+for its provider — idempotently, leaving a grant you wrote alone — so no
+install loses compute on the update that brings the refusal.
+
+**Under compose** the containers mount no instance directory (D5), so
+`docker-compose.yml` bind-mounts exactly one instance path into the
+`console` and `assistant` containers, **read-only**: the policy mirror
+directory `.metistry/state/policy/` at `/run/metistry/policy`, with
+`METISTRY_SECRETS_FILE=/run/metistry/policy/secrets.yaml` (the owner's
+rulings of 2026-09-30). The directory holds nothing but a byte-for-byte copy
+of `secrets.yaml` — names and policy, never a value. **A directory, not the
+file**: a single-file bind pins the inode it was given, and every writer of
+`secrets.yaml` (the reconciler, git, an editor) replaces it by rename, so a
+file mount would keep a revoked grant alive until a restart. A directory
+bind resolves the entry by name, so the replaced mirror is what the next call
+reads. `.metistry/` itself is never mounted — it holds `state/.env`.
+
+The reconciler refreshes the mirror every second and at start (core's
+`mirrorSecretsPolicy`), so a change by any writer — a `metistry secrets`
+verb, a hand edit, a pull — reaches a running container within about a
+second; a deleted `secrets.yaml` removes the mirror, never leaving a grant
+behind. `metistry up` / `update` create the directory and mirror once before
+compose starts. Unmounted (compose run by hand without
+`METISTRY_SECRETS_POLICY_DIR`), `METISTRY_SECRETS_FILE` is empty and every
+`{{ secret.x }}` provider key is refused, the message naming the mount. The install's
+egress proxy still refuses any host `compute.yaml` does not name: two walls,
+the door in the process and the proxy outside it.
 
 `providers test` is a real `GET <base_url>/models` with that credential;
 `--complete` adds a one-token `POST <base_url>/chat/completions`, carrying
@@ -885,6 +928,24 @@ metistry-eval complexity --instance <instance> --fit \
 - **Offline.** `--record <file>` writes every server response; `--replay
   <file>` answers from one with no network at all. `--threshold` and
   `--timeout-ms` evaluate at a value you name instead of `rules.yaml`'s.
+- **Generated fixtures, apart from yours.** If you would rather not write
+  150-plus items, `metistry-eval generate-complexity --instance <instance>`
+  writes `<instance>/.metistry/eval/complexity.generated.jsonl` with two
+  non-Claude models from two families (`docs/ops/dynamic-router.md` §7.2,
+  *Generating fixtures*): a writer that sees the class names and the
+  structural rules only — never the descriptions — and a second model that
+  relabels every item blind. Set `METISTRY_EVAL_GEN_BASE_URL` (OpenRouter's
+  is `https://openrouter.ai/api/v1`), `METISTRY_EVAL_GEN_API_KEY`,
+  `METISTRY_EVAL_GEN_MODEL` and `METISTRY_EVAL_GEN_RELABEL_MODEL` in the
+  environment; a Claude id or a one-family pair is refused. Disagreements
+  become `accept` or land in `adjudicate.jsonl` with every D08-class item —
+  those are yours to label (replace the `"?"`, append the line); the stats
+  report (`--out`) gives the counts, the agreement, the pile and r. Every
+  generated row carries `source: generated`, and `metistry-eval complexity
+  --instance` reads both files and holds your set and the generated one to
+  the bar **separately** — the report says which passed. `--record` /
+  `--replay` work as for the eval; an existing generated file is not
+  overwritten without `--force`.
 
 ## Budgets
 

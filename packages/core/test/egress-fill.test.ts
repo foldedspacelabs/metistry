@@ -6,6 +6,7 @@
 //
 // Bold (the ticket's own): **an unlisted host is blocked** and **a model body
 // never contains a value**.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   EgressRefused,
@@ -13,11 +14,14 @@ import {
   SECRET_USE_META_KEY,
   SecretRedactor,
   egressDestination,
+  isLoopbackHost,
   guardedFetch,
   memoryKeychain,
   parseSecretsFile,
   planEgress,
+  planSocketEgress,
   recordSecretUse,
+  socketDestination,
   redactedSecret,
   secretRefsIn,
   type KeychainBackend,
@@ -35,7 +39,7 @@ const VALUES = [GH, OR, LOCAL, QUOTED, ORPHAN];
 
 const FILE = parseSecretsFile(`
 secrets:
-  github_write:
+  github_key:
     hosts: [api.github.com]
     grants:
       connection:github: on
@@ -71,7 +75,7 @@ interface Sent {
 async function setup(opts: { respond?: (url: string, init: RequestInit) => Response | Promise<Response> } = {}) {
   const kc = memoryKeychain();
   const secrets = new InstanceSecrets(kc, ID);
-  await secrets.set("github_write", GH);
+  await secrets.set("github_key", GH);
   await secrets.set("openrouter_key", OR);
   await secrets.set("local_bridge", LOCAL);
   await secrets.set("plain_http", "plain-http-SENTINEL-0006");
@@ -106,7 +110,7 @@ function wire(sent: Sent[]): string {
   return sent.map((s) => `${s.url}\n${JSON.stringify(s.init.headers ?? {})}\n${typeof s.init.body === "string" ? s.init.body : ""}`).join("\n---\n");
 }
 
-const bearer = { authorization: "Bearer {{ secret.github_write }}" };
+const bearer = { authorization: "Bearer {{ secret.github_key }}" };
 
 describe("the fill: filled at egress, for a listed host", () => {
   it("a granted secret is filled into a header for its listed host, and the names are reported", async () => {
@@ -116,13 +120,13 @@ describe("the fill: filled at egress, for a listed host", () => {
     expect(t.sent).toHaveLength(1);
     expect((t.sent[0]!.init.headers as Record<string, string>).authorization).toBe(`Bearer ${GH}`);
     expect(t.sent[0]!.init.redirect).toBe("manual");
-    expect(t.uses).toEqual([{ names: ["github_write"], destination: "api.github.com" }]);
+    expect(t.uses).toEqual([{ names: ["github_key"], destination: "api.github.com" }]);
   });
 
   it("fills a body for a service call, and leaves a call with no secret alone", async () => {
     const t = await setup();
     const door = t.door("connection:github", "service");
-    await door("https://api.github.com/graphql", { method: "POST", body: '{"token":"{{ secret.github_write }}"}' });
+    await door("https://api.github.com/graphql", { method: "POST", body: '{"token":"{{ secret.github_key }}"}' });
     expect(t.sent[0]!.init.body).toBe(`{"token":"${GH}"}`);
     await door("https://api.github.com/zen", {});
     expect(t.sent[1]!.init.redirect).toBeUndefined();
@@ -158,7 +162,7 @@ describe("**an unlisted host is blocked**", () => {
       const t = await setup();
       const err = await refusal(t.door("connection:github", "service")(url, { headers: bearer }));
       expect(err.code).toBe("host_not_listed");
-      expect(err.names).toEqual(["github_write"]);
+      expect(err.names).toEqual(["github_key"]);
       expect(t.sent).toHaveLength(0);
       expect(t.reads).toEqual([]);
       expect(t.uses).toEqual([]);
@@ -176,7 +180,7 @@ describe("**an unlisted host is blocked**", () => {
 
   it("a value already in the request — not a reference — is the same secret, and is blocked the same way", async () => {
     const t = await setup();
-    t.redactor.learn("github_write", GH);
+    t.redactor.learn("github_key", GH);
     const err = await refusal(t.door("connection:github", "service")("https://evil.example/", { method: "POST", headers: { "x-token": GH } }));
     expect(err.code).toBe("host_not_listed");
     expect(t.sent).toHaveLength(0);
@@ -213,9 +217,9 @@ describe("**an unlisted host is blocked**", () => {
 
 describe("a secret in a URL is flagged", () => {
   const cases: Array<[string, string, (t: Awaited<ReturnType<typeof setup>>) => void]> = [
-    ["a reference in the query", "https://api.github.com/user?access_token={{ secret.github_write }}", () => undefined],
-    ["an encoded reference", "https://api.github.com/user?t=%7B%7B%20secret.github_write%20%7D%7D", () => undefined],
-    ["a known value in the path", `https://api.github.com/u/${GH}`, (t) => t.redactor.learn("github_write", GH)],
+    ["a reference in the query", "https://api.github.com/user?access_token={{ secret.github_key }}", () => undefined],
+    ["an encoded reference", "https://api.github.com/user?t=%7B%7B%20secret.github_key%20%7D%7D", () => undefined],
+    ["a known value in the path", `https://api.github.com/u/${GH}`, (t) => t.redactor.learn("github_key", GH)],
     ["a known value, URL-encoded", `https://api.github.com/?q=${encodeURIComponent(QUOTED)}`, (t) => t.redactor.learn("quoted", QUOTED)],
     ["userinfo", "https://user:pass@api.github.com/", () => undefined],
     ["the userinfo look-alike", "https://api.github.com@evil.example/", () => undefined],
@@ -265,9 +269,9 @@ describe("**a model body never contains a value**", () => {
     const text = await res.text();
     expect(text).not.toContain(GH);
     expect(text).not.toContain(JSON.stringify(QUOTED).slice(1, -1));
-    expect(text).toContain(redactedSecret("github_write"));
+    expect(text).toContain(redactedSecret("github_key"));
     expect(text).toContain(redactedSecret("quoted"));
-    expect(res.headers.get("x-echo")).toBe(`Bearer ${redactedSecret("github_write")}`);
+    expect(res.headers.get("x-echo")).toBe(`Bearer ${redactedSecret("github_key")}`);
 
     // … and that text becomes the model's context
     await t.door("agent:assistant", "model")(model, { method: "POST", headers: providerKey, body: chat(`the tool said: ${text}`) });
@@ -326,7 +330,7 @@ describe("who may use it", () => {
     const err = await refusal(t.door("agent:devin", "service")("https://api.github.com/", { headers: bearer }));
     expect(err.code).toBe("needs_approval");
     expect(t.sent).toHaveLength(0);
-    await t.door("agent:devin", "service", { approved: ["github_write"] })("https://api.github.com/", { headers: bearer });
+    await t.door("agent:devin", "service", { approved: ["github_key"] })("https://api.github.com/", { headers: bearer });
     expect(t.sent).toHaveLength(1);
   });
 
@@ -381,7 +385,7 @@ describe("redacted on the way back", () => {
     });
     const res = await t.door("connection:github", "service")("https://api.github.com/stream", { headers: bearer });
     const text = await res.text();
-    expect(text).toBe(`data: {"t":"${redactedSecret("github_write")}"}\n\n`);
+    expect(text).toBe(`data: {"t":"${redactedSecret("github_key")}"}\n\n`);
     expect(res.headers.get("content-length")).toBeNull();
   });
 
@@ -403,10 +407,10 @@ describe("redacted on the way back", () => {
     );
     const err = (await door("https://api.github.com/", { headers: bearer }).catch((e: unknown) => e)) as Error;
     expect(err.message).not.toContain(GH);
-    expect(err.message).toContain(redactedSecret("github_write"));
+    expect(err.message).toContain(redactedSecret("github_key"));
     expect(err.cause).toBeUndefined();
     // the value WAS on the wire, so the use is recorded
-    expect(t.uses).toEqual([{ names: ["github_write"], destination: "api.github.com" }]);
+    expect(t.uses).toEqual([{ names: ["github_key"], destination: "api.github.com" }]);
   });
 
   it("a null-body status passes through", async () => {
@@ -421,7 +425,7 @@ describe("planEgress — the checks, without the store", () => {
     const t = await setup();
     const plan = planEgress({ url: "https://api.github.com/user", headers: bearer }, { secrets: FILE, grantee: "connection:github", purpose: "service", redactor: t.redactor });
     expect(plan.destination.entry).toBe("api.github.com");
-    expect(plan.names).toEqual(["github_write"]);
+    expect(plan.names).toEqual(["github_key"]);
     expect(t.reads).toEqual([]);
   });
 
@@ -439,10 +443,106 @@ describe("recordSecretUse — *last used* is stamped on the run", () => {
   it("merges the names into runs.meta.secrets as a set, and does nothing for none", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
     const db: RunExecutor = { query: async (text, values) => (calls.push({ text, values }), { rows: [] }) };
-    await recordSecretUse(db, 42, ["github_write"]);
+    await recordSecretUse(db, 42, ["github_key"]);
     await recordSecretUse(db, 42, []);
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.values).toEqual([42, JSON.stringify(["github_write"]), SECRET_USE_META_KEY]);
+    expect(calls[0]!.values).toEqual([42, JSON.stringify(["github_key"]), SECRET_USE_META_KEY]);
     expect(calls[0]!.text).toMatch(/UPDATE runs SET meta = jsonb_set/);
+  });
+});
+
+// T4-15: a connection that is not HTTP (IMAP) has no URL, header or body for
+// planEgress to read — its guard takes the socket's host, port and TLS and
+// the names it will send, and asks the same three questions before a dial.
+describe("the socket guard (planSocketEgress, T4-15)", () => {
+  const SOCKETS = parseSecretsFile(`
+secrets:
+  gmail_app_password:
+    hosts: ["imap.gmail.com:993"]
+    grants:
+      connection:gmail: on
+      connection:asked: ask
+  bridge_password:
+    hosts: ["127.0.0.1:1143"]
+    grants:
+      connection:bridge: on
+`);
+  const rules = (grantee: string, extra: Record<string, unknown> = {}) => ({ secrets: SOCKETS, grantee, purpose: "service" as const, redactor: new SecretRedactor(), ...extra });
+  const code = (f: () => unknown): string => {
+    try {
+      f();
+    } catch (err) {
+      expect(err).toBeInstanceOf(EgressRefused);
+      return (err as EgressRefused).code;
+    }
+    return "passed";
+  };
+
+  it("passes for the exact host:port, over TLS, when granted — and names what it sends", () => {
+    const plan = planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["gmail_app_password"], rules("connection:gmail"));
+    expect(plan).toEqual({ destination: { entry: "imap.gmail.com:993", host: "imap.gmail.com", port: 993, cleartext: false }, refs: ["gmail_app_password"], names: ["gmail_app_password"] });
+    // a socket destination always carries its port — an IMAP server on 443 is not the bare host an HTTPS entry names
+    expect(socketDestination("IMAP.Example.com", 443, true).entry).toBe("imap.example.com:443");
+    expect(socketDestination("imap.example.com", 993, true).entry).toBe("imap.example.com:993");
+    // an HTTPS destination on 443 still collapses to the bare host
+    expect(egressDestination("https://imap.example.com/")?.entry).toBe("imap.example.com");
+    expect(egressDestination("https://imap.example.com:443/")?.entry).toBe("imap.example.com");
+  });
+
+  it("refuses another host, another port, cleartext off loopback, no grant, Ask without approval", () => {
+    expect(code(() => planSocketEgress({ host: "imap.evil.example", port: 993, tls: true }, ["gmail_app_password"], rules("connection:gmail")))).toBe("host_not_listed");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 143, tls: true }, ["gmail_app_password"], rules("connection:gmail")))).toBe("host_not_listed");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 993, tls: false }, ["gmail_app_password"], rules("connection:gmail")))).toBe("cleartext");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["gmail_app_password"], rules("connection:other")))).toBe("not_granted");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["gmail_app_password"], rules("connection:asked")))).toBe("needs_approval");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["gmail_app_password"], rules("connection:asked", { approved: ["gmail_app_password"] })))).toBe("passed");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["undescribed"], rules("connection:gmail")))).toBe("host_not_listed");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com/x", port: 993, tls: true }, ["gmail_app_password"], rules("connection:gmail")))).toBe("bad_url");
+    // loopback without TLS is a destination like any other — listed with its port
+    expect(code(() => planSocketEgress({ host: "127.0.0.1", port: 1143, tls: false }, ["bridge_password"], rules("connection:bridge")))).toBe("passed");
+  });
+
+  it("an IMAP server on 443 is listed as host:443 — the bare host an HTTPS entry names does not admit it", () => {
+    const secrets = parseSecretsFile(`
+secrets:
+  https_only:
+    hosts: ["mail.example.com"]
+    grants:
+      connection:mail: on
+  socket_ok:
+    hosts: ["mail.example.com:443"]
+    grants:
+      connection:mail: on
+`);
+    const r = { secrets, grantee: "connection:mail", purpose: "service" as const, redactor: new SecretRedactor() };
+    expect(code(() => planSocketEgress({ host: "mail.example.com", port: 443, tls: true }, ["https_only"], r))).toBe("host_not_listed");
+    expect(code(() => planSocketEgress({ host: "mail.example.com", port: 443, tls: true }, ["socket_ok"], r))).toBe("passed");
+    // the same secret's bare entry still admits an HTTPS call to that host
+    expect(code(() => planEgress({ url: "https://mail.example.com/", headers: { authorization: "{{ secret.https_only }}" } }, r))).toBe("passed");
+  });
+
+  it("the cleartext refusal says TLS, not https", () => {
+    try {
+      planSocketEgress({ host: "imap.gmail.com", port: 993, tls: false }, ["gmail_app_password"], rules("connection:gmail"));
+    } catch (err) {
+      expect((err as Error).message).toMatch(/without TLS — a secret goes off this machine over TLS only/);
+    }
+  });
+});
+
+// The Mac app decides "cleartext" with its own spelling of loopback
+// (`EgressDestination.isLoopbackHost`); its tests read this same file, so a
+// host core calls loopback is one the Mac calls loopback, and no other.
+describe("isLoopbackHost — the cases the Mac app is held to", () => {
+  const cases = JSON.parse(readFileSync(new URL("./held-to-core/loopback-hosts.json", import.meta.url), "utf8")) as { loopback: string[]; not_loopback: string[] };
+
+  it("calls exactly these hosts loopback", () => {
+    expect(cases.loopback.length).toBeGreaterThan(10);
+    for (const host of cases.loopback) expect(isLoopbackHost(host), JSON.stringify(host)).toBe(true);
+  });
+
+  it("calls none of these loopback — not *.localhost, not 0.0.0.0, not a near-miss of 127/8 or ::1", () => {
+    expect(cases.not_loopback.length).toBeGreaterThan(10);
+    for (const host of cases.not_loopback) expect(isLoopbackHost(host), JSON.stringify(host)).toBe(false);
   });
 });

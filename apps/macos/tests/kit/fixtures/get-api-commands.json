@@ -64,6 +64,13 @@
     ],
     "agents": [
       {
+        "id": "@assistant",
+        "description": "assistant (internal)",
+        "kind": "internal",
+        "present": false,
+        "last_seen_at": null
+      },
+      {
         "id": "@cursor",
         "description": "Cursor",
         "kind": "external",
@@ -83,8 +90,15 @@
         "kind": "external",
         "present": false,
         "last_seen_at": null
+      },
+      {
+        "id": "@researcher",
+        "description": "researcher (crew, example)",
+        "kind": "crew",
+        "present": false,
+        "last_seen_at": null
       }
     ],
-    "as_of": "2026-09-26T22:54:15.104Z"
+    "as_of": "2026-09-30T04:49:51.822Z"
   }
 }

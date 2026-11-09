@@ -62,8 +62,15 @@ import Testing
     #expect(!ConsoleError.transport("connect ECONNREFUSED").wasHeldForReachability)
 }
 
+// The time limits below are two minutes for the reason live-events-tests.swift
+// gives at length: each test is milliseconds alone, but every return to the
+// main actor queues behind the ~480 other main-actor tests `swift test`
+// dispatches at the same moment, and on CI's runner these reached 40–46 s in
+// a passing 65 s run. The limit exists to fail a held answer that is never
+// released, not to time the test.
+
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func anOlderRequestsLateAnswerNeverOverridesANewerOne() async throws {
     let board = Switchboard()
     let session = ConsoleSession(transport: board, management: nil)
@@ -102,7 +109,7 @@ func anOlderRequestsLateAnswerNeverOverridesANewerOne() async throws {
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func everyStoreAndTheEventStreamShareOneSessionChild() async throws {
     let spawner = EchoSpawner()
     let session = ConsoleSession(cli: sessionCLI(RecordingRunner()), spawner: spawner)
@@ -141,7 +148,7 @@ func everyStoreAndTheEventStreamShareOneSessionChild() async throws {
 // MARK: - Switching instance
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func adoptingAnotherInstanceDropsEverySectionAndTheAnswerStillInFlight() async throws {
     let first = Switchboard()
     await first.answer("GET /api/needs-you/count", .success(Data(#"{"waiting":3,"oldest_ts":"2026-09-26T08:00:00Z"}"#.utf8)))
@@ -184,7 +191,7 @@ func adoptingAnotherInstanceDropsEverySectionAndTheAnswerStillInFlight() async t
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func adoptingEndsTheOldChildAndTheNextRequestStartsOneForTheNewInstance() async throws {
     let spawner = EchoSpawner()
     let session = ConsoleSession(cli: sessionCLI(RecordingRunner()), spawner: spawner)
@@ -279,9 +286,9 @@ func adoptingEndsTheOldChildAndTheNextRequestStartsOneForTheNewInstance() async 
 
 @Test func aCommandCannotNameItsOwnProductDirectory() {
     // which product runs a verb is the locator's answer, appended by the runner
-    #expect(ManagementCommand(.doctor, ["doctor", "--json", "--product-dir", "/elsewhere"]) == nil)
+    #expect(ManagementCommand(.doctor, ["doctor", "--check", "--json", "--product-dir", "/elsewhere"]) == nil)
     #expect(ManagementCommand(.update, ["update", "--product-dir=/elsewhere"]) == nil)
-    #expect(ManagementCommand(.doctor, ["doctor", "--json"]) != nil)
+    #expect(ManagementCommand(.doctor, ["doctor", "--check", "--json"]) != nil)
 }
 
 // MARK: - The two bugs F-7 reported
@@ -305,11 +312,19 @@ func adoptingEndsTheOldChildAndTheNextRequestStartsOneForTheNewInstance() async 
 @Test func aRoomsIdsAreTheTextTheConsoleSends() async throws {
     let stores = ConsoleStores(transport: try FixtureConsole.recorded())
     let rooms = try await stores.rooms(state: nil, project: nil, anchor: nil, limit: nil).get()
-    #expect(rooms.rows.map(\.threadID) == ["cmt_01M3FYT8PDPMAX22C9X769GV7Q", "cmt_01M3FYT8NVNX3ZGBZH481KTHGE"])
+    // the recorded text, character for character — read from the fixture, whose
+    // ids are minted afresh on every recording
+    let sent = try ConsoleFixture.load("get-api-q-rooms").replyJSON?["rows"]?.arrayValue ?? []
+    #expect(sent.count == 2)
+    #expect(rooms.rows.map(\.threadID) == sent.compactMap { $0["thread_id"]?.stringValue })
+    #expect(rooms.rows.allSatisfy { $0.threadID.hasPrefix("cmt_") })
     #expect(Set(rooms.rows.map(\.id)).count == rooms.rows.count, "every room had the same id")
     let artifactRoom = try #require(rooms.rows.first { $0.anchor == "artifact" })
-    #expect(artifactRoom.artifactID == "art_01M3FYT8N8HRG4S2W4Q0GN28F1")
-    #expect(artifactRoom.versionID == "ver_01M3FYT8NB0W22G5J1H3A71PTY")
+    let sentArtifact = try #require(sent.first { $0["anchor"]?.stringValue == "artifact" })
+    #expect(artifactRoom.artifactID == sentArtifact["artifact_id"]?.stringValue)
+    #expect(artifactRoom.versionID == sentArtifact["version_id"]?.stringValue)
+    #expect(artifactRoom.artifactID?.hasPrefix("art_") == true)
+    #expect(artifactRoom.versionID?.hasPrefix("ver_") == true)
     let workRoom = try #require(rooms.rows.first { $0.anchor == "work" })
     #expect(workRoom.workID == 3)
 

@@ -40,6 +40,9 @@ interface Parsed {
   body: any;
 }
 
+/** CM-3's and CM-4's handle queries: `expose: route`, served to the owner's doors and CM-1's briefing, never here. */
+const ROUTE_ONLY_HANDLES = ["project_for_repo", "recent_sessions"] as const;
+
 /** The seed manifests as they ship — `seed/queries/<name>.yaml`, `expose: route` included. */
 function seedQuery(name: string): string {
   return readFileSync(new URL(`../../../seed/queries/${name}.yaml`, import.meta.url), "utf8");
@@ -103,6 +106,11 @@ describe.skipIf(!hasDb)("knowledge scope on /mcp (real db, real MCP client, real
     const queries = new QueryStore(pool);
     queries.load(seedQuery(KNOWLEDGE_PAGES_QUERY));
     queries.load(seedQuery(KNOWLEDGE_LINKS_QUERY));
+    // CM-3/CM-4: a project page's path and title, and the owner's own
+    // sessions — vault paths, files, their first prompt — are route-only on
+    // the same rule, and a `queries: true` grant at tier `none` is exactly
+    // the credential that must not reach them here.
+    for (const name of ROUTE_ONLY_HANDLES) queries.load(seedQuery(name));
     queries.load(`
 name: itest_scope_generic
 description: a generic (default-exposure) query, so "refused" can be told from "no queries work"
@@ -167,8 +175,8 @@ cache_ttl: 0
     expect(unknown).toMatchObject({ isError: true, body: { error: { code: "not_found", message: "no such query: no_such_thing_here" } } });
 
     for (const token of ["tok-hub", "tok-none", "tok-index", "tok-areas"]) {
-      for (const name of [KNOWLEDGE_PAGES_QUERY, KNOWLEDGE_LINKS_QUERY]) {
-        const r = await once(token, "queries_run", { name });
+      for (const name of [KNOWLEDGE_PAGES_QUERY, KNOWLEDGE_LINKS_QUERY, ...ROUTE_ONLY_HANDLES]) {
+        const r = await once(token, "queries_run", { name, ...(name === "project_for_repo" ? { params: { remote: "git@github.com:foldedspacelabs/metistry.git" } } : name === "recent_sessions" ? { params: { repo: "metistry" } } : {}) });
         // Same code, same message shape, no mention of `expose`, of a route,
         // or of the query existing: a distinguishable refusal would make this
         // tool an oracle for the route-only set.
@@ -192,6 +200,7 @@ cache_ttl: 0
     expect(names).toContain("itest_scope_generic");
     expect(names).not.toContain(KNOWLEDGE_PAGES_QUERY);
     expect(names).not.toContain(KNOWLEDGE_LINKS_QUERY);
+    for (const name of ROUTE_ONLY_HANDLES) expect(names).not.toContain(name);
   });
 
   // --- 2. the scoped door ---------------------------------------------------

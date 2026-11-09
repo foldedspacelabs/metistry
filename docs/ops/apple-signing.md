@@ -2,9 +2,9 @@
 
 > By-hand runbook for the owner on the Mac Studio. One time setup (steps
 > 1–2, 5), then a recurring step whenever a helper is rebuilt with a new
-> identity (step 3), and setup for a release pipeline that doesn't exist
-> yet (steps 4–5 build the credentials the DMG workflow will consume —
-> `docs/product/desktop-app-plan.md` "Distribution").
+> identity (step 3), and the credentials the release workflow's macOS app job
+> (sign, notarize, DMG) and its appcast job consume (steps 4–5 —
+> `.github/workflows/release.yml`, `docs/ops/releases.md`).
 
 Why this exists: PoC-1/3/9 (`metistry-build-plan.md` §4.16) found that TCC
 grants attach to a binary's exact signing identity, and an ad-hoc signature's
@@ -96,7 +96,7 @@ codesign --force --options runtime --timestamp \
 
 (`afm-helper` is the same shape, no `requires_tcc`, so ad-hoc was previously
 "functionally fine"; sign it too now that a real identity exists, both
-because a future DMG will want every shipped binary under one identity for
+because the DMG wants every shipped binary under one identity for
 notarization, and because a consistent identity is one less thing to reason
 about later.)
 
@@ -279,7 +279,7 @@ curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_APPLE_FM" http://127.0.
 > timestamp server at sign time. Re-run the two build scripts after
 > pulling this change, then resubmit.
 
-## 4. Notarization (credentials only — the DMG pipeline is a separate PR)
+## 4. Notarization (the credentials; the release workflow's `macos-app` job uses them)
 
 Notarization needs its own App Store Connect API key, kept out of the repo
 entirely.
@@ -309,15 +309,15 @@ which matters once it's a CI credential rather than a by-hand one.
    ditto -c -k --keepParent packages/mcp-eventkit/helper/ek-helper.app /tmp/ek-helper.zip
    xcrun notarytool submit /tmp/ek-helper.zip --keychain-profile "metistry-notary" --wait
    ```
-   The helper bundle is not the shipped artifact (that is the future DMG),
+   The helper bundle is not the shipped artifact (that is the DMG),
    so `stapler staple` on the zip itself will report it cannot staple a
    zip — that is expected here; done looks like the
    submit step printing `status: Accepted`, which proves the credentials
    and the binary's signature are both valid. The real `stapler staple
-   MyApp.app` / `stapler staple Metistry.dmg` step belongs to the DMG
-   release workflow.
+   MyApp.app` / `stapler staple Metistry.dmg` step is the release
+   workflow's `macos-app` job.
 
-**Secrets the future release workflow needs** (as GitHub Actions secrets,
+**Secrets the release workflow needs** (as GitHub Actions secrets,
 never committed): the Developer ID Application certificate exported as
 `APPLE_CERTIFICATE_P12` (base64-encoded) plus `APPLE_CERTIFICATE_PASSWORD`
 (its export password), `APPLE_TEAM_ID`, and the three notarytool API-key
@@ -347,8 +347,8 @@ to log in — run `env -u GH_TOKEN gh secret set …` for these and any other
 
 ## 5. Sparkle update-signing keys (EdDSA)
 
-Future auto-update appcast signing (`docs/product/desktop-app-plan.md`
-"Updates"). The Homebrew cask `sparkle` is **disabled** (fails Gatekeeper,
+Auto-update appcast signing (`docs/product/desktop-app-plan.md`
+"Updates"; the release workflow's `appcast` job signs the DMG with the key below). The Homebrew cask `sparkle` is **disabled** (fails Gatekeeper,
 2026-09-01), so get the CLI tools with the pinned-download-plus-checksum
 script instead — the same pattern `ops/release/build-runtime-deps.sh` uses
 for Node/Postgres/git:
@@ -367,8 +367,7 @@ Idempotent — re-running with the same pin is a no-op. To bump the version:
 change those two lines in `runtime-versions.env` (get the sha256 by
 downloading the new archive once and `shasum -a 256`, same as every other
 pin in that file), then re-run the script. CI runs the same script in the
-`appcast` job (`.github/workflows/release.yml`) so it is one line to
-un-stub once the DMG job exists.
+`appcast` job (`.github/workflows/release.yml`).
 
 1. Generate the key pair:
    ```sh

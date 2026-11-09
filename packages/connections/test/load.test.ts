@@ -182,11 +182,35 @@ describe("planDial", () => {
     expect(() => planDial(e, vars)).toThrow(/reach\.command\.env\.ORG: no variable \{\{ variable\.nope \}\}/);
   });
 
-  it("basic and OAuth sign-in, and the types this release does not dial, refuse as not built — naming where they arrive", () => {
-    const basic = judgeConnection("r", "/x/r.yaml", { name: "r", type: "mcp", provider: "custom", reach: { http: { url: "https://x.example.com/mcp", auth: { scheme: "basic", username: "me", secret: "pw" } } }, secrets: ["pw"] }, types);
-    expect(() => planDial(basic, vars)).toThrow(/basic sign-in arrives with T4-10/);
+  it("a feed, an API or a files connection is not dialled as MCP — the pool reaches it through its generated tools (T4-10)", () => {
     const feed = judgeConnection("f", "/x/f.yaml", { name: "f", type: "feed", provider: "custom", reach: { http: { url: "https://x.example.com/feed.xml" } } }, types);
-    expect(() => planDial(feed, vars)).toThrow(/feed: tools generated for a feed arrive with T4-10/);
+    expect(() => planDial(feed, vars)).toThrow(/feed: a feed is reached through the tools Metistry generates for it/);
+  });
+
+  it("OAuth sign-in writes the token secret as a Bearer reference, and carries the client plan — never a value (T4-10)", () => {
+    const e = judgeConnection(
+      "o",
+      "/x/o.yaml",
+      {
+        name: "o",
+        type: "mcp",
+        provider: "custom",
+        reach: {
+          http: {
+            url: "https://mcp.example.com/mcp",
+            auth: { scheme: "oauth", client: { authorize_url: "https://auth.example.com/a", token_url: "https://auth.example.com/t", scopes: ["read"], pkce: true, redirect: "loopback" }, token: "{{ secret.o_token }}", client_id: "{{ secret.o_client }}" },
+          },
+        },
+        secrets: ["o_token", "o_client"],
+      },
+      types,
+    );
+    const plan = planDial(e, vars);
+    expect(plan.kind === "http" && plan.headers).toEqual({ authorization: "Bearer {{ secret.o_token }}" });
+    expect(plan.kind === "http" && plan.oauth).toMatchObject({ from: "custom", tokenSecret: "o_token", clientId: { kind: "secret", name: "o_client" }, tokenUrl: "https://auth.example.com/t" });
+    // the broker is modelled, not built: refused where the dial would start
+    const broker = judgeConnection("b", "/x/b.yaml", { ...(e.connection as object), name: "b", reach: { http: { url: "https://mcp.example.com/mcp", auth: { scheme: "oauth", client: { authorize_url: "https://auth.example.com/a", token_url: "https://auth.example.com/t", scopes: ["read"], pkce: false, redirect: "broker" }, token: "{{ secret.o_token }}", client_id: "{{ secret.o_client }}" } } } }, types);
+    expect(() => planDial(broker, vars)).toThrow(/sign_in.*token broker .* designed and not built/);
   });
 
   it("a relative working directory resolves against the instance", () => {

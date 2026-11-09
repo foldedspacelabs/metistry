@@ -8,14 +8,19 @@ impossible. The file's schema is F-3's (`packages/core/src/connections.ts`,
 connections` (M13, `docs/ops/cli.md`); the read routes are `GET
 /api/connections(/:name)` (`docs/ops/client-api.md`).
 
-**This release dials MCP servers** — over Streamable HTTP or by starting a
-command (stdio). The other types have their own consumers and tickets: agent
-connections (targets, T4-11), tools generated for API, feed and files
-connections (T4-10), calendar and mail providers (T4-13…T4-15). A
-**tracker** or **calendar** connection is read by its provider's sync —
-Linear is the first tracker (T4-24, *Linear* below), an ICS feed the first
-calendar (T4-12, *ICS feeds* below). Asking the pool to dial any of those is refused `not_built`,
-naming where it arrives.
+**The pool reaches MCP servers** — over Streamable HTTP or by starting a
+command (stdio) — **and API, feed and files connections through the tools
+Metistry generates for them** (T4-10, *Generated tools* below). Every HTTP
+auth shortcut dials: none, bearer, an API-key header, Basic (a type that
+declares it) and **OAuth** (T4-10, *OAuth* below). The other types have their
+own consumers and tickets: an **agent** connection is a target a task is
+dispatched to (T4-11, *Agent connections* below), and calendar and mail
+providers are T4-13…T4-15. A **tracker** or **calendar** connection is read
+by its provider's sync — Linear is the first tracker (T4-24, *Linear* below),
+an ICS feed the first calendar (T4-12, *ICS feeds* below). A **mail** connection
+is a mailbox over IMAP (T4-15, *Mail over IMAP* below) — a reach class of its
+own. Asking the pool to
+dial one of those is refused `not_built`, naming what reaches it instead.
 
 ## The file, read
 
@@ -48,6 +53,15 @@ them later, one call at a time:
   that command only.
 - **A `{{ secret.x }}` in a path reach**, which has nowhere to send one.
 - **An `Authorization` header beside an auth shortcut** that writes one.
+- **An OAuth sign-in that names its client in the wrong place** (core's
+  schema, C118): a custom connection carries its client model on the auth
+  shortcut — `client: { authorize_url, token_url, scopes, pkce, redirect }`
+  (https endpoints, scopes declared, PKCE on a loopback) beside `token`,
+  `client_id` and an optional `client_secret`, each a `{{ secret.name }}` — and
+  is refused without one; a typed connection takes its client from its
+  connection type and keeps the references in its `oauth` field
+  (`config.<field>`), and is refused the custom shape. A client id or secret
+  written as text is refused: the owner's client is a secret.
 
 A YAML error is reported by its code and line only — never the parser's
 snippet of the source, which would echo whatever was pasted there.
@@ -69,14 +83,41 @@ would meet, **before any call is made**:
   read a value);
 - `failed` — `secrets.yaml` does not grant a secret to `connection:<name>`, or
   an HTTP connection sends a secret to a host that is not on the secret's
-  *Sent only to* list (the same refusal the egress door makes).
+  *Sent only to* list (the same refusal the egress door makes) — or an IMAP
+  connection's app password is not listed for its exact `host:port`.
 
-*Used by* is what reads it today: the syncs in `scheduled.yaml` that name it,
-and the sync its provider declares when that sync reads it (the rule *A sync
-reading its connection* below applies).
+The reach is summarised by class: `http` (URL, auth scheme, header and query
+names), `command` (command, arguments, environment names), `path`, and `imap`
+(host, port, `tls` or `plain`, `auth: basic` — never the username).
+
+An **OAuth** connection says more before any call: `absent` — *not signed in
+yet* — until its token secret has an item, and `failed` while a sign-in
+secret may not go where it must (the token secret to the token endpoint and
+the service, the owner's client id to the authorize and token endpoints).
+
+*Used by* is everything that uses it: the syncs in `scheduled.yaml` that name
+it, and the sync its provider declares when that sync reads it (the rule *A sync
+reading its connection* below applies) — and the agents and crews granted it,
+once the owner has offered it to agents (`DescribeOptions.granted`, which a host
+fills from its registry: the console does; the CLI has none and lists syncs
+only). *Last checked* (`last_checked`: the time and doctor's word) is the newest
+check anyone ran: `checkConnection` stamps it in the instance's gitignored
+`.metistry/state/connection-checks.json` (time and verdict, never the message),
+and the listing reads it — derived and disposable. An HTTP row's
+`header_secrets` pairs each header with the secret **names** its value carries.
+
+Beside the rows, the listing serves **the installed connection types**
+(`describeConnectionTypes`; `GET /api/connections` → `types`, and each
+detail's `provider_unit.type`, T6-13b): every unit the registry loads — seed
+and extensions alike — with its fields **by kind** (`text` · `secret` ·
+`variable` · `url` · `choice` · `oauth`), so the Mac renders a known service's
+form from the manifest and no service has Swift of its own. A `secret` field
+carries no default by schema, and an `oauth` field is served as its kind alone
+— nothing of the client. Filling a field is `metistry connections add|set
+--config KEY=VALUE` (`docs/ops/cli.md`), judged against the same manifest.
 Agents reach a connection through the lazy pair `connections_list` /
-`connections_call` (below); until a host mounts the pool behind them and
-agents carry grants, an empty list is the true answer (*Nobody yet*).
+`connections_call` (below), which the console mounts over its own pool
+(T4-10); who reaches which is the owner's offer switch and each agent's grant.
 
 ## The pooled client
 
@@ -88,10 +129,12 @@ environment depends on), with the server's `tools/list` cached until it sends
 `notifications/tools/list_changed`. The pool reads the catalog on every call,
 so an edit takes effect without a restart. It is a library: the process that
 holds it is the one whose calls it makes — `metistry connections add|test` and
-`metistry doctor` in the CLI today, and the console (a supervisor child) once
-it mounts the pool behind the lazy pair. A proxied call's `runs` row is
+`metistry doctor` in the CLI, and **the console**, which builds one pool over
+the instance's catalog and mounts it behind the lazy pair and the Approve path
+(T4-10, *The console's pool* below). A proxied call's `runs` row is
 written by mcp-brain itself (below), so a host does not also write one from
-the pool's `connection_call` event for it; `connection_check` is the CLI's.
+the pool's `connection_call` event for it; a check's stamp (`last_checked`) is
+`checkConnection`'s own.
 
 The host sets the clocks: the CLI reads `METISTRY_CONNECTION_CONNECT_TIMEOUT_MS`
 (default 30 s — a cold `npx -y …` downloads first) and
@@ -107,11 +150,13 @@ each a `ConnectionRefused` with a code:
 | `tool_off` | the tool is at Never |
 | `needs_approval` | the tool is at Ask First and the caller holds no approval of this call — only the console's Approve of the Needs You request sets it (T4-9) |
 | `caller_credential` | the caller's own bearer is in the arguments |
+| `secret_reference` | the arguments carry a `{{ secret.… }}` reference (T4-10). The door fills a reference wherever it finds one, so a reference a caller writes — into an issue body, say — would be a value the caller chose where to send. Refused for every connection, before anything is dialled; the wire says `invalid_request` |
+| `sign_in` | an OAuth connection that cannot sign in: no client id (the type ships none and the owner brought none), the broker (designed, not built), or the provider refused the refresh (`invalid_grant` — sign in again with `metistry connections authorize <name>`). A sign-in with no item is the egress door's `missing_secret`, naming the token secret |
 | `unknown_connection`, `not_ready` | no such file; a file that is `failed` or `absent`, with its issues |
 | `variable` | a `{{ variable.x }}` that does not fill |
 | `secret` | a command's environment needs a secret that is not granted **on** to `connection:<name>` (Ask First cannot hold there: an environment is filled once, at spawn, so there is no call to approve), or has no item |
 | `runs_elsewhere` | `runs_on` names a place this process is not |
-| `not_built` | a type, provider or auth scheme this release does not dial (`basic` and `oauth` sign-in arrive with T4-10) |
+| `not_built` | a connection the pool does not dial: an agent connection (dispatch, T4-11), a calendar, mail or tracker (its provider's sync), a builtin provider's, or a command reach on a type with no generated tools |
 | `other_host` | an HTTP connection's request to another origin, or a redirect — a redirect is not followed |
 
 **The caller's bearer is never forwarded upstream.** The MCP authorization
@@ -226,13 +271,55 @@ the `runs` row as `meta.detail`, where the owner reads it. The caller's bearer
 reaches the proxy only as `caller.bearer`, so a call whose arguments carry it
 is refused `caller_credential`; it is never sent upstream.
 
+**Folded answers (X-132; the owner's 2026-10-04 ruling on the Context Mode
+review's Q4).** An upstream answer over `METISTRY_CONNECTION_FOLD_BYTES`
+(default 8192 bytes on the wire) does not reach the caller whole. After the
+pool's redaction, `connections_call` applies one deterministic fold — a pure
+function of the text and the settings, so the same answer folds to the same
+bytes every time and a client's prompt cache sees one stable prefix
+(`packages/mcp-brain/src/connection-fold.ts`):
+
+| The answer | Becomes |
+| --- | --- |
+| a JSON array over `METISTRY_CONNECTION_FOLD_ARRAY_OVER` items (default 20) | `{"folded":"array","count":N,"first":[…the first `METISTRY_CONNECTION_FOLD_ARRAY_KEEP` (default 5)…],"last":{…}}` |
+| text with runs of a repeated line | the line once and `[×n]`; blank runs `[×n blank lines]` |
+| anything still over the threshold | a head (three quarters) and a tail (one quarter), with `…[N bytes folded — the whole answer is on its pages]…` between |
+
+The reply is `{connection, tool, content: [one text block], folded: {handle,
+bytes, pages, how, note}}` — `how` is the shapes that applied (`array`,
+`lines`, `cap`), `handle` is the call's own `runs` id. **The whole answer is
+kept** in `connection_answers` (migration 0042; derived and ephemeral, deleted
+on the next write after `METISTRY_CONNECTION_ANSWER_KEEP_HOURS`, default 24),
+and read back one page at a time — no new tool (X-49) — through the same
+door: `connections_call { connection, tool, page: "<handle>/<n>" }` answers
+`{handle, page, pages, bytes, text, next}`, pages cut at code points so every
+byte of the answer is on exactly one page. A page stands behind the gate every
+call takes (the grant, the offer, the tool not at Never), dials nothing, spends
+none of the hour and takes no confirm token. **Only the principal that made
+the call reads it back**: the row carries that principal and the read is
+`WHERE run_id = … AND principal = …` — another caller presenting the handle,
+an expired handle, one that never was, or one stored under another connection
+or tool all hear the one `not_found` (*no such answer: <handle>/<n>*). A page
+past the last is `invalid_request` naming the range.
+
+**The owner turns folding off per connection**: `metistry connections policy
+<name> --fold off` writes `fold: false` to the file (on is the default and the
+file's absence of the key), beside the per-tool Allow · Ask First · Never and
+the offer switch, and the listing (`GET /api/connections`, `connections list
+--json`) says which. With it off every answer comes whole, however large, and
+nothing is stored. Nothing is folded below the threshold either way.
+
 **The audit.** Every `connections_call` — refusals included — is one `runs`
 row of kind `connection_call`: the principal as `component`,
 `meta.connection`, `meta.connection_tool`, the secret NAMES it carried in
 `meta.secrets` (so *last used* on the Secrets list counts it), and
 `meta.is_error` when the upstream's tool reported failure — plus
 `meta.group`, `meta.tool_mode` (the owner's policy), `meta.mode` (what the call
-did: `call`, `preview`, `ask`, `confirmed`) and `meta.dialled`. An Approve is a
+did: `call`, `preview`, `ask`, `confirmed`, `page`) and `meta.dialled`. A
+dialled call also carries `meta.bytes_in` and `meta.bytes_out` (the answer's
+bytes on the wire, whole and as sent), and a folded one `meta.fold` (the
+shapes), `meta.handle` and `meta.pages`; a connection with folding off says
+`meta.fold: "off"`. An Approve is a
 `connection_call` row too, written by the console (`tool: approve`, `mode:
 approved`). The
 `connection_calls` named query (`expose: route`) reads them back by
@@ -241,20 +328,26 @@ same row on the timeline — connection and upstream tool named, never an
 argument or a secret — and `turn_progress` joins it into the strip of one
 turn's calls like any other tool row.
 
-**Not yet wired — said plainly.** This release ships the gate, the tools and
-the record, and the console takes a `connectionsProxy` it hands to both `/mcp`
-and the Approve path. Its `main.ts` does not yet build one (a `ConnectionPool`
-over the instance's catalog), and
-an agent's registry `grants` do not yet carry `connections` (the console's
-grant validator and a crew's manifest are where they will), so today both
-tools answer `not_available` on a live console and no agent is lent anything
-— the fail-closed end of every axis.
+**The console's pool** (T4-10; the owner's ruling of 2026-09-30, Q10 — open
+since #374). The console builds **one** `ConnectionPool` over the instance's
+catalog (`apps/console/src/connections-proxy.ts`) and hands it to `/mcp` and to
+the Approve path that runs an Ask First call. Its values are the ones
+`metistry secrets sync --to env` delivers as `METISTRY_SECRET_<NAME>` — every
+secret an `ok` MCP, API, feed or files connection lists, beside a sync's
+(`consoleSecretNames`) — filled at the egress door for each secret's listed
+hosts; the console never reads the Keychain. After adding a connection or
+signing one in, run `sync --to env` and restart the console. A console with no
+instance directory (the compose shape) builds no pool, and both tools answer
+`not_available` — the fail-closed end. An agent's registry `grants` carry
+`connections` (X-8), and a crew needs its manifest's `connections` group too.
 
 ## `check()`
 
 `checkConnection` is the connection's `check()` (core's frozen shape): dial it
 through the pool, `initialize`, `tools/list`, and compare what the server
-offers with what the file lists.
+offers with what the file lists. A generated type has no server to list
+tools: the check reaches the service once (a GET, the feed read, the folder
+listed) and compares the tools Metistry generates with the file.
 
 | Status | Means |
 | --- | --- |
@@ -262,6 +355,13 @@ offers with what the file lists.
 | `degraded` | it answered, and a listed tool is gone — a call to it will fail |
 | `absent` | configured, but something it needs is not here: the command, a secret's item, a variable, its connection type |
 | `failed` | the file is wrong, the credential is refused at the door, or the server cannot be reached — the error verbatim, redacted |
+
+A refusal carries its code as `meta.refused` (`not_built`, `secret`, `sign_in`,
+…), so a reader that must tell "this kind of connection is not dialled here"
+from "missing here" reads a field, not the sentence. A calendar or a tracker is
+read by its provider's sync and is refused `not_built`; the collector that reads
+it reports that as not dialled (X-87, `docs/ops/cli.md`, *Reading a doctor
+report*).
 
 `meta` carries `tools_seen`, `listed`, `missing`, `unlisted` (offered and not
 listed — refused until the owner lists one) and `read_only_hint` (what the
@@ -276,7 +376,10 @@ else's server.
 A `calendar`, `mail` or `tracker` connection's provider is product code — a
 connection type whose `implementation` is `builtin` — and a sync (the
 collector the type names in `sync:`) reads it on an interval. What the sync
-opens is `openSyncHttp` (`packages/connections`, `sync.ts`):
+opens is `openSyncHttp` (`packages/connections`, `sync.ts`) — or, for a
+mailbox, `openSyncImap` (T4-17): the same choice of connection and the same
+delivered secret, handed to the IMAP provider's own host guard (*Mail over
+IMAP*, below) instead of an HTTP door:
 
 - **Which connection.** `scheduled.yaml`'s `syncs.<sync>.connection` when the
   owner names one; otherwise the one `ok` connection whose provider declares
@@ -300,6 +403,136 @@ opens is `openSyncHttp` (`packages/connections`, `sync.ts`):
   sync so it holds the line.
 - **The owner's switches.** `syncs.<sync>.raise` in `scheduled.yaml`; a rule
   the file does not mention takes the collector manifest's default.
+- **OAuth sign-in** (`auth: oauth` — Google Calendar, T4-14). The delivered
+  secret is the connection's **refresh token**; the sync's door fills
+  `Bearer {{ secret.<token> }}` with an **access token** minted from it at the
+  token endpoint (T4-10's `OAuthTokens`: its own guarded request, pinned to
+  that endpoint, no redirect) and held in the console's memory — one per
+  connection, reused across runs until a minute before it expires. A sync
+  that knows its provider's hosts passes them (`tokenHosts`), and the token
+  secret's *Sent only to* list must be **exactly** those, or the connection
+  is not opened and nothing is sent (`failed`, naming the `metistry secrets
+  hosts` line). A refused refresh is `sign_in`, naming `metistry connections
+  authorize <name>`.
+- **One connection, several syncs** (T4-11). A type names its first sync in
+  `sync:` and any others that read the same connection in `also_read_by:` —
+  the Devin connection is read by `devin-sessions` and by `devin-knowledge`.
+  Each finds it by the same rule; `sync:` is the one `add` names in
+  `scheduled.yaml`.
+- **A further origin is the code's, never the file's.** A sync may name an
+  origin its product code reaches for the same service beside the
+  connection's own (`devin-knowledge` names `https://mcp.devin.ai`, where the
+  repo wikis are); nothing in a connection file can add one, and the key is
+  still filled only for the hosts its *Sent only to* list names.
+- **The connection's config.** The sync is handed the connection's text
+  config values (`config.repos`, `config.org`) — never a secret field's.
+
+**Which collectors are syncs of a connection (T4-11).** Beside Linear and
+the calendar providers (ICS, CalDAV, Google Calendar): **GitHub** (`github-state` reads the
+`github` tracker connection — its read-only token, its `repos`; still
+read-only, `readOnlyGithub` wraps the door, and pinned to
+`https://api.github.com`), and **Devin** (`devin-sessions` and
+`devin-knowledge` read the `devin` agent connection — its key, its `org` and
+`repos`). A connection that is there but wrong fails the run by name; it
+never falls back to an older key. Since 0.17.0 (X-85) the console reads no
+legacy environment for them: a collector with no connection degrades absent,
+and `METISTRY_GITHUB_TOKEN` / `METISTRY_DEVIN_API_KEY` set in the environment
+are ignored (`metistry doctor` has a *target keys* row naming them). Two stay
+outside, and why:
+**AWS Costs** signs each request with SigV4, which needs the secret key's
+value in the process to compute the signature — a door that fills a
+reference cannot sign; and **Calendar** (`eventkit-calendar`) reads the
+eventkit bridge with the bridge's own token, which is the bridge's wire
+contract, not a connection's secret.
+
+```sh
+metistry secrets set github_token                     # a read-only fine-grained PAT, on stdin
+metistry secrets hosts github_token api.github.com
+metistry secrets grant github_token connection:github on
+metistry connections add github --type tracker --provider github \
+    --url https://api.github.com --auth bearer --secret github_token \
+    --config repos=owner/a,owner/b --no-discover
+metistry secrets sync --to env                        # then restart the console
+```
+
+## Agent connections — targets as connections (T4-11)
+
+An **agent** connection is somewhere work is sent (plan §2.6): the two HTTP
+targets that used to be `targets/devin-sessions` and `targets/github-issues`
+are connection types — `seed/connection-types/devin/` and
+`seed/connection-types/github-issues/` (the manifests themselves are gone,
+X-85). The split is where each thing belongs:
+
+| Where | What |
+| --- | --- |
+| the **type** (`dispatch:`) | the dispatcher (closed: `devin-session`, `github-issue`), the **data policy** a brief is held to, the **purposes** with their preambles (Devin's — `DEVIN_PURPOSES` moved here), the result path, the cost, Devin's ACU ceiling |
+| the **connection** | where it goes (`reach.http.url`), the key it goes with (`secrets`, by name), and its fields: Devin's `org` (and `repos` for its wikis), GitHub Issues' `repo` |
+
+**Dispatch is unchanged.** The console's target registry
+(`apps/console/src/dispatch.ts`) reads the instance's agent connections
+afresh on every `GET /api/targets` and every `POST /api/tasks/:id/dispatch`
+and presents each as the target `dispatch()` already knows: the same data
+policy check, the same `runs` row, the same work-row binding, the same
+return path (`devin-sessions` polls a Devin session home; `github-state`
+reconciles the issue). The crews' `local-crew` is the one `targets/`
+manifest left; a connection can never take its name.
+
+**What changes is where the key comes from.** A connection-backed target's
+requests go through the connection's door (`openAgentHttp`,
+`packages/connections`): the key is a `{{ secret.x }}` reference in the
+Authorization header, filled by core's `guardedFetch` for the hosts its
+*Sent only to* list names, only when granted to `connection:<name>`; the
+response is redacted; no redirect is followed. GitHub Issues is pinned to
+`https://api.github.com` whatever the file says. The console fills these
+secrets from `metistry secrets sync --to env` (`consoleSecretNames` lists an
+agent connection's).
+
+**Refused, each before anything is sent:**
+
+| Refusal | Why |
+| --- | --- |
+| a brief or task title carrying `{{ secret.… }}` or `{{ variable.… }}` — 400 | the door fills a reference wherever it finds one, so a brief never carries one (the pool's `secret_reference`, T4-10) |
+| a key not granted to the connection, or bound for a host its list does not name — 409 *target unavailable*, by name | the egress door's rule |
+| a repo that is not `owner/repo` (or a `.`/`..` part), an org that is not an id — the connection is unavailable, naming why | they go in a URL path |
+| a purpose the target's type does not take — 400 | the purposes are the type's |
+| an agent connection named `local-crew` | it is the crews' target |
+
+**The data policy is the type's**, so a connection file cannot widen it.
+Devin's is empty on purpose (a third party with a train-on-your-data
+default may be sent no vault citation); the owner widens it by overlaying
+the type — `.metistry/extensions/devin/manifest.yaml` — exactly as a target
+was widened by overlaying the target.
+
+**Not through the proxy.** An agent may not dispatch through
+`connections_call`: the pool refuses an agent connection `not_built`, and a
+task is sent only by the owner's dispatch door.
+
+```sh
+metistry secrets set devin_api_key                    # the cog_ key, on stdin
+metistry secrets hosts devin_api_key api.devin.ai mcp.devin.ai
+metistry secrets grant devin_api_key connection:devin on
+metistry connections add devin --type agent --provider devin \
+    --url https://api.devin.ai --auth bearer --secret devin_api_key \
+    --config org=org-… [--config repos=owner/repo] --no-discover
+metistry secrets sync --to env                        # then restart the console
+
+metistry secrets set github_write_token               # Issues read/write + Metadata on ONE repo
+metistry secrets hosts github_write_token api.github.com
+metistry secrets grant github_write_token connection:github-issues on
+metistry connections add github-issues --type agent --provider github-issues \
+    --url https://api.github.com --auth bearer --secret github_write_token \
+    --config repo=owner/repo --no-discover
+```
+
+**The one-release shim is gone (0.17.0, X-85).** T4-11 kept the `targets/`
+manifests and their `env:` keys (`METISTRY_GITHUB_TOKEN`,
+`METISTRY_DEVIN_API_KEY`) working beside the connections for one release;
+0.16.0 was that release. A `targets/` manifest other than `local-crew` is
+refused at load, naming `metistry connections add`; an environment key alone
+dispatches nothing (the target does not exist, and dispatch answers `404`);
+and `metistry doctor`'s *target keys* row names a key still set and says it is
+ignored. The commands above are the migration: store the key, add the
+connection, delete the old line from `.env`.
 
 ## Linear
 
@@ -432,11 +665,12 @@ Today reads one table for every source. What it reads:
 in iCal format*, a published iCloud calendar, a `?token=` link. The file
 refuses one (`reach.http.url: this looks like a key`), and `{{ secret.x }}` in
 a URL is refused at the file and at the egress door (`secret_in_url`). **So
-this release reads public feed addresses only**; how a secret that *is* a URL
-reaches the wire is open for the owner (T4-12's PR). For a private Google or
-iCloud calendar today: the eventkit bridge reads whatever the Mac's Calendar
-shows, and CalDAV (*CalDAV* below; T4-13) and Google (T4-14) are the
-read-and-reply providers.
+ICS reads public feed addresses only** — and stays that way: the owner ruled
+on 2026-09-30 (Q8) that there is **no secret-in-URL door** and private ICS
+feeds stay out. For a private Google or iCloud calendar: the eventkit bridge
+reads whatever the Mac's Calendar shows, and CalDAV (*CalDAV* below; T4-13)
+and Google Calendar (*Google Calendar* below; T4-14, signed in with Google)
+are the read-and-reply providers.
 
 One sync reads one connection: with two ICS connections, name the one it reads
 in `scheduled.yaml` (`syncs.ics-calendar.connection`).
@@ -502,6 +736,15 @@ says who the owner is: the attendee whose address is one of the owner's is
 reads. `sync_state` records the window, the calendars and resources read, and
 whether the server schedules. Never the invite body.
 
+**Invitation requests** (T4-17; `syncs.caldav-calendar.raise.invitation`, on by
+default — the eventkit sync raises them too): a meeting still to come whose
+owner's answer is needs-action and which someone else organises raises one
+`invitation` request per meeting (its UID), cleared when the owner answers —
+here or in their calendar — or the meeting is cancelled or passes
+(`collectors/invitations.ts`; `docs/ops/client-api.md`, *Invitation and
+message requests*). The Mac's own calendar cannot answer one; a CalDAV
+connection holding the same meeting answers for it.
+
 **Reply** (`rsvp`; `previewReply`, then `respondToInvitation`): RFC 6638
 §3.2.2 — an attendee changes `PARTSTAT` in its own copy and the server "MUST
 deliver an iTIP REPLY". **Only the owner's own attendee line changes** — in the
@@ -527,8 +770,352 @@ as whom, to whom — with the event's ETag; the confirm names that ETag, is
 re-derived from the server's copy (never a body the caller sends) and written
 with `If-Match`, so an event that changed in between is refused (`changed`),
 never overwritten. The confirm token and who may press it belong to the
-console door (T4-17 for Respond; `write_own`'s door is not built yet). No
-agent reaches any of it: a calendar connection is not dialled as MCP.
+console door — **Respond** is `POST /api/calendar/invitations/:id/respond`
+(T4-17: the connection is found among every calendar holding the meeting, by
+its provider's `rsvp`; refused, *Open in Calendar*, where none can);
+`write_own`'s door is not built yet. No agent reaches any of it: a calendar
+connection is not dialled as MCP.
+
+## Google Calendar — signed in with Google (T4-14)
+
+Google Calendar through the Calendar API v3 (plan §2.6, §4 Q7 second; ruling
+2026-09-30, Q8): the `google-calendar` connection type, capabilities `read`,
+`write_own` and `rsvp`, over one builtin module (`google-calendar`). Google's
+CalDAV takes OAuth only, so this is the one way Metistry answers a Google
+invitation — and there is **no secret-in-URL door**: Google's *secret address
+in iCal format* stays out.
+
+```sh
+metistry connections add google --type calendar --provider google-calendar \
+  --url https://www.googleapis.com/calendar/v3/ --auth oauth
+metistry connections authorize google                    # the browser opens at accounts.google.com
+metistry secrets sync --to env                           # delivers the sign-in to the console; restart the console
+```
+
+**Sign-in is Metistry's own OAuth door** (*OAuth* below, T4-10): PKCE, a
+one-shot listener on 127.0.0.1, the `state` checked, the code exchanged at
+`oauth2.googleapis.com` through the egress door; the **refresh token** kept in
+this instance's Keychain as the connection's token secret, the **access
+token** only in the memory of the process that dials. The scope is
+`https://www.googleapis.com/auth/calendar.events` and nothing else — events
+on calendars the owner can reach, no calendar list, no settings, no Gmail —
+so the sync reads the owner's **primary** calendar.
+
+**The client.** The type's manifest ships **Metistry's public client id** — the
+maintainer's *Desktop* client in Folded Space Labs' Google Cloud project,
+public by design: an installed app cannot keep a secret, Google says so, and
+PKCE is what binds a code to its sign-in. **Until that client exists the
+manifest ships none**, and a connection signs in with the owner's own
+(`metistry secrets set google_client_id`, `metistry secrets hosts
+google_client_id accounts.google.com oauth2.googleapis.com`, `metistry
+secrets grant google_client_id connection:google on`, then `add … --client-id-secret
+google_client_id` or `metistry connections set google --client-id-secret
+google_client_id`). **A bring-your-own client id always overrides the
+shipped one.** A client secret — Google may ask for the one its Desktop
+clients carry — is always the owner's secret (`--client-secret-secret`,
+hosts `oauth2.googleapis.com` only), never a manifest's.
+
+***Google hasn't verified this app.*** Until Google verifies Metistry's
+client, Google shows that warning for its sensitive `calendar.events` scope.
+The connection type says so — the oauth field's `help`, which `metistry
+connections authorize` prints before the browser opens when the shipped
+client is used (and the Mac's connection sheet shows) — *choose Advanced,
+then Go to Metistry*. Removed from the manifest when verification completes.
+
+**Exactly two hosts.** The first sign-in writes the token secret's policy:
+sent only to `oauth2.googleapis.com` (the refresh token, to mint an access
+token) and `www.googleapis.com` (the access token), granted to the connection
+alone. The sync holds it to **exactly** those two (`GOOGLE_TOKEN_HOSTS`): a
+list that says more or less, and the connection is not opened. Every request
+is pinned to `https://www.googleapis.com` and follows no redirect.
+
+**Refused at the file** (`googleCalendarConnectionIssues`): a connection
+anywhere but `https://www.googleapis.com/calendar/v3/`; any sign-in but
+Google's (`auth: [oauth]` — never an app password); headers or query
+parameters of its own.
+
+**The sync** (`collectors/google-calendar/`, every 15 minutes):
+`events.list` on the primary calendar for today and the next two weeks, with
+`singleEvents=true` — Google expands each series, and each occurrence's own id
+(`<series>_20260928T133000Z`) is its `event_id` — into `calendar_events` under
+the connection's name. It asks with `fields=` for named fields only: **the
+description, the meeting link and the dial-in are never requested**, and
+never read if a server sends them. Google marks the owner's attendee
+(`self`), so `self_status` is the owner's own answer. A cancelled occurrence
+and a working-location marker are skipped and counted in `sync_state`.
+
+**Reply** (`rsvp`; `previewGoogleReply`, then `respondToGoogleInvitation`):
+the Calendar API's `attendees[].responseStatus` is writable, and
+`attendeesOmitted` "can be used to only update the participant's response".
+**The PATCH body is exactly** `{"attendeesOmitted": true, "attendees":
+[{"email": "<the owner's address>", "responseStatus": "<answer>"}]}` — the
+owner's own answer and the address that names it; no other attendee, no
+time, no title. `sendUpdates=all`, so the organizer hears it as they would
+from Calendar. Answers `accepted`, `tentative`, `declined`, for the
+occurrence named (a series' id answers the series). Refused: `not_invited`
+(the owner organises it, or is not an attendee), `unsupported` (not a
+meeting, or Google left out the guest list), `not_found`.
+
+**Write own** (`write_own`): create (`previewCreateGoogleEvent` /
+`createOwnGoogleEvent` — the preview mints the event's id, so a second
+confirm finds it made, `exists`), move or retitle (`previewChangeGoogleEvent`
+/ `changeOwnGoogleEvent` — one occurrence of a series moves alone) and
+delete (`previewDeleteGoogleEvent` / `deleteOwnGoogleEvent`), each with
+`sendUpdates=none` — **only an event nobody else is in**, organised by the
+owner (`not_own`); a series itself is not rewritten, and an out-of-office or
+working-location event is changed in Google Calendar (`unsupported`).
+
+**Preview, then confirm** — as CalDAV's: the preview reads the event now and
+says the exact body the confirm will send, with the event's ETag; the confirm
+names that ETag, re-reads the event, re-derives the body from Google's copy
+and writes with `If-Match`, so an event that changed in between is refused
+(`changed`), never overwritten. The console doors that call these — Respond
+(`POST /api/calendar/invitations/:id/respond`, T4-17: a series is answered
+at its master, `recurringEventId`, so one card is one answer) and own-event
+changes — hold the confirm token; no agent reaches any of it (a calendar
+connection is not dialled as MCP). The sync raises invitation requests as the
+CalDAV sync does (`syncs.google-calendar.raise.invitation`, on).
+
+## Mail over IMAP — Gmail, any IMAP server
+
+The first `mail` provider (plan §2.6, §4 Q8; T4-15): IMAP with an **app
+password**, capabilities `read` and `draft`. **Nothing sends mail** — there is
+no SMTP anywhere, and IMAP cannot send. Two connection types over one builtin
+module (`imap`): `gmail-mail`, a known service pinned to `imap.gmail.com:993`,
+and `imap` for any other server. The Gmail API is not used (§4 Q8).
+
+**Gmail needs 2-Step Verification and an app password.** Google ended
+password sign-in for IMAP on 2025-03-14, except for app passwords (Google
+Workspace, *Transition from less secure apps*). Turn on 2-Step Verification
+(myaccount.google.com → Security), make an app password
+(myaccount.google.com/apppasswords — 16 letters, without the spaces Google
+shows), and check IMAP is on in Gmail (Settings → Forwarding and POP/IMAP; a
+Workspace admin can turn it off). Then:
+
+```sh
+metistry secrets set gmail_app_password                   # the app password, on stdin
+metistry secrets hosts gmail_app_password imap.gmail.com:993
+metistry secrets grant gmail_app_password connection:gmail on
+metistry connections add gmail --type mail --provider gmail-mail \
+  --imap imap.gmail.com:993 --username you@gmail.com --secret gmail_app_password
+metistry connections test gmail                           # signs in, lists folders, finds [Gmail]/Drafts
+metistry secrets sync --to env                            # the mail sync reads it: then restart the console
+```
+
+| Type | Server | Username | Password |
+| --- | --- | --- | --- |
+| `gmail-mail` | `imap.gmail.com:993`, TLS — nowhere else | the Google Account's address | an app password (2-Step Verification on) |
+| `imap` | the server's IMAP host (`--imap host[:port]`, 993 unless given) | as the server says | an app password, where the server has them |
+
+**A reach class of its own.** A mailbox is not an HTTP service, a command or a
+path, so the file says `reach: { imap: { host, port, security, username,
+secret } }` (core's `reachSchema`; port 993, `security: tls` by default). A
+connection type reached by `imap` must provide `mail` and declare `auth:
+[basic]` — a username and an app password is the only sign-in.
+
+**The host guard** (core's `planSocketEgress`, run before anything is dialled —
+the socket's counterpart of `guardedFetch`): the app password goes only to the
+exact `host:port` on the secret's *Sent only to* list (`imap.gmail.com:993`,
+not `imap.gmail.com`; a socket always carries its port, even 443 — the bare
+host means HTTPS, so an IMAP server on 443 is listed `host:443`), only over TLS — verified certificate and host name, TLS
+1.2 or later — and only when granted to `connection:<name>`; each refusal is
+the door's own code (`host_not_listed`, `cleartext`, `not_granted`,
+`needs_approval`, `missing_secret`). The value is written into the one LOGIN
+command and nowhere else, and learned by the redactor first: a server that
+echoes it, or an error that carries it, shows `***REDACTED
+secret.<name>***`. `security: plain` (`--plain`) is for a server on this Mac —
+a local mail bridge — and is refused for any other host.
+
+**Refused at the file** (before anything is written or dialled): a mail
+submission port (25, 465, 587, 2525); plain off loopback; a host that is not a
+lowercase host name (no scheme, port or path); a username with a quote,
+backslash, control character or template; Gmail pointed anywhere but
+`imap.gmail.com:993` over TLS; an `imap` type without `auth: [basic]`; a
+custom mail connection (nothing runs it).
+
+**No code path can send — a closed command set.** Every command line passes
+one function (`imapCommandLine`) that knows nine commands — `CAPABILITY`,
+`LOGIN`, `LIST`, `EXAMINE`, `UID SEARCH`, `UID FETCH`, `APPEND`, `NOOP`,
+`LOGOUT` — each with one fixed argument shape. `SELECT`, `STORE`, `COPY`,
+`MOVE`, `EXPUNGE`, `DELETE`, `CREATE`, `RENAME`, `STARTTLS` and `AUTHENTICATE`
+are refused by name; a body fetch, a flag store, or a second command after a
+line break is refused before a byte is written (`command_refused`). A
+submission port is never dialled, even when handed one directly.
+
+**Read** (`readHeaders`): `EXAMINE` — read-only, so reading never marks a
+message read — then `UID SEARCH` (all, or since a day) and one `UID FETCH` of
+fixed items: `UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (DATE
+FROM SENDER REPLY-TO TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES LIST-ID
+AUTO-SUBMITTED PRECEDENCE)]`. The items are a constant, so **no body is ever
+fetched** — §4.12's rule, *the reference, not the content*. Each message comes
+back with a `ref` (`<connection>/<mailbox>/<uidvalidity>/<uid>`), its header
+text decoded (RFC 2047, RFC 6532), stripped of bidi and zero-width controls and
+a leading slash (core's `sanitizeForAgent`) and capped, `automated` when a list
+or an automatic sender says so (the deterministic prefilter §4.12 asks for),
+and **`source: comms`** — the provenance the data policy's `deny_sources`
+names, so a brief that carries it never leaves the machine (`checkBrief`,
+`docs/ops/targets.md`). At most 500 messages per read, the newest.
+
+**Draft** (`draft`; `previewDraft`, then `appendDraft`): a plain-text RFC 5322
+message (UTF-8, base64 body; To and Cc as addresses only — no Bcc), threaded
+with `In-Reply-To` and `References`. The preview returns the exact bytes, a
+digest and where it would go; the confirm re-renders from the same input with
+the preview's date and Message-ID and **refuses a different digest**
+(`changed`), writing nothing. `APPEND` takes no mailbox from the caller: it
+writes to the one mailbox the server marks `\Drafts` (RFC 6154) — else a
+top-level `Drafts` — flagged `\Draft \Seen`, and never to Sent or an Outbox
+(`no_drafts` when there is none). The owner sends it from their mail app. The
+confirm token and who may press it belong to the console door (`POST
+/api/mail/messages/:id/draft`, T4-17).
+
+**`check()`** (`metistry connections test`, doctor): sign in, `LIST`, find
+Drafts, `EXAMINE INBOX` — no message fetched — `LOGOUT`. `ok`; `degraded`
+when there is no Drafts mailbox (reading works, a draft would be refused);
+`failed` on a refused sign-in — *sign in with an app password (for Gmail:
+2-Step Verification on, then an app password)* — or an unreachable server or
+certificate; `absent` with no app password in this instance's Keychain.
+`meta` is `{ mailboxes, drafts, inbox_messages }`. The pool opens a mailbox
+only for the IMAP module (`openImap`) and never dials one as MCP; no agent
+reaches it.
+
+**The sync** (`collectors/mail-messages/`, every 15 minutes, T4-17): both IMAP
+types declare `sync: mail-messages`, so `metistry secrets sync --to env`
+delivers the app password to the console and the sync opens the mailbox
+through `openSyncImap` — the host guard above, nothing dialled until a
+session opens. Each pass reads the headers of the last week of `INBOX`, and
+of the mailbox marked `\Sent` (only its `In-Reply-To` and `References` — which
+messages the owner answered), and raises a **`message` request** for each
+message that looks like it waits on the owner's reply — **inferred from the
+headers alone**, by rules, and saying so (`payload.inferred`, the reason in
+words): the owner's address (the sign-in name) in To — R7, the source names
+the owner; from a person, not the owner, a list, an automatic sender or a
+no-reply address; unanswered; and a reply in a conversation or written to the
+owner alone. Once per message (by Message-ID); cleared when the owner
+replies, it leaves the inbox, or it is a week old. A sign-in name that is not
+an address raises nothing (`sync_state.owner: unknown`). No body is fetched,
+so none can reach a request, the assistant or an agent; reading a body to
+infer from waits on §4.12's PoC-13 re-run bar. `syncs.mail-messages.raise.message`
+turns the raise off.
+
+**Draft Reply** is `POST /api/mail/messages/:id/draft` (T4-17): the message's
+headers read again by its reference (`readMessage`), the reply addressed from
+them — Reply-To, else From; never an address the caller sends — previewed,
+then APPENDed to Drafts only as previewed. Nothing sends.
+
+## Generated tools — an API, a feed, files (T4-10)
+
+A connection that is not an MCP server is reached through tools Metistry
+generates for it (C115: "non-MCP types get generated tools") — offered by the
+same lazy pair, fetched only by `connections_list { connection }` and never on
+the bridge's eager `tools/list`, and held to every rule above: the file's
+`tools:` is the allowlist, the owner's mode decides how each runs, every
+request leaves through the egress door, every call is a `connection_call`
+row. The set is closed (`packages/connections/src/generated.ts`):
+
+| Type · reach | Tool | Group | Does |
+| --- | --- | --- | --- |
+| api · http | `get` | Reads | GET a path under the connection's URL; answers the status, the content type and the body (JSON parsed) |
+| api · http | `request` | Changes things | POST, PUT, PATCH or DELETE under the URL; a JSON body as JSON, a string as text |
+| feed · http | `list_items` | Reads | RSS 2.0, RSS 1.0 or Atom: id, title, link, date, a short summary |
+| feed · http | `get_item` | Reads | one item by id, its full summary |
+| feed · http | `search_items` | Reads | items whose title or summary holds the words |
+| files · path | `list_files` | Reads | one folder level: path, file or folder, size |
+| files · path | `read_file` | Reads | a text file (a binary one is refused) |
+| files · path | `search_files` | Reads | matching lines, with their paths and line numbers |
+| files · http | `read_page` | Reads | the page at the URL, HTML reduced to text |
+
+`metistry connections add` writes them **every one at Ask First** — the
+default for a proxied tool (CLAUDE.md), taken whole for a service nobody has
+yet seen answer through Metistry; `policy <name> <tool> allow` moves one. A
+tool that changes something (`request`) is preview-then-confirm at Allow and
+waits for the owner's Approve at Ask First, like any proxied tool.
+
+What each makes impossible, before anything is sent: **leaving the
+connection** — an API path is relative and resolves under the URL (same
+origin, same path prefix; a scheme, `//host`, a leading `/`, `..` or an
+encoded climb is refused), a files path resolves under the folder (`..` and an
+absolute path are refused, and a symbolic link that leads outside is refused
+once resolved; a listing and a search do not follow links at all); **a
+caller's query parameter replacing one the file sets**; **a caller's header**
+(the headers are the file's and the auth shortcut's). Hidden files stay hidden
+and the include and skip patterns apply (`*` within a name, `**` across
+folders; a pattern with no `/` matches a name anywhere). Every read is capped
+— 256 KB of an answer or a page, 5 MB of a feed, 1 MB of a file, 5,000 files
+per search — and says so. A redirect is not followed (`other_host`).
+
+## OAuth — a public client, PKCE, a loopback redirect (T4-10)
+
+The plan's model (§2.6): an installed app cannot keep a secret, so a
+connection signs in as a **public client** — PKCE (RFC 7636) and a loopback
+redirect — with no Metistry server in the path. The client comes from:
+
+| Connection | Client id | Client secret |
+| --- | --- | --- |
+| a known service (`google-calendar`, T4-14) | the type's manifest ships one — or **your own**, `config.<field>.client_id: {{ secret.x }}` (`metistry connections set <name> --client-id-secret x`), which overrides it | none; your own, where the provider needs one (`--client-secret-secret`) |
+| a custom connection (C118) | **always your own** — nothing ships one — beside the client model the connection carries (`--authorize-url`, `--token-url`, `--scope`) | your own, where needed |
+
+**Signing in is the owner's hand alone**: `metistry connections authorize
+<name>` (`docs/ops/cli.md`), which the Mac app runs (M13). It listens on
+**127.0.0.1 only** — a rule, not a default: there is no host to pass — on a
+port the system picks, for **exactly one callback**: the first request to
+`/callback` is the answer, whatever it says, and the listener stops accepting
+before it replies (or at the timeout). The `state` it sent is compared in
+constant time before the code is looked at; another state is refused and
+nothing is exchanged. The provider's `error=` is kept by its code alone,
+never its text. The code goes to the token endpoint with the PKCE verifier,
+the loopback it was sent to and the client — **through the egress door**,
+pinned to the token endpoint's origin, no redirect followed, a
+bring-your-own client id or secret filled (form-encoded) only for a host on
+its *Sent only to* list. A bring-your-own client id also goes in the
+authorize address the browser opens (OAuth puts it there), so it must list
+the authorize endpoint's host too, and be granted to the connection, before
+the browser opens.
+
+**What is kept is the refresh token** — the connection's token secret, in this
+instance's Keychain (§2.6: "the refresh token is a credential"). A provider
+that issues none is refused rather than kept: the sign-in would stop working
+within the hour. The first sign-in writes the token secret's policy: sent
+only to the token endpoint's host and the service's, granted `on` to the
+connection alone. **An access token is never stored**: the process that dials
+(the console, or the CLI's `test`) mints one from the refresh token at the
+egress door when a request needs it, holds it in memory until a minute before
+it expires, and fills it as that same token secret — `Authorization: Bearer
+{{ secret.<token> }}` — so the token secret's *Sent only to* list and grant
+decide where the access token may go. Both are redacted wherever they come
+back.
+
+**The assistant cannot start a flow.** It has no shell (invariant 9); the
+proxy it reaches has three doors — list, tools, call — none of which signs
+in; and nothing it runs in or reaches (the console, the bridge, the engine,
+the reconciler, the supervisor) imports the flow — a test holds each of them
+to it (`packages/connections/test/oauth-reach.test.ts`). A call to an OAuth
+connection that is not signed in is refused before anything is sent.
+
+**The broker** (`redirect: broker`) is modelled in the schema and refused
+where a flow would start (`sign_in`): it is designed, not built (§5).
+
+## A sync's first connection (T4-10; ruled 2026-09-27)
+
+A sync reads the one `ok` connection its provider declares, or the one
+`scheduled.yaml` names (*A sync reading its connection* above). `metistry
+connections add` writes that name the first time: when the provider is
+product code a sync reads and `scheduled.yaml` names no connection for the
+sync yet, it adds `syncs.<sync>: { connection: <name> }` — edited as a
+document, so the owner's comments and every other entry survive — through the
+reconciler as the owner. An entry that already names a connection is left as
+it is. The Scheduled pane changes a sync's interval, pause and Needs You
+rules, and keeps refusing to set its connection.
+
+## The permissions table — *Through Metistry* (T4-10)
+
+A proxied connection is one more row of the permissions table
+(`docs/ops/client-api.md`, *permissions*; screen 7 §10): its Reads under
+Read, its Changes things and Starts an agent under Write, by the owner's mode
+(Never absent, Ask First ⏱), and every entry's provenance `proxy` — *reached
+through Metistry*, said once by the row's ⧉. Which rows an actor has is the
+proxy's own rule, asked through `may()`: the assistant every connection, a
+borrower only those offered and granted, a crew only with its `connections`
+group as well.
 
 ## Decisions made here
 
@@ -545,3 +1132,27 @@ agent reaches any of it: a calendar connection is not dialled as MCP.
   the file keeps F-3's `on | ask | off`, and the CLI accepts both.
 - **A GET never dials.** The console lists files; whether a server answers is
   `test` and `doctor`, and — from T4-8b — the console's own calls.
+- **Generated tools start at Ask First, every group** (T4-10), not Q15's
+  Reads-Allow: they reach a service no one has yet seen answer through
+  Metistry, and CLAUDE.md's default for a proxied tool is Ask.
+- **The console fills the secrets of every connection it dials** (T4-10):
+  `secrets sync --to env` delivers an MCP, API, feed or files connection's
+  secrets, where until the pool was wired it delivered a sync's alone — and,
+  from T4-11, an agent connection's, since the console dispatches through it.
+- **An agent type's purposes are not tools** (T4-11). Devin's purposes live
+  in the type's `dispatch.purposes`, not as `starts_agent` tools: dispatch is
+  the owner's own door, so a per-tool Ask would ask the owner about their
+  own click, and a tool would put the connection on the proxy's listing,
+  where it is not reachable.
+- **No legacy keys** (X-85, 0.17.0): T4-11 let a sync with no connection read
+  its old environment and the `targets/` manifests dispatch with `env:` keys,
+  for one release. That release has passed; a connection is the only way in,
+  and `metistry doctor` names a leftover key.
+- **A rotated refresh token lives in memory** (T4-10): the process that dials
+  cannot write the Keychain, so a provider that rotates refresh tokens hands
+  the new one to the running console only; after a restart the stored one is
+  used again, and a provider that revoked it answers `invalid_grant` — sign in
+  again.
+- **A caller-written secret reference is refused** (T4-10, found in passing):
+  the door fills `{{ secret.x }}` wherever it finds one, so the pool refuses a
+  call whose arguments carry one (`secret_reference`) for every connection.

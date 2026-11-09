@@ -1,5 +1,120 @@
 # @foldedspacelabs/metistry-connections
 
+## 0.17.2
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.17.2
+
+## 0.17.1
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.17.1
+
+## 0.17.0
+
+### Minor Changes
+
+- 9fce74e: `connections_call` folds a large answer (X-132; the Context Mode review's CM-6, allowed by the owner 2026-10-04). An upstream answer over `METISTRY_CONNECTION_FOLD_BYTES` (default 8 KiB on the wire) is folded once, after redaction, as a pure function of its text — a JSON array over `METISTRY_CONNECTION_FOLD_ARRAY_OVER` items (20) becomes its first `METISTRY_CONNECTION_FOLD_ARRAY_KEEP` (5), its last and the count; runs of a repeated line become the line and a count; anything still over the threshold gets a head and a tail — so the same answer folds to the same bytes every time. **The whole answer is kept** in the new `connection_answers` table (migration 0042: derived, ephemeral, self-purging after `METISTRY_CONNECTION_ANSWER_KEEP_HOURS`, default 24) under the call's own `runs` id, and read back one page at a time through the same tool — `connections_call { page: "<handle>/<n>" }`, no new tool — **by the principal that made the call and nobody else**: the read is `WHERE run_id = … AND principal = …`, so another caller with the handle hears the same `not_found` an unknown handle does. The `runs` row records `bytes_in`, `bytes_out`, `fold` and the handle. **The owner turns it off per connection**: `metistry connections policy <name> --fold off` writes `fold: false` beside Allow · Ask First · Never and the offer switch; `GET /api/connections` and `connections list --json` carry `fold` on every row.
+- 4065f91: X-87: every collector exports `check()`, and `metistry doctor` asks it. The ten
+  that had none (the Google, ICS, CalDAV and EventKit calendars, Linear, GitHub,
+  mail, AWS costs, Claude usage and the inbox sort) report cheap, local-first
+  state: configuration and credential presence, the connection they read opened
+  through the console's own opener, and — where the shared connection check dials
+  that kind of connection — its verdict, never a full sync and never a billed
+  call. Doctor loads each collector's compiled entry (a build or a release pack)
+  and lays the verdict over that collector's one row; a module that will not
+  load, or a `check()` that throws, hangs or answers something that is not the
+  `check()` shape, is a `failed` row and the rest of the report still runs. One
+  CI test holds the convention for every collector manifest, with no allowlist.
+  A connection check's refusal now carries its code as `meta.refused`.
+- 4c717ca: A connection's detail says who uses it and when it was last checked.
+  `GET /api/connections(/:name)` rows now list every user in `used_by` — the
+  agents and crews granted the connection beside its syncs, once it is offered
+  to agents — serve `last_checked` (the time and verdict of the newest check,
+  stamped by `metistry connections test` and `doctor` under the instance's
+  gitignored state directory) and, on an HTTP reach, `header_secrets` (each
+  header with the secret names it carries). Settings ▸ Connections draws all
+  three; `metistry connections show` prints the check and each header's secrets.
+
+### Patch Changes
+
+- 5ea6c00: `socketDestination` keeps its port (X-93). The `:443` collapse is an HTTPS convention, but the IMAP host guard and `describeConnection` shared it, so an IMAP server on 443 was spelled as the bare host and would have matched a secret's HTTPS *Sent only to* entry. A socket destination now always reads `host:port`; an HTTPS URL on 443 still collapses to the host.
+- Updated dependencies [4c27b53]
+- Updated dependencies [6719455]
+- Updated dependencies [5ea6c00]
+- Updated dependencies [13e1b31]
+- Updated dependencies [675e819]
+- Updated dependencies [0708790]
+- Updated dependencies [c90e651]
+- Updated dependencies [2ceeed4]
+- Updated dependencies [9fce74e]
+- Updated dependencies [82bf3ad]
+- Updated dependencies [c0685d8]
+- Updated dependencies [76a8024]
+- Updated dependencies [c2f9f88]
+  - @foldedspacelabs/metistry-core@0.17.0
+
+## 0.16.1
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.16.1
+
+## 0.16.0
+
+### Minor Changes
+
+- e6f16eb: Connections P3 (T4-10). **OAuth as a public client**: `metistry connections authorize <name>` signs a connection in — a listener on 127.0.0.1 for exactly one callback, the browser at the provider, the `state` checked before any code is exchanged, the code exchanged with its PKCE verifier through the egress door, and the refresh token kept in this instance's Keychain; the process that dials mints the access token at the door and holds it in memory. The client id comes from the connection type's manifest or is the owner's own (a secret, `--client-id-secret`); a custom connection carries its own client model (C118, core's `customOAuthClientSchema`); the broker redirect is modelled and refused. **Every HTTP auth shortcut dials** — Basic and OAuth join bearer and the API-key header. **Generated tools** for API (`get`, `request`), feed (`list_items`, `get_item`, `search_items`) and files (`list_files`, `read_file`, `search_files`, `read_page`) connections, served lazily through the proxy's pair and added at Ask First. **The console builds the connections pool** (open since #374, ruled 2026-09-30), so `connections_list` / `connections_call` answer on a live console; `metistry secrets sync --to env` now delivers the secrets of every connection the console dials. **The permissions table** draws each connection an actor reaches as a row with the new `proxy` provenance, *reached through Metistry*. `connections add` writes a sync's first `connection:` into `scheduled.yaml`. And a call whose arguments carry a `{{ secret.… }}` reference is refused (`secret_reference`) before anything is dialled — the door would have filled it.
+- 0ff5643: Targets and syncs as connections (T4-11). **Targets become agent connections**: a connection-type manifest gains a `dispatch:` block for `provides: agent` — the dispatcher (closed `AGENT_DISPATCHERS`: `devin-session`, `github-issue`), the data policy, the purposes with their preambles (Devin's `DEVIN_PURPOSES` move here), the result path — and the product ships `devin` and `github-issues` agent types beside the `github` tracker type. The console's target registry reads the instance's agent connections afresh and presents each as the target `dispatch()` already knows (dispatch unchanged), sending through the connection's own egress door (`openAgentHttp`): the key a `{{ secret.x }}` reference filled for its listed hosts when granted to `connection:<name>`, the response redacted. A brief or title carrying a secret or variable reference is refused before anything is sent. **Collectors become syncs bound to a connection and its secret**: `github-state` reads the `github` connection, `devin-sessions` and `devin-knowledge` the `devin` one (a type may name further syncs in `also_read_by`, and a sync further origins its code reaches); a connection always wins, and the legacy environment keys still work for one release. `metistry connections add|set --config KEY=VALUE` sets a connection type's fields.
+- 3f80c1a: Google Calendar, signed in with Google (T4-14; ruling 2026-09-30, Q8). A new `google-calendar` connection type (`seed/connection-types/google-calendar/`) over a new builtin module (`packages/connections` `google-calendar.ts`): `read` — the owner's primary calendar through the Calendar API v3, named fields only (never the description), each occurrence under Google's own id, the owner's own answer as `self_status`; `rsvp` — `previewGoogleReply` / `respondToGoogleInvitation`, a PATCH whose body is exactly the owner's own `responseStatus` and address with `attendeesOmitted`; `write_own` — create, move and delete events nobody else is in. Every change previews first and confirms against the event's ETag with `If-Match`. Sign-in is T4-10's OAuth door (PKCE, a one-shot loopback listener, the refresh token in the Keychain): the shipped client id is public by design, a bring-your-own client id overrides it, and a client secret is only ever the owner's secret. The sync opener (`openSyncHttp`) now signs in with OAuth — an access token minted from the delivered refresh token, cached per connection across runs — and a sync may hold the token secret's *Sent only to* list to exact hosts (`tokenHosts`). A new `google-calendar` sync writes `calendar_events` every 15 minutes. `metistry connections authorize` prints a connection type's words about its shipped client (Google: *Google hasn't verified this app*) before the browser opens. There is no secret-in-URL door; private ICS feeds stay out.
+- f6a8e5d: T4-15: Mail over IMAP. A fourth reach class, `imap` (host, port 993, TLS —
+  plain only to loopback — username and the app password's secret name; a mail
+  submission port is refused), and `planSocketEgress`, the host guard for a
+  secret sent over a socket rather than HTTP: the exact `host:port` on its *Sent
+  only to* list, TLS, granted, before anything is dialled. The `imap` connection
+  type and Gmail (`gmail-mail`, pinned to `imap.gmail.com:993`; 2-Step
+  Verification and an app password) over a hand-rolled IMAP4rev1 client (no
+  dependency) whose commands are a closed set with fixed shapes — so no code
+  path can send, move, flag or delete mail. `read` is headers only (EXAMINE,
+  BODY.PEEK of fixed fields), stamped `source: comms` and sanitised; `draft`
+  previews, then APPENDs to the `\Drafts` mailbox only when the digest matches.
+  `check()` signs in, lists folders, finds Drafts and examines INBOX.
+  `metistry connections add` takes `--imap host[:port] --username --secret
+  [--plain]`.
+- cbfb1a9: T4-17: Invitation and message requests. The eventkit, CalDAV and Google Calendar syncs raise
+  one `invitation` mirror per meeting still to come whose owner's answer is
+  needs-action and which someone else organises (R7) — a series is one card,
+  the same meeting on two calendars one card with both askers — cleared with a
+  receipt when the owner answers, it is cancelled or it passes; an ICS feed
+  names no owner and raises none. A new sync, `mail-messages`, reads the last
+  week of an IMAP inbox's headers (and Sent's, for what was answered) and
+  raises one `message` mirror per message that waits on the owner's reply,
+  inferred from the headers alone and saying so (`payload.inferred`), cleared
+  when the owner replies, it leaves the inbox or it is a week old. The imap
+  types declare `sync: mail-messages`, so their app password is delivered to
+  the console; `openSyncImap` / `instanceImapOpener` open the mailbox through
+  the IMAP host guard, and `ImapSession.readMessage` re-reads one message's
+  headers by reference. `POST /api/calendar/invitations/:id/respond` answers
+  through a connection whose provider declares `rsvp` — CalDAV or Google
+  Calendar — (refused with Open in Calendar where none can) and `POST /api/mail/messages/:id/draft` writes a
+  reply to Drafts, addressed from the message's own headers; both preview,
+  then confirm with a single-use token, and never send mail.
+- 91d222c: Connections: add and configure (T6-13b, screen 9 §10.5). **The Mac's Add Connection** starts with the type, then a known service or custom: a known service's form is **rendered from its connection type's fields** — text, URL, choice, a variable's name, a secret's name (a picker of the names `GET /api/secrets` serves, never a text field), an OAuth sign-in — so a type an extension installs renders with no per-service Swift; custom is configured by how it is reached (HTTP with *None · Bearer · Basic · API Key · OAuth*, a command with its environment, a path, a mailbox over IMAP). *What it sends* and the host guards draw on the draft as they do on a connection, and the whole `metistry connections add|set …` command is shown before the button runs it; *Sign In…* is `connections authorize`, confirmed. Two small doors close the gap the ticket found (coordinator call 2026-09-30, no new route, no new §2.2 verb): **`GET /api/connections` serves `types`** — the installed connection types, seed and extensions through one registry, each with its fields by kind and nothing of an OAuth client or a value — and `GET /api/connections/:name`'s `provider_unit` gains the same `type`; **`metistry connections add|set` take a repeatable `--config KEY=VALUE`**, judged against the type's manifest before anything is written — an unknown key, a wrong kind or a required field left out is exit 2 naming the field, a `secret` field takes only the NAME of a secret (a value is refused pointing at `secrets set`, never echoed), an `oauth` field is never typed. The detail also draws an IMAP reach as a mailbox.
+
+### Patch Changes
+
+- Updated dependencies [5a6ad9e]
+- Updated dependencies [822a0c7]
+- Updated dependencies [eadd0df]
+- Updated dependencies [e6f16eb]
+- Updated dependencies [0ff5643]
+- Updated dependencies [f6a8e5d]
+- Updated dependencies [cbfb1a9]
+- Updated dependencies [7b979ef]
+  - @foldedspacelabs/metistry-core@0.16.0
+
 ## 0.15.1
 
 ### Patch Changes

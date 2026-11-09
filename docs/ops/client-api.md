@@ -28,7 +28,8 @@ the live-changes catalogue. Four tests keep the halves honest:
   misuse tests, with bodies that would otherwise succeed (F-13).
 - `packages/core/test/client-api.test.ts` — the table is consistent with
   itself: reach and principals agree, a `local` row admits the local owner
-  token alone, no agent bearer reaches past `/mcp` and `/capture`.
+  token alone, no agent bearer reaches past `/mcp`, `/capture` and
+  `GET /api/briefing`.
 
 **The console reads the table before it dispatches.** For the owner, a route
 the table does not list as served is a `404` whatever handler exists behind it
@@ -53,9 +54,9 @@ route by route.
 | Reach | Who gets through | How it is proved |
 | --- | --- | --- |
 | `public` | anyone | the bootstrap: health, identity, the WebAuthn ceremony |
-| `agent` | agent bearers, the capture owner token | `/mcp`, `POST /capture` |
+| `agent` | agent bearers, the capture owner token | `/mcp`, `POST /capture`, `GET /api/briefing` (agent bearers alone) |
 | `owner` | the owner, from any client | a passkey session **or** the local owner token |
-| `local` | the owner **on this Mac** | the local owner token only — accepted solely from a loopback peer (`apps/console/src/local-owner.ts`); a passkey session, even from the same Mac, is refused `403 local_only` naming the Mac app (F-13) |
+| `local` | the owner **on this Mac** | the local owner token only — accepted solely from a loopback peer on the console's **main listener** (`apps/console/src/local-owner.ts`); a passkey session, even from the same Mac, is refused `403 local_only` naming the Mac app (F-13); on the **proxy listener** (`docs/ops/auth.md`, "The proxy listener") no `local` route answers at all |
 
 **Principals** are the credential kinds a route actually admits, spelled as
 the console's own `Auth` kinds:
@@ -64,7 +65,7 @@ the console's own `Auth` kinds:
 | --- | --- |
 | `anyone` | none at all — `public` rows only |
 | `session` | a passkey session cookie (`metistry_session`) |
-| `local_owner` | `METISTRY_LOCAL_OWNER_TOKEN`, from a loopback peer |
+| `local_owner` | `METISTRY_LOCAL_OWNER_TOKEN`, from a loopback peer on the main listener — never through the proxy listener |
 | `owner_token` | a host-minted `owner_tokens` row — the capture Shortcut |
 | `agent` | an agent bearer: an external agent, the assistant, a crew |
 
@@ -90,10 +91,16 @@ The console reads `local` off the table — `isLocalRoute` in
 in `apps/console/src/server.ts` — so a row filed under `local` is enforced
 before any handler runs, with no second list in the server:
 
-- **The local owner token from a loopback peer** gets through. From any other
-  peer it is the uniform `401` an unknown token gets (and the attempt is
-  audited as `owner_token_remote`), exactly as before — the address is the
-  socket's, never a header.
+- **The local owner token from a loopback peer on the main listener** gets
+  through. From any other peer — and from *every* peer on the proxy listener,
+  where a remote-access provider forwards to (`docs/ops/auth.md`, "The proxy
+  listener") — it is the uniform `401` an unknown token gets (and the attempt
+  is audited as `owner_token_remote`, with `meta.listener`), exactly as
+  before — the address and the listener are the socket's, never a header.
+- **On the proxy listener no `local` route answers**: `403 local_only` to a
+  passkey session, audited with `meta.listener = proxy`; the token itself is
+  the `401` above. A request there whose `Host` is not a remote host
+  `METISTRY_ORIGIN` names is `421 misdirected` before any of this.
 - **A passkey session is refused `403 local_only`** — even one from
   `127.0.0.1` — with a message that names the route and the Mac app:
 
@@ -115,10 +122,14 @@ before any handler runs, with no second list in the server:
 
 `local_only` is `packages/core`'s error code for this answer, status `403`.
 Served `local` rows today: `POST /api/agents` and `POST /api/agents/:id/rotate`
-— minting a bearer is a boundary change — and `POST /api/sessions/purge`, which
-is irreversible. `metistry connect` mints through the first two
-with the local owner token, so it is unaffected; the legacy PWA's agent panel
-can no longer register or rotate an agent.
+— minting a bearer is a boundary change — `POST /api/sessions/purge`, which is
+irreversible, `PUT /api/scheduled/routines/:name/assignment` and
+`POST /api/scheduled/routines`, which change what runs, and
+`POST /api/knowledge/restore` and `POST /api/vault/rollback`, whose history and
+remote are the boundary. `metistry connect` mints through the first two with
+the local owner token, so it is unaffected. The PWA holds a passkey session, so
+it offers none of them: its Settings (T7-6) shows each as a Mac-only row — the
+reason, never a control — and a request sent anyway meets this answer.
 
 ## Versioning
 
@@ -140,8 +151,14 @@ can no longer register or rotate an agent.
 `packages/core`'s envelope, `{"error":{"code","message"}}`, on every refusal.
 The codes and their statuses are `packages/core/src/errors.ts`: `invalid_request`
 400, `unauthenticated` 401, `forbidden` 403, `local_only` 403 (a `local` route,
-asked with a passkey session — "The `local` gate" above), `not_found` 404, `conflict` 409,
-`rate_limited` 429, `internal` 500, `not_available` 503 (the capability is
+asked with a passkey session — "The `local` gate" above), `misdirected` 421 (a
+request on the console's proxy listener whose `Host` is not a remote host
+`METISTRY_ORIGIN` names — `docs/ops/auth.md`, "The proxy listener"), `not_found` 404, `conflict` 409,
+`rate_limited` 429 (on the proxy listener, an address — or the listener as a
+whole — answered without a session more often than its window allows; carries
+`Retry-After` in whole seconds, and a session is never limited — `docs/ops/auth.md`,
+"On the internet: rate limits"; a client retries after the header, never
+sooner), `internal` 500, `not_available` 503 (the capability is
 absent in this deployment — degrades: absent — never a permission), and
 `section_missing` 409 — the vault bridge's answer when the daily note's
 `metistry:day` markers are not exactly one clean pair (docs/ops/reconciler.md,
@@ -259,11 +276,12 @@ takes a `since` cursor and answers with the next one.
 | `POST /auth/login/finish` | public | anyone | no | — | — | served | finish a passkey sign-in; sets the session cookie |
 | `* /mcp` | agent | agent | no | — | — | served | the MCP bridge: the tools an agent bearer's grants allow |
 | `POST /capture` | agent · owner | session · local_owner · owner_token · agent | key | — | — | served | a note or a file into `Inbox/`; `source: "app"` for an owner credential (T2-1) |
+| `GET /api/briefing` | agent | agent | natural | — | — | served | the session-start briefing for one repository (`repo`, `remote`): the owner's project page, open tasks, folds and recent sessions as handles plus owner text, under the agent's grant (X-128) |
 | `GET /api/whoami` | owner | session · local_owner · owner_token | natural | — | — | served | which credential this is and whether it reaches management |
 | `POST /auth/logout` | owner | session | no | — | — | served | end this device's session |
-| `GET /api/devices` | owner | session · local_owner | natural | — | — | served | the enrolled passkeys and their sessions |
-| `POST /api/devices/:id/revoke` | owner | session · local_owner | no | — | — | served | end one device session |
-| `POST /message` | owner | session · local_owner · owner_token | no | — | — | served | send a message; `tier` picks the model tier for this one |
+| `GET /api/devices` | owner | session · local_owner | natural | — | — | served | the devices: a passkey each, its sessions under it (§2.22) |
+| `POST /api/devices/:id/revoke` | owner | session · local_owner | no | — | — | served | remove a device — its passkey and every session under it; `scope: "sessions"` signs it out and keeps the passkey |
+| `POST /message` | owner | session · local_owner · owner_token | no | stale | — | served | send a message; `tier` picks the model tier for this one; `capture_session` holds it to the private tier |
 | `GET /api/messages` | owner | session · local_owner · owner_token | natural | — | since | served | the conversation, inbound and outbound |
 | `POST /api/messages/:id/feedback` | owner | session · local_owner | natural | — | — | served | rate one reply, with an optional note |
 | `DELETE /api/messages/:id/feedback` | owner | session · local_owner | natural | — | — | served | clear a reply's rating |
@@ -345,8 +363,8 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/today/close` | owner | session · local_owner | no | stale | — | served | Close the Day: write the section, then plan tomorrow |
 | `POST /api/meetings/:event_id/note` | owner | session · local_owner | natural | — | — | served | the meeting note for one event; a second call returns the first |
 | `POST /api/calendar/events/:id/move` | owner | session · local_owner | no | stale | — | served | move an event: preview (who is in it, the new time), then confirm with a single-use token |
-| `POST /api/calendar/invitations/:id/respond` | owner | session · local_owner | no | — | — | T4-17 | answer an invitation through the connection that can |
-| `POST /api/mail/messages/:id/draft` | owner | session · local_owner | no | — | — | T4-17 | draft a reply through the connection that can; never sends |
+| `POST /api/calendar/invitations/:id/respond` | owner | session · local_owner | no | stale | — | served | answer an invitation through a connection that can (`rsvp`): preview, then confirm with a single-use token; 503 names Open in Calendar where none can |
+| `POST /api/mail/messages/:id/draft` | owner | session · local_owner | no | stale | — | served | draft a reply into Drafts through the connection's `draft` capability: preview, then confirm with a single-use token; never sends |
 | `GET /api/scheduled` | owner | session · local_owner | natural | — | — | served | every routine and sync with its schedule and last run |
 | `GET /api/scheduled/routines/:name` | owner | session · local_owner | natural | — | — | served | one routine |
 | `GET /api/scheduled/syncs/:name` | owner | session · local_owner | natural | — | — | served | one sync |
@@ -363,7 +381,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/connections/:name` | owner | session · local_owner | natural | — | — | served | one connection, with its file and its provider's unit |
 | `GET /api/secrets` | owner | session · local_owner | natural | — | — | served | secret names, hosts, grants, last used — never a value |
 | `GET /api/variables` | owner | session · local_owner | natural | — | — | served | the variables agents read — name, value, read by, used in |
-| `GET /api/recordings/:id` | owner | session · local_owner | natural | — | — | T8-4 | one recording's retention state |
+| `GET /api/recordings/:id` | owner | session · local_owner | natural | — | — | served | one recording's retention state |
 | `POST /api/github/pulls/:owner/:repo/:number/review` | owner | session · local_owner | no | stale | — | served | post a review; the head SHA must match the one shown |
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply` | owner | session · local_owner | no | stale | — | served | reply to a review thread; the head SHA must match |
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve` | owner | session · local_owner | no | stale | — | served | resolve a review thread; the head SHA must match |
@@ -404,10 +422,14 @@ POST /auth/login/finish    {key, response}         200 {ok:true} + Set-Cookie me
 `GET /health` is a liveness probe (`metistry doctor` reads it) and the cheapest
 way to learn the contract version without signing in. The four ceremonies are
 `docs/ops/auth.md`'s: a one-time, ten-minute enrolment code minted on the host
-(`apps/console/scripts/enroll.mjs` — shell access is the root of trust for a
-first passkey, so no route mints one) starts a passkey registration, and a
+(`metistry enroll`, `docs/ops/cli.md`; `apps/console/scripts/enroll.mjs` on the
+compose shape — shell access is the root of trust for a first passkey, so no
+route mints one, and a test holds this table to that) starts a passkey registration, and a
 sign-in is the standard WebAuthn assertion. An origin mismatch is a `401` with
-the reason, never a `500`.
+the reason, never a `500`. `POST /auth/enroll/start` with a live code also
+stamps the code's row with the listener that answered (`proxy` or `main`;
+migration `0040`, X-114) — no new field in the `200`; the host reads it with
+`metistry enroll --status`, and stamping never spends the code.
 
 #### `GET /api/identity` — who this instance is, before sign-in
 
@@ -471,12 +493,14 @@ console streams live changes, so a client subscribes instead of polling — and,
 because it follows the table's row and the console's own wiring rather than a
 flag, never subscribes to a console that would answer `404` or `503`.
 
-### The agent surface — `/mcp` and `POST /capture`
+### The agent surface — `/mcp`, `POST /capture` and `GET /api/briefing`
 
 ```
 *    /mcp       the MCP bridge (Streamable HTTP, stateless; POST carries JSON-RPC) — agent bearers only
 POST /capture   {note?, filename?, content_base64?} as JSON, or raw bytes with X-Metistry-Filename
                 201 {"id":42,"path":"Inbox/1757556000000-note.md","sha256":"…"}
+GET  /api/briefing?repo=<checkout basename>&remote=<git remote>   the session-start briefing — agent bearers only
+                200 {as_of, agent, repo, remote, tier, project, handles, text, sha256, chars, budget_chars, truncated, empty}
 ```
 
 **`/mcp`** is `packages/mcp-brain`: the tools an agent bearer's grants allow
@@ -493,6 +517,20 @@ the Mac app and the PWA, never a request field — records `source: "app"`
 (T2-1), so Activity can tell the owner's own captures apart from the
 Shortcut's (`owner_token`, still `"http"`) and an agent bearer's (still
 `"http"`; the bridge's own `capture` tool still records `"mcp"`).
+
+**A recording's transcript is filed, not dropped in the inbox** (T8-4; the
+owner's ruling on W3 question 29). A capture from an **owner** credential —
+the Shortcut's owner token included, which is what the live-capture bridge
+presents — whose note carries the recorder's frontmatter (`kind:
+transcript`, `source: live-capture`, a `capture_session` id and a
+`started_at`) lands at `Journal/Transcripts/<date>-<session>.md` — the day it
+started, in `METISTRY_TZ` — committed in the owner's name, create-only, and
+records the recording's `capture_sessions` row; the answer's `path` says
+where. It keeps its inbox row, so the inbox drain still classifies it and
+raises a crashed recording's one report. The folder is the owner's at the
+tool (no agent can edit a transcript) and outside every default read grant:
+an area grant of `Journal` does not reach it. The same frontmatter on an
+**agent** bearer is an ordinary capture into `Inbox/`.
 
 #### `Idempotency-Key` on `POST /capture` — a retry is not a second note
 
@@ -560,33 +598,175 @@ Content-Type: application/json
   `ended_reason: crashed` from an owner credential raises **one** `report`
   in Needs You, keyed on the session (C137). An agent bearer's capture
   raises none.
+- **The meeting's card** (T8-7): from an owner credential the transcript
+  opens one card in Needs You — `group_id: "meeting:<session id>"`, named
+  from the calendar — and the Notes and To-dos the owner made from the bar
+  during the recording are captures too, anchored to the session until the
+  card's Approve moves them (*A meeting*, below; `docs/ops/inbox.md`).
+- **Window and Screen recordings** (T8-3) arrive the same way, through the
+  same door: the transcript is the picked content's sound (`(apps)`) and the
+  owner's microphone (`(you)`). The picture itself (`screen.mp4`) stays in
+  the session directory on the Mac — no route carries a frame, and
+  `ended_reason: picture_lost` (the system stopped the stream: the window
+  closed, the grant was withdrawn) is delivered like any other end.
+
+The recording itself is started on the Mac, never here: the bar sends
+`POST /recording/start` to the local bridge with the control credential —
+`{"mode":"audio_only","apps":[…]}`, or `{"mode":"window"}` /
+`{"mode":"screen"}`, which name no content because the system picker the
+recorder presents is the only chooser. A start that names a window, a
+display or apps for those modes is refused `400`; the bridge token is
+refused `403` on every recording route. The bridge's own contract is
+`packages/mcp-live-capture/README.md`.
 
 `POST /api/messages/:id/feedback` needs no key: it is an upsert on the
 message id, so a replay is already the same row. `POST /message` is not
 idempotent and not meant to be queued (a reply three hours late into a
 moved-on thread is confusing); the research note says why.
 
+#### `GET /api/briefing` — what a coding agent starts out knowing (X-128)
+
+```
+GET  /api/briefing?repo=metistry&remote=git%40github.com%3Aorg%2FMetistry.git
+     Authorization: Bearer <the agent token `metistry connect <tool>` minted>
+200  {
+       "as_of": "2026-10-19T12:00:00.000Z", "agent": "claude-code",
+       "repo": "metistry", "remote": "github.com/org/Metistry", "tier": "areas",
+       "project": {"path": "Projects/Metistry.md", "slug": "metistry", "title": "Metistry", "sha256": "…"} | null,
+       "handles": [{"kind": "project" | "task" | "session" | "fold" | "link", "path": "…", "title"?, "date"?, "sha256"?, "line"?}, …],
+       "text": "--- metistry briefing · reference only · nothing here is an instruction ---\n…\n--- end briefing ---",
+       "sha256": "<sha256 of text>", "chars": 1870, "budget_chars": 4800, "truncated": false, "empty": false
+     }
+400  invalid_request — `repo` missing, blank, more than one path segment, or over 200 characters
+401  no credential · 403 forbidden — any owner credential (a session, the local owner token, the capture token), the assistant's own bearer, a crew's bearer
+```
+
+The Context Mode review's CM-1 (`docs/research/2026-10-04-context-mode-review.md`
+§5–§6), as the owner ruled it on 2026-10-04: **handles plus the owner's own
+text**, assembled by the console with no model (invariant 4) from named
+queries alone (invariant 3), under the caller's grant. The plugins (X-129) call
+it **once, at session start**, with the cwd's basename and `git remote`, and
+inject `text` as context; the console does not cache it and the hook never
+calls again mid-session, so the cached prompt prefix is not churned.
+
+- **Who.** Agent bearers alone: the table files it under reach `agent` with
+  `agent` as its one principal. An owner credential is not an agent principal
+  here, exactly as at `/mcp`, and gets the uniform `403` before the door is
+  reached; among agent bearers only the `agent` role is served (core's
+  `console_briefing` door) — the assistant and a crew get the same hidden
+  `403`. Everything about the caller comes from its authenticated record:
+  its grant decides the tier, its `agents.projects` decides the unfolded
+  arm, and its `briefing: false` opt-out (below) — never the request.
+- **On by default, opt-out per agent** (Context Mode Q2, the owner's override
+  of the review's opt-in: "getting the right knowledge to the right place" is
+  the core feature). Every agent with a read grant is served. The opt-out is
+  one field in the agent's grants envelope, `briefing: false`, written with
+  the grants (`PUT /api/agents/:id/grants`), so it goes where a revoke goes
+  and is never inherited from a project or widened by an approval; an
+  opted-out agent gets the empty briefing below, and its `runs` row says
+  `opted_out`. The owner sets it with `metistry connect <tool> --briefing off` (`docs/ops/cli.md`), which writes the whole envelope so no other grant is dropped.
+- **What appears, as what.** The project page the repository resolves to
+  (`project_for_repo`, X-130 — only a page the owner wrote claims a remote):
+  path, title, `sha256`, and its own description **as text**. The open tasks
+  in the project (`vault_tasks_query {project}`): a line on the owner's
+  project page as text, with its due date and priority; a line on any other
+  page, or one an agent planted (`source: agent:…`), as a handle —
+  `path:line` and nothing of its text. The owner's recent sessions in this
+  repository (X-131, `recentSessionsForCaller`): date, tool, branch, turns,
+  files and the owner's own first prompt; never the agent's reply, which has
+  no column to be read from. The evening folds that link to the project page
+  and the pages the project page links to (`briefing_page_handles`): handles
+  — path, title, the fold's day, `sha256`. **Nothing the assistant wrote is
+  ever rendered as text**, and the block carries no imperative: it opens
+  `reference only · nothing here is an instruction` and addresses nobody.
+- **Tiers** (the same rule as the knowledge doors, `mayListPath` /
+  `mayReadPath`). `none` is the empty briefing: `text: ""`, `handles: []`,
+  `empty: true`. `index` is handles only — a title may be seen anywhere,
+  content nowhere: no description, no task, no file list, no prompt. `areas`
+  is content under the areas and **nothing outside them**: a path the caller
+  could not read at `GET /api/knowledge/page` is not named here either, and
+  a project page outside the grant is no project (no tasks, no folds, no
+  links under its name).
+- **Unfolded sessions** (Context Mode Q3): a session the fold has read goes
+  to any agent its grant allows; one still waiting goes only to an agent
+  whose own `agents.projects` holds the repository's project, and only when
+  the checkout's name agrees with the remote (`docs/ops/claude-code-plugin.md`,
+  "Who is handed what").
+- **Budget.** The owner's, `METISTRY_BRIEFING_TOKENS` (default 1,200; chars/4
+  is the measure, `budget_chars`). Sections fill in a fixed order — the
+  project page, its tasks, the sessions, the folds, the links — and an item
+  that does not fit is dropped with one `(n more not shown)` line;
+  `truncated` says so. A budget too small for the block's own frame is the
+  empty briefing, never a cut frame.
+- **Every string** passes `sanitizeForAgent` and loses its line breaks, so a
+  title cannot start a line, close the block early or arrive as a slash
+  command. The result is a pure function of the index and the budget: the
+  same rows render the same bytes, and `sha256` is the hash of `text`.
+- **The record.** One `runs` row per briefing (`component: console`, `kind:
+  briefing`): the agent, the repository, the tier, the handles named (kind,
+  path, line) and the `sha256` of what was sent — never the text itself.
+  `empty`, `truncated`, `chars`, `budget_chars` and the project slug ride
+  along, and `opted_out: true` when that is why it was empty.
+
 ### Who you are, and your devices
 
 ```
 GET  /api/whoami               200 {"principal":"user","via":"local_owner_token","management":true,"origin":"…","as_of":"…"}
 POST /auth/logout              200 {"ok":true}          403 — the local owner token has no session to end
-GET  /api/devices              200 {"devices":[…]}
-POST /api/devices/:id/revoke   200 {"revoked":true}     404 — no such session
+GET  /api/devices              200 {"devices":[{id, passkey_id, rp_id, label, added, last_seen, this_device, sessions:[…]}, …]}
+POST /api/devices/:id/revoke   {scope?: "device" | "sessions"}   200 {"revoked":true,"scope":"device","sessions":2}
+                               404 — no such session, or its device is already removed;  400 — a scope that is neither
 ```
 
 `whoami` says which credential the console sees: `via` is `passkey_session`,
 `local_owner_token` or `owner_token` (a capture token answers `principal:
 "owner_token"`, `management: false`); `session_id` rides along for a session.
 It is what `metistry console whoami` and the Mac app's "signed in as" read.
-**Logout** ends the calling device's session row, so it takes a session; a
-device is revoked from any other one with `…/revoke` — a lost phone is revoked
-from the Mac.
+**Logout** ends the calling device's session row, so it takes a session.
+
+**A device is a passkey, with its sessions under it** (design-build-plan
+§2.22). `GET /api/devices` serves one row per enrolled passkey that has not
+been removed, newest seen first:
+
+| field | |
+| --- | --- |
+| `id` | what Remove posts to `…/:id/revoke`: the device's newest session row, live or not — every device has one, because enrolment issues a session |
+| `passkey_id` | the credential id |
+| `label` | the name the device chose at enrolment |
+| `rp_id` | the host the passkey was created for and the only host it signs in at (`docs/ops/auth.md` *Passkeys: origins*; migration `0039`, X-104) — a passkey from before `0039` has no recorded host, so the console serves the first configured origin's host for it; always a string, so a client never needs `METISTRY_ORIGIN` to tell which passkeys a change of origin stranded (Devices marks them, X-107) |
+| `added` | when the passkey was enrolled |
+| `last_seen` | the latest of its sessions' `last_seen_at` and the passkey's last login |
+| `this_device` | `true` on the caller's own row — the passkey of its session; `false` on every row for the local owner token, which has no device |
+| `sessions` | each session under it: `{id, created_at, last_seen_at, absolute_expires_at, revoked, push}` — `push` says a notification subscription is held |
+
+The session-row fields the body carried before §2.22 — `passkey_last_used`,
+`created_at`, `last_seen_at`, `absolute_expires_at`, `revoked` — stay on the
+row (the passkey's dates, the newest session's expiry; `revoked` is always
+false, since a removed device is not listed), so a reader of the old shape
+reads something true. The PWA marks *This Device* from `this_device`, falling
+back to `GET /api/whoami`'s `session_id` against `sessions`.
+
+**Remove** — `POST /api/devices/:id/revoke` with `{}` or no body (`scope:
+"device"`) — is what the website promises ("you can remove it from Devices
+anytime"): the device's **passkey is revoked** (`passkeys.revoked_at`,
+migration 0038), so it never signs in again, and **every session under it is
+revoked**, each losing its push subscription, so its notifications stop. A
+revoked passkey's login is refused with the **same uniform 401 as an unknown
+credential's** — nothing in the answer says whether it ever existed. Remove is
+irreversible, so a client confirms it naming the device (C136); a removed phone
+is set up again as a new device, with a new passkey. **Sign Out Everywhere**
+keeps its meaning — sessions only, passkeys kept: it is this door with `{scope:
+"sessions"}` once per signed-in device, the caller's own last, and each device
+signs in again with the passkey it has. Both land in `runs` (`auth`, `revoke`)
+with the scope, the passkey and the number of sessions ended on the record.
+Any `:id` of the device's sessions names it; a device already removed answers
+404, as an unknown session does.
 
 ### Chat
 
 ```
-POST   /message                      {text, thread_id?, tier?}   202 {"message_id":…, "reply"?: "…"}   400 — no text
+POST   /message                      {text, thread_id?, tier?, capture_session?}   202 {"message_id":…, "reply"?: "…"}
+400 — no text, or a capture_session that is not a recorder session id;  409 reason "stale" — capture_session names a recording that has ended
 GET    /api/messages?limit=&since=   200 {"messages":[…],"cursor":"…","more":false}
 POST   /api/messages/:id/feedback    {rating: 1 | -1, note?}     200 {"ok":true,"feedback":{rating,note,ts}}
 DELETE /api/messages/:id/feedback                                200 {"ok":true,"feedback":null}
@@ -633,6 +813,26 @@ hours late into a moved-on thread confuses more than it helps. Feedback is an
 upsert on the message id — the reply row stays immutable, the judgement is
 revisable (`docs/ops/reply-feedback.md`).
 
+**`capture_session` — the session-turn marker** (X-84, ruled 2026-10-04;
+screen 11 §4 *staying on this Mac*). The recorder's session id
+(`20260928-120000-00ab`) of the recording a turn is asked inside; the Mac's
+capture bar sets it on every Ask sent while a recording runs, and nothing
+else sends it. A marked turn runs on the **private tier** whatever the
+router or `tier` chose — the row carries `meta.capture_session`, the drain
+resolves it through core's `turnTier`, and `private` resolves on an
+`on_machine` provider or the turn is refused with an alert naming
+`metistry compute assign private …`; it never falls back
+(`docs/ops/compute.md`, "The private tier"). `GET /api/messages` reads a
+marked model turn's `tier` as `private`. The marker can only make a turn more
+private: a `/note` or a fast path still answers in the `202`, on this Mac,
+and reads no tier, as before. It is
+checked against what the console knows of the session — a value that is not
+a recorder id is `400`, and an id whose recording the console has seen end
+(its transcript delivered through `POST /capture`) is `409` with `reason:
+"stale"`; a recording in progress has no row yet, so the Mac's word is
+taken. An agent bearer is refused the route whole (`403`), field or no
+field; every unmarked turn is routed exactly as before.
+
 ### Push — bound to a device session
 
 ```
@@ -646,14 +846,41 @@ POST /api/push/test                         200 {"result":"sent" | "no_subscript
 A subscription is stored on the session row, so revoking the device ends its
 pushes (`docs/ops/auth.md`).
 
+**What the console pushes** (screen 18 §6, X-32): Needs You, and nothing
+else. The notifier reads the queue as `GET /api/proposals` lists it — pending,
+and not put down until later — and pushes each request that was not in it on
+its last pass: one just raised, or one whose Later has run out. A reply, an
+ack, a brief, a review or an alert (`outbound_messages`) never pushes; the
+thread and the feed are where activity is read. Every push is exactly:
+
+```
+{"type":"Question","title":"Needs You","url":"/#/needs-you/412"}
+```
+
+`type` is the request's word from core's type table in Title Case — a closed
+vocabulary; an unknown kind reads as `Report`, never as itself. `title` is
+always `Needs You`: a request's own title is written by whoever raised it and
+can hold anything, so it never leaves the console. `url` opens the PWA on
+Needs You with that card open (`#/needs-you/<id>`; a card answered since
+opens the queue). There is no `body`, and `wirePayload` copies these three
+fields and no other onto the wire. A meeting's rows (`group_id`) push once,
+and more than three new cards in one pass push once, for the queue:
+`{"title":"Needs You","url":"/#/needs-you"}`. The notifier learns the queue
+on its first pass, so a request raised while the console was down does not
+push when it comes back — the count and the badge still show it.
+`POST /api/push/test` sends `{"type":"Metistry","title":"This device is
+reachable","url":"/"}`.
+
 **What a notification shows** is the PWA service worker's (`sw.js`, T7-5),
 not the sender's: it reads a payload's `type`, `title` and `url` and nothing
 else — a `body`, `actions`, an `image` are never shown. `type` (≤ 40
 characters) heads the notification and `title` (≤ 120) is its line; each is
 one line with key-shaped runs and six-digit runs blanked. A payload with no
 `type` shows its `title` alone. `url` is followed only when it is a path on
-the console's own origin — anything else opens `/`. A sender that wants a
-tap to open Needs You sends `url: "/#/needs-you"`.
+the console's own origin — anything else opens `/`. A tap opens Needs You
+for `url: "/#/needs-you"`, and that card for `"/#/needs-you/<id>"`. The
+reading and the scrub stay although the console no longer sends a request's
+text: a sender that gets it wrong must still not reach a lock screen.
 
 ### Status
 
@@ -668,7 +895,7 @@ local probes, are `metistry doctor` on the Mac (M6).
 ### Needs You — requests and their answers
 
 ```
-GET  /api/proposals[?since=&limit=]   200 {"proposals":[{…the stored row…, "request":{type, word, body, primary, revise, decline, grouped, decisions, questions?}, "subject":{basis, fingerprint} | null}],"cursor":"…","more":false}
+GET  /api/proposals[?since=&limit=]   200 {"proposals":[{…the stored row, with group_id…, "request":{type, word, body, primary, revise, decline, grouped, decisions, questions?}, "subject":{basis, fingerprint} | null}],"cursor":"…","more":false}
 POST /api/proposals/batch             {ids, decision: later | skip | deny, feedback?}   200 {"results":[…]}
 POST /api/proposals/:id               {decision, feedback?, area?, answers?, if_unchanged?: {seen_at?, subject?}}
                                       200 {"ok":true, …}   409 already_decided | stale   404   400
@@ -795,6 +1022,65 @@ rows `GET /api/proposals` already serves.
   already_decided` a late answer gets (`proposal.payload.cleared`) and in
   Activity's detail. A mirror its source cleared is nobody's decision here:
   the weekly review notes it apart from what the owner decided.
+
+#### A meeting — one card, Accept All in order, and the jots' anchors (T8-7)
+
+A recording is **one card** (C81, screen 3 §10.3): its rows share
+`group_id: "meeting:<session id>"`, served on every row of `GET /api/proposals`
+(`null` for a row that is its own card), so a client groups without a second
+read. No route was added; `group_id` is a column the list now returns, beside
+the stored row.
+
+```
+GET /api/proposals → {…, "kind":"knowledge", "source_agent":"inbox-drain", "trust":"user",
+                      "group_id":"meeting:20260928-120000-00ab",
+                      "payload":{…, "classification":{"kind":"transcript", …},
+                                 "meeting":{"session_id":"20260928-120000-00ab", "session_title":"Vendor review",
+                                            "started_at":"…", "ended_at":"…", "event_id":"…" | null,
+                                            "event":{event_id, title, start, end, note} | null,
+                                            "transcript_path":"Journal/Transcripts/2026-09-28-20260928-120000-00ab.md",
+                                            "jots":[{"inbox_id":41, "jot":"note", "offset_s":754}, …]}}}
+
+POST /api/proposals/42  {"decision":"allow"}        ← the transcript's row
+200 {"ok":true, "anchored":{"session":"20260928-120000-00ab",
+                            "path":"Journal/Transcripts/2026-09-28-20260928-120000-00ab.md" | null,
+                            "promoted":[41, 43], "already":[], "kept":[{"inbox_id":44, "why":"…"}]}}
+```
+
+- **The inbox drain opens it**, from a transcript an owner credential
+  delivered (`docs/ops/inbox.md`). `session_title` is the calendar event the
+  recording overlapped the most (`day_events`), else the recorder's own title;
+  the Mac's `MeetingGroup` reads it. Whatever raises another row for the
+  session later — the notes and to-dos drafted from it — uses the same id
+  (core `meetingGroupId`) and lands on the same card.
+- **Accept All is one `allow` per row, in order** — each its own request,
+  its own receipt and its own audit row — **never the batch**, which refuses
+  `allow` because each approval carries its own consequence. A row answered
+  elsewhere meanwhile is its own `409 already_decided`, and the rest are still
+  answered: *4 of 5 accepted*. Decline All is one `deny` per row after the
+  client-held Undo (§2.12).
+- **The owner's jots are not rows.** A Note or To-do made from the bar during
+  the recording is a `POST /capture` like any other, saved when typed, with
+  `kind: "jot"`, `jot: "note" | "todo"`, `capture_session` and `offset_s` in
+  its frontmatter (`docs/ops/inbox.md` has the file). It asks nothing; the
+  card counts it (`payload.meeting.jots`).
+- **Approve of the transcript's row moves the anchors** (C77): each of the
+  session's jots has its `capture_session` line rewritten to
+  `source: "meeting:<transcript path>"`, `offset_s` kept, committed as `user`
+  through the vault bridge, compare-and-swap on the bytes it read — a jot the
+  owner edited a moment before is read again and promoted with the edit, never
+  overwritten. The receipt is `anchored`, answered and kept on the row
+  (`payload.anchored`, with `at` and `by`). `promoted` are the jots this
+  Approve moved; `already`, those an earlier answer did; `kept`, those left on
+  their session anchor and why. **Anchors point into `Journal/Transcripts/`
+  and nowhere else** (the owner's ruling on W3 question 29): a transcript
+  filed anywhere else moves nothing (`path: null`, every jot `kept`).
+- **Only the drain's own card, only the owner's jots.** A row an agent raised
+  with the same group and payload moves nothing and is answered like any
+  note; an agent's capture with a jot's frontmatter is never a jot; Revise,
+  Decline and Later move nothing. A vault that cannot be reached leaves the
+  row pending with `payload.error` (C45), and Approve again moves what is
+  left.
 
 #### A question — several per request, answered per question (T2-3)
 
@@ -1203,7 +1489,7 @@ uniform `403`, never a `404` that would hide the route's existence.
 
 ```
 GET  /api/agents                      200 {"agents":[{…, "scope":{…}, "permissions":[…]}],"access_requests":[…],"access_ceilings":[…]}
-POST /api/agents                      {id, display_name, kind?, remote?}   201 {"id","token","pending","proposal_id"?}   409 — the id is taken
+POST /api/agents                      {id, display_name, kind?, remote?}   201 {"id","token","pending","proposal_id"?}   409 — the id is taken (a live row, or a revoked internal/crew one)
 PUT  /api/agents/:id/grants           {tier, areas?, queries?, connections?}   200 {"ok":true,"grants":{…}}
 PUT  /api/agents/:id/projects         {projects: [slug, …]}      200 {"ok":true,"projects":[…]}
 PUT  /api/agents/:id/autonomy         {level?, actions?, may_dispatch_to?, accept_from?, max_open_bundles?}
@@ -1220,6 +1506,17 @@ the call that minted it. Registering and rotating mint a credential, which is a
 boundary change, so both are reach `local` (F-13): the local owner token from
 this Mac — the Mac app, `metistry connect` — and a passkey session is refused
 `403 local_only` ("The `local` gate" above).
+
+**A revoked `external` row is registered again by the same call** (HS-7,
+ruled 2026-10-04: an accidental revoke must be recoverable without a new
+install). The `201` is exactly a first mint's — a new token, shown once —
+and the row is revived in place: the id and `created_at` stay, so old
+proposals keep their provenance; the token is new; `grants`, `projects` and
+`autonomy` go back to a new row's defaults, because a credential the owner
+withdrew does not return holding what it held (revocation already cleared the
+areas approved from Needs You). `remote: true` makes it a fresh pending
+enrolment. A live row, or a revoked `internal` or `crew` row, is still `409`
+and is left untouched. The audit row is the mint's, with `revived: true`.
 
 **`POST /api/agents` mints `external` rows only** (T4-6). `kind` may be
 omitted or `external`; anything else is `400 invalid_request`, refused before
@@ -1245,15 +1542,23 @@ Every row of `GET /api/agents` carries `permissions`: the actor's
 ```
 
 - Rows come Knowledge, Work, Artifacts, Inbox, Queries, Agents, then one per
-  connection (`resource.kind: "connection"`, `name`). A row with both cells
-  empty is left out; **`[]` holds nothing** — a revoked row, or a crew whose
-  manifest is gone. Anything not listed is not granted.
+  connection the actor reaches (`resource.kind: "connection"`, `name`) — the
+  assistant every one, a borrower only those the owner offered to agents AND
+  granted it (a crew also needs its `connections` group): the proxy's own
+  rule, asked through `may()` (T4-10). Its tools fill Read (Reads) and Write
+  (Changes things, Starts an agent) by the owner's mode — Never absent, Ask
+  First ⏱. A row with both cells empty is left out; **`[]` holds nothing** — a
+  revoked row, or a crew whose manifest is gone. Anything not listed is not
+  granted.
 - The table **renders `may()`**: a tool fills its cell only when the door
   would admit it, so a line here is a door that says yes.
 - `asks` is ⏱: the owner answers first. `provenance` is `base` (no marker),
-  `approved` (*approved in Needs You · #n*), `routine` (*during … only*) or
+  `approved` (*approved in Needs You · #n*), `routine` (*during … only*),
   `project` (*via project \<slug\>* — inherited from a project the actor is a
-  member of, T4-7; see *Projects*).
+  member of, T4-7; see *Projects*) or `proxy` (*reached through Metistry* —
+  every entry of a connection row, T4-10; said once, by the row's ⧉, never
+  after each tool). A client that does not know a kind prints no marker for
+  it.
 - A client prints `label` and never re-derives a cell. The CLI, the console's
   panel and MetistryKit print the same words — core's `permissionRowText`,
   an empty cell `—` — held together by a test on the recorded fixture.
@@ -1561,7 +1866,17 @@ unknown one is refused rather than defaulted. The data policy and the `runs`
 row are `dispatch()`'s — `400` names the field, `404` no targets are
 registered, `409` the task is already bound or closed or the target is
 unavailable, with `violations` or the target's `check` beside the envelope
-where one applies. T4-11 turns targets into Agent connections.
+where one applies. **Targets are also agent connections** (T4-11,
+`docs/ops/connections.md`, *Agent connections*): each `ok` agent connection
+is a target named for it, carrying `connection: <name>` in `GET
+/api/targets` and its key as a reference (`auth: "{{ secret.<name> }}"`),
+never a value; it is dispatched through its own egress door. `purpose` is
+one of the purposes the targets' connection types take (the Devin type's:
+`work`, `knowledge_research`), and one the chosen target does not take is
+`400`. A brief or task title carrying a `{{ secret.… }}` or
+`{{ variable.… }}` reference is `400` before anything is sent to a
+connection; a key the door refuses is `409` *target unavailable*, naming
+why.
 
 #### The task routes — the board's drags, and nothing else (`user` principal)
 
@@ -1734,8 +2049,12 @@ routine's display name, not its raw component id — `plan-tomorrow` reads
 `Tomorrow's Plan` (Ruling 25, X-21), the runner's own `meta.display_name`
 stamp read straight from the manifest, or (a row from before that stamp
 existed) the same identifier-to-title fallback a manifest-less New Routine
-gets. `actor` still carries the component id unchanged. `turn_id` returns
-every call one reply made, whatever the window's `limit` left out.
+gets. `actor` still carries the component id unchanged. A `capture` row's
+`subject` is the file name of its path (`Inbox/…/note.md` reads `note.md`) and
+no part of the note: the feed is servable through `queries_run` on any tier, so
+a transcript's first spoken line must not be (Q-c, ruled 2026-10-04); `detail`
+is `source · status`. `turn_id` returns every call one reply made, whatever the
+window's `limit` left out.
 
 #### `GET /api/runs/export` — the audit ledger as NDJSON (S5)
 
@@ -2936,8 +3255,10 @@ today).
 POST /api/meetings/:event_id/note                 {}   201 {ok, event_id, path, created: true} · 200 {…, created: false}
 POST /api/calendar/events/:id/move                {start, end}                 200 {ok, preview: {event_id, title, from, to, attendees}, others, warning, confirm_token, expires_in_sec, moved: false}
                                                   {start, end, confirm_token}  200 {ok, moved: true, event_id, event, others, refreshing}
-POST /api/calendar/invitations/:id/respond        T4-17 — through the connection's `rsvp` capability (CalDAV's: packages/connections `previewReply` / `respondToInvitation`, T4-13)
-POST /api/mail/messages/:id/draft                 T4-17 — through the connection's `draft` capability; never sends mail
+POST /api/calendar/invitations/:id/respond        {response}                   200 {ok, event_id, response, connection, preview: {event_id, connection, title, response, organizer, as, series, unchanged}, confirm_token, expires_in_sec, responded: false}
+                                                  {response, confirm_token}    200 {ok, event_id, response, connection, responded: true, unchanged, cleared}
+POST /api/mail/messages/:id/draft                 {body}                       200 {ok, message_id, connection, sent: false, preview: {mailbox, from, to, cc, subject, in_reply_to, body}, confirm_token, expires_in_sec, drafted: false}
+                                                  {confirm_token, body?}       201 {ok, message_id, connection, sent: false, drafted: true, draft_id, mailbox, uid, cleared}
 ```
 
 **Where the calendar comes from.** Every calendar source syncs into one table,
@@ -2946,7 +3267,9 @@ POST /api/mail/messages/:id/draft                 T4-17 — through the connecti
 connection `eventkit`) and an ICS feed (`collectors/ics-calendar`, T4-12, under
 the connection's own name; `docs/ops/connections.md`, *ICS feeds*) and a CalDAV
 account (`collectors/caldav-calendar`, T4-13, under the connection's own name,
-the owner's answer included; *CalDAV*) now; Google later (T4-14). Today
+the owner's answer included; *CalDAV*) and the owner's primary Google calendar
+(`collectors/google-calendar`, T4-14, under the connection's own name, the
+owner's answer included, signed in with Google; *Google Calendar*). Today
 reads a day of it through the route-only `day_events` query; this door reads
 one event through `calendar_event`. A row is one **occurrence**: its
 `event_id` is the source's key for that one meeting — for EventKit, the
@@ -3039,6 +3362,100 @@ Two calls, as every destructive tool is:
   id, the outcome and the count of others — never the title, the people or
   the times. Never the invite body: neither the bridge nor the table carries
   one.
+
+**Invitation and message requests** (T4-17; §2.12, R7, C108) are mirrors: they
+exist while the source says the owner is needed and clear when it stops.
+
+- **`invitation`** — raised by a calendar sync that knows who the owner is
+  (the eventkit sync, a CalDAV account, Google Calendar; an ICS feed never
+  names the owner and never raises one) for a meeting still to come whose owner's answer is
+  needs-action (`self_status: pending`) and which someone else organises. One
+  per meeting — `source {kind: "calendar", external_ref:
+  "invite:uid/<ical_uid>"}` — so a series is one card and the same meeting on
+  the Mac's calendar and a CalDAV account is one card with both askers on it
+  (`payload.also_asked`). An answer on any calendar wins. The payload:
+  `title`, `summary` (the card's preview line — who invites, when, where, how
+  many others), `event_id`, `connection`, `ical_uid`, `start`, `end`,
+  `all_day`, `location`, `organizer {name, email}`, `others`, `series`, and
+  `rsvp` — a hint that the raising calendar can answer; the door decides. It
+  resolves at source when the owner answers (*You accepted it in your
+  calendar*), the meeting is cancelled (*No longer on your calendar*) or it
+  passes (*The meeting has passed*). Never the invite body.
+- **`message`** — raised by the mail sync (`mail-messages`) from the inbox's
+  **headers alone**: the owner's address (the connection's sign-in name) in
+  To, from a person (not a list, an automatic sender or a no-reply address),
+  unanswered (no `\Answered`, no reply to it in Sent), and a reply in a
+  conversation or written to the owner alone. **Inferred, and it says so**:
+  `payload.inferred: {from: "headers", by: "rules"}`, and `reason` in words
+  (*Written to you alone — inferred from its headers; the message itself was
+  not read*). The payload: `title` and `summary` (the subject), `from`
+  (*Name &lt;address&gt;*), `reason`, `why` (`reply` · `direct`), `ref` (the
+  door's id), `message_id`, `date`, `connection`, `source: "comms"`. A run of
+  six or more digits is scrubbed from what it carries. No body is ever
+  fetched, so none can arrive. Once per message (by Message-ID); it resolves
+  at source when the owner replies (*You replied in your mail*), it leaves
+  the inbox, or it is a week old. *Not Mine* is the row's `skip`.
+
+**Respond** (`POST /api/calendar/invitations/:id/respond`, T4-17; §2.11, K16,
+Q9) — the invitation's Accept · Maybe · Decline. `:id` is the event's
+`event_id`, as the request (`payload.event_id`) and Today carry it.
+
+- **Two calls.** `{response}` (`accepted` · `tentative` · `declined`) is the
+  preview: nothing is written; it names the calendar that will answer, the
+  meeting, the organizer the reply goes to and the owner's address it
+  answers as, and returns a single-use `confirm_token` (five minutes).
+  `{response, confirm_token}` is the confirm: the owner's own attendee line
+  changes in that calendar's copy — re-derived from the server's copy, and
+  written only if it is still the one previewed — and the server delivers
+  the reply (RFC 6638). A series is answered as a whole. The request clears
+  (*You accepted — the reply went to the organizer*).
+- **Through the connection that can, or not at all.** The answer goes through
+  a calendar connection whose provider declares **`rsvp`** (CalDAV, by the
+  meeting's UID; Google Calendar, by the series or the event, T4-14) and
+  that holds the same meeting — the event's own, or
+  another with the same UID. The Mac's calendar cannot answer (EventKit's
+  participant status is read-only). **Without an `rsvp` capability it is
+  refused** — `503`, `reason: "no_rsvp"`, `open_in_calendar: true` — before
+  anything is sent, and the client offers *Open in Calendar*. So is a server
+  that does not schedule (`no_scheduling`).
+- **Refused, nothing sent:** a body with any other field, an answer that is
+  not one (`400`); an id no calendar holds (`404`); the owner organises it or
+  is not an attendee (`400`, `not_invited`). A spent, expired or mismatched
+  token, or an event that changed since the preview, is `409` with
+  `reason: "stale"` — preview again. A refused answer leaves the request
+  pending with `payload.error` (door `rsvp`, C45).
+- **Owner only**: an agent bearer and the capture owner token get the uniform
+  `403`; not an action, so no proposal can answer an invitation. The ledger
+  row (`kind: invitation_respond`, tool `preview` or `confirm`) carries the id,
+  the outcome and the connection — never the title or an address.
+
+**Draft Reply** (`POST /api/mail/messages/:id/draft`, T4-17; §2.6, §2.11) —
+the message's primary answer. **It never sends mail**: the reply goes into the
+owner's Drafts mailbox and they send it from their own mail app.
+
+- **`:id` is the message's reference** — `payload.ref` on its request,
+  `<connection>/<mailbox>/<uidvalidity>/<uid>`, percent-encoded as one path
+  segment.
+- **Two calls.** `{body}` is the preview: the message's headers are read
+  again from the server and the reply is addressed from them — its Reply-To,
+  else its From; `Re:` its subject; threaded by its Message-ID — with `body`
+  as the owner's words. Nothing is appended. `{confirm_token}` (with the same
+  `body`, if sent) is the confirm: the exact draft previewed — checked by
+  digest — is APPENDed to the mailbox the server marks `\Drafts`, flagged
+  `\Draft`, and the request clears (*You drafted a reply — it is in your
+  Drafts, unsent*). `draft_id` is the draft's Message-ID.
+- **Who it goes to is never the caller's**: a body naming a recipient, a
+  subject, a mailbox — anything but `body` and `confirm_token` — is `400`.
+- **Refused, nothing appended:** a reference that is not one (`400`); a
+  connection that is not here, a message the server no longer has (`404`); a
+  mailbox renumbered since the reference was made (`409 stale`); a
+  connection without a `draft` capability, one that cannot be signed in to,
+  no Drafts mailbox, no mail here at all (`503`). A spent or mismatched
+  token, or other words than the preview's, is `409 stale`. A refused draft
+  leaves the request pending with `payload.error` (door `draft`, C45).
+- **Owner only**, as Respond. The ledger row (`kind: mail_draft`) carries the
+  connection and the outcome — never the reference, an address, the subject
+  or the words.
 
 ### Scheduled — routines and syncs
 
@@ -3169,11 +3586,13 @@ GET /api/connections           served — status, reach, tools and modes, used b
 GET /api/connections/:name     served — one connection, its file and its provider's unit
 GET /api/secrets               served — names, hosts, grants, last used: never a value
 GET /api/variables             served — name, value, read by, used in: never a secret
-GET /api/recordings/:id        T8-4 — a recording's retention state
+GET /api/recordings/:id        served — a recording's retention state: never its words
 ```
 
 Every write here is a CLI verb with the owner caller class (M7, M13, M14 below):
-hosts, commands, credentials and the offer switch are the boundary, and a
+hosts, commands, credentials, the offer switch and the fold switch (`fold`:
+whether `connections_call` folds this connection's large answers, X-132;
+`metistry connections policy <name> --fold on|off`) are the boundary, and a
 secret's value never crosses the API in either direction.
 
 #### `GET /api/connections` — the Connections list (`user` principal)
@@ -3195,7 +3614,16 @@ GET /api/connections
                      "tools":[{"name":"create_issue","group":"changes","mode":"ask"},
                               {"name":"search_issues","group":"reads","mode":"on"}],
                      "offer_to_agents":false,
-                     "used_by":[{"kind":"sync","name":"github-state"}]}],
+                     "fold":true,
+                     "used_by":[{"kind":"sync","name":"github-state"}],
+                     "last_checked":{"at":"2026-09-30T06:50:00.000Z","status":"ok"}}],
+     "types":[{"name":"icloud-calendar","title":"iCloud Calendar over CalDAV with an app-specific password",
+               "description":"iCloud Calendar over CalDAV with an app-specific password — your events on Today, …",
+               "origin":"product","provides":"calendar","transports":["http"],"auth":["basic"],
+               "capabilities":["read","write_own","rsvp"],
+               "fields":[{"key":"server","kind":"url","label":"Server","help":"Where discovery starts. …",
+                          "required":false,"default":"https://caldav.icloud.com/"}],
+               "tools":[]}, …],
      "as_of":"2026-09-28T13:05:00.000Z"}
 503 no instance directory in this deployment (degrades: absent)
 ```
@@ -3205,14 +3633,39 @@ One row per file in the instance's `.metistry/connections/`, sorted by name
 `metistry connections list --json` prints). `type` is what it is (`mcp`,
 `calendar`, …) and `provider` the connection-type unit that reaches it, or
 `custom`. `reach` is how Metistry reaches it — `http` (`url`, `auth` scheme,
-header and query-parameter **names**, `timeout_s`), `command` (`command`,
-`args`, `cwd`, environment-variable **names**, `runs_on`) or `path`. `tools`
+header and query-parameter **names**, `header_secrets`, `timeout_s`), `command` (`command`,
+`args`, `cwd`, environment-variable **names**, `runs_on`), `path`, or `imap`
+(`host`, `port`, `security` `tls` · `plain`, `auth: "basic"` — a mailbox,
+T4-15; never the username or the password). `tools`
 is the owner's per-tool policy: each tool's `group` (`reads` · `changes` ·
 `starts_agent`) and `mode` (`on` · `ask` · `off`, drawn *Allow · Ask First ·
-Never*). `used_by` is what reads it today — the syncs in `scheduled.yaml` that
-name it; agents reach a connection through the lazy pair on `/mcp`
-(`docs/ops/connections.md`), and until they are lent one an empty list is the
-true answer (*Nobody yet*).
+Never*).
+
+**`used_by`** is everything that uses it, each `{kind, name}`: `sync` (the syncs
+in `scheduled.yaml` that name it), then `agent` and `crew` — a registry row
+granted the connection (`grants.connections`) — by `name` = the row's id, sorted
+by kind and name. A grant counts only once the owner has **offered** the
+connection to agents (`offer_to_agents`): it is the one rule the proxy applies
+(`mayConnection`), so a grant on an unoffered connection reaches nothing and is
+not listed. A revoked or still-pending row is not a user, and the assistant
+(which reaches every connection) is not listed against each. An empty list is
+the true answer (*Nobody yet*). The console fills the agents from its registry;
+`metistry connections list|show --json` has no registry to ask, so it lists
+syncs only.
+
+**`header_secrets`** (on an `http` reach) is `[{header, secrets}]`, one entry
+per header in `headers` order: the **names** of the secrets that header's value
+carries (`["relay_key"]`, or `[]` for a header that names none). Never the value
+or the template around it — a header per secret lists one secret each.
+
+**`last_checked`** is `{at, status}` — the ISO time and doctor's word
+(`ok` · `degraded` · `failed` · `absent`) of the newest check anyone ran
+(`metistry connections test`, `metistry doctor`, the Mac's Test) — or `null`
+for never. A check leaves it as a stamp in the instance's gitignored
+`.metistry/state/connection-checks.json` (time and verdict only, never the
+check's message); the route **reads** that file and dials nothing. It is
+derived and disposable (invariant 1): lose it and every connection reads
+*never checked* until its next check.
 
 **`status`** is one of doctor's words, and `issues` says why, one sentence each:
 
@@ -3220,7 +3673,7 @@ true answer (*Nobody yet*).
 | --- | --- |
 | `ok` | the file validates against its provider's unit and the door would let it through |
 | `absent` | something it needs is not here: its provider's connection type (not installed — the file is not deleted), a variable it uses, or a secret's item in **this instance's** Keychain (a presence probe; never a value) |
-| `failed` | the file does not validate or breaks a rule (a key pasted where a name belongs, a secret in a URL or on a command line), or `secrets.yaml` does not grant a secret to `connection:<name>`, or does not list the host an HTTP connection sends it to — exactly what the egress door would refuse, said before any call |
+| `failed` | the file does not validate or breaks a rule (a key pasted where a name belongs, a secret in a URL or on a command line), or `secrets.yaml` does not grant a secret to `connection:<name>`, or does not list the host an HTTP connection sends it to (or the exact `host:port` an IMAP connection signs in to) — exactly what the egress door would refuse, said before any call |
 
 **Names, never values, by construction.** A row is built field by field; it
 carries header, query and environment **names** and never a header or
@@ -3229,12 +3682,31 @@ name, `status: "failed"` and `issues`, and **nothing it holds** — the rule may
 be a key pasted into the wrong place, and a row that repeated the file would
 repeat the key.
 
+**`types` — the installed connection types (T6-13b).** One per unit the
+connection-type registry loads — the product's `seed/connection-types/` and
+the owner's `.metistry/extensions/` through the same registry (plan §2.7: an
+extension that takes a product unit's name replaces it; a manifest that fails
+validation is skipped, its reason doctor's), sorted by name. This is what *Add
+Connection* offers once the type is chosen, and the form it renders — **no
+per-service Swift**: `name`, a `title` (the manifest's description up to its
+first dash or full stop, or the name), `description`, `origin` (`product` ·
+`extension`), `provides` (the connection type), `transports` (`http` ·
+`command` · `path` · `imap`), `auth` (the sign-in schemes it declares, or
+`null` for any but `basic`), `capabilities`, `tools` (name and group), and
+`fields`: each `{key, kind, label, help, required, default?, choices?}` with
+`kind` from the closed vocabulary `text · secret · variable · url · choice ·
+oauth`. **Kinds, never values:** a `secret` field has no default by schema
+and no value has a place here; an `oauth` field says only that it is one —
+nothing of its client (id, endpoints, scopes) is served. The same object rides
+on `GET /api/connections/:name`'s `provider_unit.type`. Writing a field is
+`metistry connections add|set --config KEY=VALUE` on the Mac (M13,
+`docs/ops/cli.md`), which judges each value against this manifest and takes a
+secret only by name.
+
 **Nothing here dials.** A GET that started a command or reached a server would
 be a read with a side effect; whether a connection answers is `metistry
-connections test <name>` and `metistry doctor` on the Mac. The last check or
-call the console itself made (`runs` rows `connection_check` /
-`connection_call`, which `connection.health` announces) joins the row when the
-console makes calls (T4-8b). Every write — add, set, policy, remove — is
+connections test <name>` and `metistry doctor` on the Mac, and the time and
+verdict of the last one is the row's `last_checked`. Every write — add, set, policy, remove — is
 `metistry connections` on the Mac (M13, `docs/ops/cli.md`): a connection file
 says where Metistry reaches and with which credential, which is the boundary,
 so no route writes one (invariant 10).
@@ -3248,7 +3720,8 @@ GET /api/connections/linear
                    "provider_unit":{"name":"linear","origin":"product",
                                     "provides":"mcp","capabilities":[],
                                     "implementation":"native","sync":null,
-                                    "tools":[{"name":"list_issues","group":"reads"}]}},
+                                    "tools":[{"name":"list_issues","group":"reads"}],
+                                    "type":{…the same object as the list's `types[]` entry for linear…}}},
      "as_of":"2026-09-28T13:05:00.000Z"}
 404 no such connection — no file of that name, or a name that cannot be one
 503 no instance directory in this deployment (degrades: absent)
@@ -3257,9 +3730,11 @@ GET /api/connections/linear
 The row, plus `file` (instance-relative) and `provider_unit`: the
 connection-type unit's name, whether it is the product's or the owner's
 extension, what it provides, its capabilities, how it is implemented, the
-sync that reads it, and the tools it declares with the group each keeps
-(a connection may not relabel one). `null` for a `custom` connection, an
-uninstalled provider, or a file that does not validate.
+sync that reads it, the tools it declares with the group each keeps
+(a connection may not relabel one), and `type` — the unit as the list's
+`types` serves it, its fields by kind (T6-13b), so Configure renders the same
+form Add did. `null` for a `custom` connection, an uninstalled provider, or a
+file that does not validate.
 
 #### `GET /api/secrets` — the Secrets list (`user` principal)
 
@@ -3279,7 +3754,7 @@ GET /api/secrets
 
 One row per secret in the instance's `.metistry/secrets.yaml`, sorted by
 name (plan §2.14): `hosts` is *Sent only to*; `grants` is *Who may use it*,
-each `{to: "connection:<name>" | "agent:<id>", mode: "on" | "ask" | "off"}` —
+each `{to: "connection:<name>" | "agent:<id>" | "provider:<name>", mode: "on" | "ask" | "off"}` —
 a grantee not listed is Off; `expires` is where the service says the value
 stops working, or null. `present` is whether **this instance's** Keychain
 account holds an item for the name, and `null` where the console has no
@@ -3328,6 +3803,41 @@ variable and the reason, the ledger row records only that it failed, and no
 row of that file is served. Every write is `metistry variables set|unset` on
 the Mac (M14, `docs/ops/cli.md`), which also refuses a value equal to one of
 the instance's own secrets.
+
+#### `GET /api/recordings/:id` — a recording's retention state (`user` principal)
+
+```
+GET /api/recordings/20260928-133000-00ab
+200 {"id":"20260928-133000-00ab","event_id":null,
+     "started_at":"2026-09-28T13:30:00.000Z","ended_at":"2026-09-28T13:45:00.000Z",
+     "scope":{"kind":"audio_only","apps":["us.zoom.xos"]},
+     "transcript":{"path":"Journal/Transcripts/2026-09-28-20260928-133000-00ab.md",
+                   "ingested_at":"2026-09-28T13:47:00.000Z",
+                   "delete_after":"2026-10-28T13:45:00.000Z","deleted_at":null},
+     "audio":{"kept":true,"bytes":26214400,"delete_after":"2026-10-05T13:47:00.000Z",
+              "deleted_at":null,"deleted_reason":null},
+     "as_of":"…"}
+400 an id that is not a recorder session id (lowercase letters, digits, hyphens)
+404 no recording with that id
+```
+
+Settings ▸ Live Capture's read (plan §2.15, T8-4): one row of
+`capture_sessions` (migration 0033) through the route-only named query
+`recording_state`, which also computes the owner's rulings — `audio.delete_after`
+is the ingestion + 7 days, never more than 30 days after `ended_at` (30 days
+after it while the transcript is not ingested); `transcript.delete_after` is
+30 days after `ended_at`. `ingested_at` is when the transcript's proposals
+were decided (or the fold read it); `audio.deleted_reason` is `retention` or
+`owner` (Purge Now). The row is what the Mac's recorder last reported through
+the `recording-retention` routine (`docs/ops/scheduled.md`), so `kept` can
+lag the Mac by up to an hour. Owner reach, in the management family: an
+agent bearer and the capture owner token are the uniform `403`. It never
+carries a word of the transcript.
+
+**Purge Now** is on the Mac, not here: the app sends the live-capture
+bridge's `POST /recording/purge` with the control credential
+(`packages/mcp-live-capture/README.md`), and this row says so after the
+routine's next pass.
 
 ### Outbound doors through a connection
 
@@ -3824,7 +4334,7 @@ exist. Reach enforces it; a client hiding a control is never the control.
 | Services: restart, stop, start, logs; Keep Awake | — | write | the machine; a remote stop locks the owner out |
 | Updates: versions | read | read | |
 | Updates: update, roll back, runtime source | — | write | replaces running code |
-| Account: devices, revoke a device, Sign Out Everywhere | write | write | a lost phone is revoked from another device |
+| Devices: the devices, remove a device (its passkey too, §2.22), Sign Out Everywhere, Add a Phone… (the Mac mints with `metistry enroll`, M19) | write | write | a lost phone is removed from another device; minting stays on the Mac |
 | Account: console sign-in, instance repository | — | write | |
 | Sessions: *Let the assistant learn*, retention | write | write | the session-fold and purge routines' settings, through the Scheduled doors (§2.5) |
 | Sessions: Purge Now | — | write | irreversible |
@@ -3836,8 +4346,22 @@ exist. Reach enforces it; a client hiding a control is never the control.
 
 The `local` reach is what makes the Mac column true for the rows a phone may
 only read: agent registration and rotation (F-13), a routine's assignment and
-New Routine, Purge Now and a vault rollback are `local` rows in the table. The
-rest of the Mac-only column is the CLI (above).
+New Routine, Purge Now, restoring a file and a vault rollback are `local` rows
+in the table. The rest of the Mac-only column is the CLI (above).
+
+The PWA draws this table as More ▸ Settings (T7-6), grouped as the Mac's
+panes: what the phone reads, the assistant's model and effort
+(`POST /api/compute/assign` with `{tier: "default", model, effort}`, the model
+chosen from `GET /api/compute/models` on the providers already switched on —
+read only when the form opens), Scheduled's pause (`POST
+/api/scheduled/routines/:name/pause|resume`, and `PUT /api/scheduled/syncs/:name`
+with `{paused}` for a sync, X-99), the budgets (`POST /api/compute/budget`,
+`PUT /api/projects/:slug`) and devices (`POST /api/devices/:id/revoke` —
+Remove, and Sign Out Everywhere as that door with `scope: "sessions"` once per
+signed-in device, the caller's own last) it writes, and every row whose phone
+column is **—**, or whose write is the Mac's, as its reason with no control.
+`this_device` on a devices row is how it marks *This Device*, with `GET
+/api/whoami`'s `session_id` as the fallback.
 
 ## Outside the contract
 

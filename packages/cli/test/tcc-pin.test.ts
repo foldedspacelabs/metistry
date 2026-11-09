@@ -15,7 +15,7 @@ import { cp, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SetShapeOptions, SetShapeResult } from "../src/deployment-report.js";
 import { migrateShape, TABLE_LIST_SQL, tableCountsSql, type MigrateShapeOptions } from "../src/migrate-shape.js";
 import { buildScriptFor, TCC_HELPERS } from "../src/tcc-pin.js";
@@ -23,6 +23,12 @@ import { up, type UpOptions, type UpResult } from "../src/up.js";
 import { checkout, fakeExec, okDoctor, shown } from "./fixtures.js";
 
 const REPO = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
+
+// 30 s, not vitest's 5 s: every case here copies a release tree and runs a
+// whole `up` against it — half a second alone, and over five beside the rest
+// of this package's files on a loaded runner (X-25's ten-run loops; the same
+// stretch #534 gave scratch-db and doctor.integration).
+vi.setConfig({ testTimeout: 30_000 });
 const PG = "/opt/homebrew/opt/postgresql@17/bin";
 const NODE = "/usr/local/bin/node";
 

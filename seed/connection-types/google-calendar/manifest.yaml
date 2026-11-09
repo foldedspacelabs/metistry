@@ -1,0 +1,66 @@
+# Google Calendar (plan §2.6, §4 Q7 second; T4-14; ruling 2026-09-30, Q8) —
+# the owner's primary Google calendar through the Calendar API, signed in
+# with Google through Metistry's own OAuth door (T4-10): PKCE, a one-shot
+# listener on 127.0.0.1, the state checked, the code exchanged at
+# oauth2.googleapis.com, the refresh token kept in this instance's Keychain
+# as the connection's token secret, the access token only in the memory of
+# the process that dials. There is no secret-in-URL door: Google's private
+# iCal address stays out (docs/ops/connections.md, *Google Calendar*).
+#
+#   metistry connections add google --type calendar --provider google-calendar \
+#     --url https://www.googleapis.com/calendar/v3/ --auth oauth
+#   metistry connections authorize google            (the browser opens; sign in with Google)
+#   metistry secrets sync --to env                   (then restart the console)
+#
+# The first sign-in writes the token secret's policy: sent only to
+# oauth2.googleapis.com and www.googleapis.com — exactly those two, which
+# the google-calendar sync holds it to — and granted to this connection
+# alone.
+#
+# **The client id is public by design.** It identifies Metistry's *Desktop*
+# OAuth client (the maintainer's, in Folded Space Labs' Google Cloud project,
+# scope `calendar.events` only, consent screen In production — §3.4). An
+# installed app cannot keep a secret and Google says so; PKCE is what binds
+# the code to this sign-in. Until that client exists this entry ships no id,
+# and a connection signs in with the owner's own client:
+#
+#   metistry secrets set google_client_id            (the id, on stdin)
+#   metistry secrets hosts google_client_id accounts.google.com oauth2.googleapis.com
+#   metistry secrets grant google_client_id connection:google on
+#   metistry connections set google --client-id-secret google_client_id
+#
+# which overrides a shipped id whenever one is set. A client secret — Google
+# may ask for the one its Desktop clients carry — is always the owner's
+# secret, never this file's (`--client-secret-secret`, the same three
+# `secrets` lines, hosts oauth2.googleapis.com only).
+#
+# Read by the `google-calendar` sync (collectors/google-calendar/): today and
+# the next two weeks into `calendar_events` under the connection's name, the
+# owner's own answer included. `rsvp` answers an invitation with the owner's
+# own responseStatus and nothing else (attendeesOmitted); `write_own`
+# creates, moves and deletes events nobody else is in. Both preview first
+# and confirm against the event's ETag (packages/connections
+# `google-calendar.ts`).
+schema: 1
+name: google-calendar
+type: connection-type
+description: Google Calendar, signed in with Google — your events on Today, replies to invitations and changes to your own events from Metistry. Metistry's sign-in client, or your own.
+provides: calendar
+transports: [http]
+auth: [oauth]                    # sign in with Google — never an app password (Google's CalDAV refuses one too)
+fields:
+  - key: google
+    kind: oauth
+    label: Sign in with Google
+    # said before the browser opens while it is true; removed when Google has verified Metistry's client
+    help: "Google hasn't verified this app yet. Google will say \"Google hasn't verified this app\" — choose Advanced, then Go to Metistry, to continue. Metistry asks only to see and change your calendar events, and your sign-in goes straight from Google to this Mac."
+    oauth:
+      # client_id: the maintainer's Desktop client id, public by design — added when the client exists (§3.4)
+      pkce: true
+      redirect: loopback
+      authorize_url: https://accounts.google.com/o/oauth2/v2/auth
+      token_url: https://oauth2.googleapis.com/token
+      scopes: [https://www.googleapis.com/auth/calendar.events]
+capabilities: [read, write_own, rsvp]
+sync: google-calendar
+implementation: { kind: builtin, module: google-calendar }

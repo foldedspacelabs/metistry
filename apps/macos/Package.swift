@@ -52,14 +52,16 @@ let package = Package(
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])
             ]
         ),
-        // Only the kit is tested: it holds everything with a decision in it
-        // (the wire shape, the runtime precedence, the planned argument
-        // arrays). The executable target is `@main` plus a Process wrapper.
+        // The kit is tested: it holds everything with a decision in it (the
+        // wire shape, the runtime precedence, the planned argument arrays).
+        // The executable target is `@main` plus a Process wrapper, tested in
+        // one file only (process-command-runner-tests.swift): that a cancel
+        // ends a child only when asked to.
         //
         // `fixtures/` is the recorded client-API fixtures (F-7) and `snapshots/`
         // the shared components' baselines (T5-3). The tests read both by
         // `#filePath`, as the source scan reads `sources/`, so they are
         // excluded rather than bundled.
-        .testTarget(name: "MetistryKitTests", dependencies: ["MetistryKit"], path: "tests/kit", exclude: ["fixtures", "snapshots"]),
+        .testTarget(name: "MetistryKitTests", dependencies: ["MetistryKit", "Metistry"], path: "tests/kit", exclude: ["fixtures", "snapshots"]),
     ]
 )

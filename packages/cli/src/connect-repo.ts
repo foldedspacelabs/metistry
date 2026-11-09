@@ -37,6 +37,7 @@ import { CREDENTIAL_HELPER_RESET, GIT_ASKPASS_TOKEN_VAR, GIT_ASKPASS_USER_VAR } 
 import { ASKPASS_FILENAME, ASKPASS_MODE, askpassScript } from "./askpass.js";
 import { realExec, type Exec, type ExecResult } from "./exec.js";
 import { Keychain } from "./keychain.js";
+import { promptHiddenLine, readStdin, realTerminal, type Terminal } from "./stdin-value.js";
 
 /** Folded Space Labs' GitHub OAuth App (device flow enabled). Public by design. */
 export const DEFAULT_GITHUB_OAUTH_CLIENT_ID = "Ov23lid9DItZlts5e5GV";
@@ -190,8 +191,10 @@ export interface ConnectRepoOptions {
   env?: NodeJS.ProcessEnv | undefined;
   platform?: NodeJS.Platform | undefined;
   fetchFn?: typeof fetch | undefined;
-  /** `--auth token` reads the PAT here — stdin, so it is never in argv or shell history. */
+  /** `--auth token` reads the PAT here — stdin, so it is never in argv or shell history. Test seam: when given, it stands in for both the pipe and the hidden prompt. */
   readSecret?: (() => Promise<string>) | undefined;
+  /** test seam: the terminal the PAT is typed at (default this process's, when stdin is one); `null` = none, read the pipe */
+  terminal?: Terminal | null | undefined;
   sleep?: ((ms: number) => Promise<void>) | undefined;
   /** The interpreter the one-shot askpass shim names in its shebang. Defaults to this process's node. */
   nodeBin?: string | undefined;
@@ -206,12 +209,9 @@ export interface ConnectRepoResult {
   flushed: boolean;
 }
 
-/** Read a whole stream (the PAT for `--auth token`). Trimmed: a trailing newline from a paste is not part of the token. */
-export async function readStdin(stream: NodeJS.ReadStream = process.stdin): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const c of stream) chunks.push(Buffer.from(c as Buffer));
-  return Buffer.concat(chunks).toString("utf8").trim();
-}
+// `readStdin` lives with the other terminal readers in stdin-value.ts; this
+// re-export keeps the package's public name (`index.ts`) where it was.
+export { readStdin };
 
 export async function connectRepo(opts: ConnectRepoOptions): Promise<ConnectRepoResult> {
   const exec = opts.exec ?? realExec;
@@ -286,8 +286,15 @@ export async function connectRepo(opts: ConnectRepoOptions): Promise<ConnectRepo
         token = await deviceFlow({ clientId, fetchFn, out, ...(opts.sleep ? { sleep: opts.sleep } : {}) });
         credential = "device";
       } else if (auth === "token") {
-        out("paste a personal access token with `repo` scope, then Ctrl-D (it is read from stdin and never echoed):");
-        token = (await (opts.readSecret ?? readStdin)()).trim();
+        // A terminal gets the hidden line (stdin-value.ts, the `secrets set`
+        // reader): the prompt is on stderr and not one typed character is
+        // echoed. A pipe is read to EOF, as before.
+        const term = opts.readSecret ? undefined : opts.terminal === undefined ? realTerminal() : (opts.terminal ?? undefined);
+        if (term) token = (await promptHiddenLine("the GitHub token (scope `repo`)", term)).trim();
+        else {
+          out("reading a personal access token with `repo` scope from stdin (never echoed, never in argv)");
+          token = (await (opts.readSecret ?? readStdin)()).trim();
+        }
         if (!token) throw new Error("no token on stdin");
         credential = "token";
       }

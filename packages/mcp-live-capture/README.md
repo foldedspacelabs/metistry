@@ -1,14 +1,32 @@
 # `@foldedspacelabs/metistry-mcp-live-capture`
 
-Record a meeting on a Mac, scoped to the apps you choose, and transcribe it
-on the Mac as it records.
+Record a meeting on a Mac, scoped to the apps or the window you choose, and
+transcribe it on the Mac as it records.
 
 - **App audio through a Core Audio process tap.** A tap mixes exactly the
   processes its description names, so a recording scoped to Zoom cannot
   hear anything else. The helper builds that description in one function,
   from a list of bundle IDs; it cannot express "everything except", and an
   empty list is refused.
-- **Your microphone**, your side only, as a second stream.
+- **A window or a screen you pick in the macOS picker** (*Window*, *Screen*).
+  The helper presents `SCContentSharingPicker` — one window, or one
+  display, the helper itself excluded, the choice fixed for the recording —
+  and opens one `SCStream` from the filter the picker handed back, with
+  `capturesAudio` (that content's own sound) and, on macOS 15,
+  `captureMicrophone`. A start names no content: a window id, display id
+  or app list is refused, a cancelled picker records nothing, and the
+  helper has no code that builds a filter or lists what is on screen. The
+  picture is kept at one frame a second (`screen.mp4`) and never leaves the
+  Mac.
+
+  *Be clear about what that enforces.* The picker makes the choice yours
+  and visible; the Screen Recording permission itself is not per-window —
+  macOS grants it to the whole helper. What keeps a recording to the
+  window you picked is that this helper has exactly one way to get a
+  filter. If you want the operating system's own guarantee, use *Audio
+  only*: a process tap is per-process by construction.
+- **Your microphone**, your side only, as a second stream (in the picture
+  stream itself on macOS 15).
 - **Transcription on the Mac** with `SpeechTranscriber` (macOS 26), as the
   audio arrives. Below macOS 26 the audio is kept without a transcript, and
   `check` says so.
@@ -23,24 +41,56 @@ on the Mac as it records.
   `Idempotency-Key: live-capture:<session>`, so a retry lands once. A
   session stays owed until the console has answered with a row; a console
   that is down or refuses the credential leaves it on this Mac, and the
-  next pass (every minute) tries again.
+  next pass (every minute) tries again. A Metistry console files it at
+  `Journal/Transcripts/<date>-<session>.md` in the owner's name.
+- **Retention you can read.** The audio (and a *Window* / *Screen*
+  session's frames) stays under the session's directory until the
+  transcript is ingested (the meeting's proposals decided, or the fold has
+  read it) plus 7 days, and never more than 30 days after the recording
+  ended; this Mac's transcript copy goes at 30 days once it was delivered.
+  The helper applies that rule itself, every hour — the 30-day ceiling
+  needs no console. The console's `recording-retention` routine reports
+  ingestion (`POST /recording/retention`), which can only bring a deletion
+  forward. Purge Now (`POST /recording/purge`, the control credential)
+  deletes a session's media at once. `session.json` stays, saying when and
+  why.
+- **Re-review — "check the audio again".** `recording_review` re-transcribes
+  a span of the kept audio (at most 15 minutes) with the transcriber's most
+  careful setting and answers **text with timestamps, never audio**: the
+  answer is rebuilt field by field, so nothing but a source, two times and a
+  line of text per line leaves the bridge. After the audio is deleted it
+  says when, and that the transcript remains. It is the assistant's alone:
+  core's `CREW_NEVER_TOOLS` names it.
 
-Requires macOS 14.2 or later for app audio, and macOS 26 for transcription.
-It needs three permissions: Microphone, Audio Capture and (for screen
-capture, not built yet) Screen Recording.
+Requires macOS 14.2 or later for app audio, macOS 14 for *Window* and
+*Screen*, and macOS 26 for transcription. It needs three permissions:
+Microphone, Audio Capture (*Audio only*) and Screen Recording (*Window* and
+*Screen*).
 
 ## Three credentials
 
 | credential | reaches |
 | --- | --- |
-| `METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE` | `GET /check` and `GET /status`, both reads. These are the manifest's `exposes:` — what a tool caller may invoke |
-| `METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` | those two, plus `POST /recording/start`, `/recording/stop` and `/recording/keep-going`. This is the person at the Mac, pressing Record |
-| `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` | nothing here — the bridge refuses it like a stranger's. It is the capture owner token the bridge **presents** to the console's `POST /capture` when a session ends (capture and messages only; `docs/ops/capture-shortcut.md` §1 mints one) |
+| `METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE` | `GET /check`, `GET /status` and `GET /recording/review` (`recording_review`), all reads — the manifest's `exposes:`, what a tool caller may invoke — and `POST /recording/retention`, which is not a tool: the console's retention routine reporting ingestion |
+| `METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` | all of those, plus `POST /recording/start` (every mode — *Audio only*, *Window*, *Screen*), `/recording/stop`, `/recording/keep-going` and `/recording/purge`. This is the person at the Mac, pressing Record or Purge Now |
+| `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` | nothing here — the bridge refuses it like a stranger's. It is the capture owner token the bridge **presents** to the console's `POST /capture` when a session ends (capture and messages only; on a Metistry install `metistry up` mints it, otherwise `docs/ops/capture-shortcut.md` §1 does) |
 
-The bridge token is refused `403` on every recording route, before the
-helper is asked anything. A model with this bridge's tools can see whether
-something is being recorded, and can never start a recording or cause a
-delivery. The bridge will not start if any two of the three are the same.
+On a Metistry install all three are minted for you: `metistry up` makes each
+one that is missing as soon as `METISTRY_LIVE_CAPTURE_URL` is set (and bare
+`metistry secrets mint` does the same, keeping any that exist). The control
+token goes into the login Keychain
+(`metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`, under the instance's id) and
+`.env`; the inbox token is also recorded as a capture owner token labelled
+`live-capture`. `metistry secrets mint METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`
+replaces one on purpose, followed by `metistry restart live-capture`. The Mac
+app's floating bar reads it from that one Keychain item and presents
+it to `127.0.0.1:7815` only. The bar never holds the bridge token
+(`apps/macos`, `docs/ops/mac-app.md` "The floating bar").
+
+The bridge token is refused `403` on every route that is the owner's hand,
+before the helper is asked anything. A model with this bridge's tools can
+see whether something is being recorded and re-read what was said, and can
+never start a recording, delete audio or cause a delivery. The bridge will not start if any two of the three are the same.
 
 ## Standalone
 
@@ -75,8 +125,50 @@ curl -sS http://127.0.0.1:7815/check -H "authorization: Bearer $METISTRY_BRIDGE_
 ```sh
 curl -sS -X POST http://127.0.0.1:7815/recording/start \
   -H "authorization: Bearer $METISTRY_LIVE_CAPTURE_CONTROL_TOKEN" \
-  -d '{"apps":["us.zoom.xos"],"app_audio":true,"microphone":true}'
+  -d '{"mode":"audio_only","apps":["us.zoom.xos"],"app_audio":true,"microphone":true}'
 ```
+
+*Window* and *Screen* name nothing — the helper presents the picker and
+waits (up to two minutes) for your choice:
+
+```sh
+curl -sS -X POST http://127.0.0.1:7815/recording/start \
+  -H "authorization: Bearer $METISTRY_LIVE_CAPTURE_CONTROL_TOKEN" \
+  -d '{"mode":"window","app_audio":true,"microphone":true}'
+```
+
+Re-review a span of a kept recording (the bridge token — `recording_review`):
+
+```sh
+curl -sS "http://127.0.0.1:7815/recording/review?session_id=20260928-133000-00ab&from_s=160&to_s=170" \
+  -H "authorization: Bearer $METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE"
+```
+
+```json
+{"session_id":"20260928-133000-00ab","from_s":160,"to_s":170,"audio":"kept",
+ "lines":[{"source":"app","speaker":"apps","from_s":160.5,"to_s":162,"at":"00:02:40","text":"the numbers are in"}],
+ "text":"[00:02:40] (apps) the numbers are in","as_of":"…"}
+```
+
+Once the media is gone: `"audio":"deleted"`, no lines, and
+`"note":"Audio deleted on 2026-10-05 after the fold; the transcript remains."`.
+
+| start body | |
+| --- | --- |
+| `mode` | `audio_only` (the default), `window` or `screen` |
+| `apps` | *Audio only*: the bundle IDs to tap, 1–16. *Window* / *Screen*: must be absent |
+| `app_audio`, `microphone` | `true` unless set; *Window* / *Screen* may turn both off and keep the picture |
+
+Anything else in the body is refused `400` before the helper hears it —
+`window_id`, `display_id`, `filter` and the like included. A cancelled
+picker is `400` (*nothing was chosen*); ScreenCaptureKit missing is `503`.
+
+`GET /status` says what is running, never what it took: the mode, the
+apps, what the picker chose (`picture: {kind, bundle_id}` — never a window
+title), and `senses` — `display`, `app_audio`, `microphone` — read from the
+streams that are open; a paused session has none. A picture the system
+stops (the window closed, the permission withdrawn) ends the session as
+`picture_lost`.
 
 `audio_capture` stays `unverified` until a tap has delivered sound, then
 reads `observed`. macOS has no way for an app to read that permission back,
@@ -92,7 +184,7 @@ and a tap without it records silence.
 | `METISTRY_LC_HELPER_TIMEOUT_MS` | `150000` | a start can wait on the transcriber's first set-up and the microphone prompt |
 | `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` | — | the capture owner token transcripts are posted with; unset, they stay on this Mac and `check` is `degraded` |
 | `METISTRY_LC_CONSOLE_URL` | `METISTRY_CONSOLE_URL`, else `http://127.0.0.1:$METISTRY_CONSOLE_PORT` (8080) | where `POST /capture` is |
-| `METISTRY_CAPTURE_DIR` (helper) | `<METISTRY_INSTANCE_DIR>/.metistry/state/capture` | where sessions are written: `<session>/session.json`, `transcript.jsonl`, `app.m4a`, `mic.m4a`; the helper refuses to start with neither set |
+| `METISTRY_CAPTURE_DIR` (helper) | `<METISTRY_INSTANCE_DIR>/.metistry/state/capture` | where sessions are written: `<session>/session.json`, `transcript.jsonl`, `app.m4a`, `mic.m4a`, `screen.mp4` (after a sleep, `app-2.m4a`… beside the first — each file's place in the session is read from when it was created, which `recording_review` uses); the helper refuses to start with neither set |
 | `METISTRY_LC_LOCALE` (helper) | the Mac's | the transcriber's language |
 
 ## Tests
@@ -100,10 +192,13 @@ and a tap without it records silence.
 `pnpm test` runs the bridge's wire, delivery and misuse tests against a
 fake helper and a fake console. On a Mac it also runs
 `scripts/test-helper.sh`, which compiles the helper's decisions
-(`helper/sources/kit`) with fakes for Core Audio, the microphone and the
-transcriber. It then builds the helper against the SDK with
-`build-helper.sh --compile-only` — unsigned, not a bundle. No step touches
-an audio device, a permission or a signing identity.
+(`helper/sources/kit`) with fakes for Core Audio, ScreenCaptureKit and its
+picker, the microphone and the transcriber — among them, *the picker's
+choice is the only filter the helper builds*. It then builds the helper
+against the SDK with `build-helper.sh --compile-only` — unsigned, not a
+bundle — and reads the sources to hold that no code constructs a content
+filter or lists what is on screen. No step touches an audio device, the
+screen, a permission or a signing identity.
 
 ## On a Metistry install
 

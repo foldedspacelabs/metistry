@@ -16,11 +16,17 @@
 // A check is a dial like any other: through the pool, so it is bound by
 // every rule the pool enforces — the egress door, the closed environment,
 // the origin pin.
+//
+// An IMAP mailbox (T4-15) is not MCP: its check signs in through the IMAP
+// provider's host guard, lists the folders, finds Drafts and EXAMINEs INBOX
+// read-only — no message is fetched — then logs out (`checkImap`).
 
 import { EgressRefused, runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
 import type { ConnectionCatalog } from "./catalog.js";
 import { ConnectionRefused } from "./errors.js";
+import { ImapError, type ImapSession } from "./imap.js";
 import type { ConnectionPool, UpstreamTool } from "./pool.js";
+import { stampCheck } from "./stamps.js";
 
 /** What a check found, beside its verdict — the facts the Connections screen shows under *Last checked*. */
 export interface ConnectionCheckMeta {
@@ -40,45 +46,107 @@ type Verdict = Pick<CheckResult, "status" | "remediation" | "meta">;
 
 /** How a refusal reads as a verdict: missing-here is `absent`, everything else `failed`. */
 function refusalVerdict(err: ConnectionRefused | EgressRefused): Verdict {
+  // `meta.refused` is the refusal's own code, so a reader that must tell "this
+  // kind of connection is not dialled here" (`not_built`) from "missing here"
+  // reads a field, never the sentence (a collector's check(), X-87).
   if (err instanceof EgressRefused) {
-    return { status: err.code === "missing_secret" ? "absent" : "failed", remediation: err.message };
+    return { status: err.code === "missing_secret" ? "absent" : "failed", remediation: err.message, meta: { refused: err.code } };
   }
   const absent =
     err.code === "not_built" ||
+    (err.code === "sign_in" && /not signed in|no item/.test(err.message)) ||
     err.code === "runs_elsewhere" ||
     err.code === "variable" ||
     (err.code === "secret" && /no item in this instance/.test(err.message));
-  return { status: absent ? "absent" : "failed", remediation: err.message };
+  return { status: absent ? "absent" : "failed", remediation: err.message, meta: { refused: err.code } };
 }
 
 function describeReach(catalog: ConnectionCatalog, name: string): string {
   const c = catalog.entries.find((e) => e.name === name)?.connection;
   if (!c) return "read the connection file";
+  if (c.type === "api" || c.type === "feed" || c.type === "files") {
+    // no server to list tools: reach the service once, and list the tools Metistry generates for it
+    return c.reach.http ? `GET ${c.reach.http.url}, and the tools Metistry generates for a ${c.type} connection` : `read ${c.reach.path?.path ?? "the folder"}, and the tools Metistry generates for a files connection`;
+  }
   if (c.reach.http) return `initialize + tools/list over HTTP (${c.reach.http.url})`;
   if (c.reach.command) return `initialize + tools/list over stdio (${c.reach.command.command})`;
+  if (c.reach.imap) return `LOGIN + LIST over IMAP${c.reach.imap.security === "tls" ? "S" : ""} (${c.reach.imap.host}:${c.reach.imap.port})`;
   return "read the connection file";
+}
+
+/** What an IMAP check found, beside its verdict. Counts and names of folders — never a message. */
+export interface ImapCheckMeta {
+  mailboxes: number;
+  /** the server's name for Drafts, or null when there is none — a draft has nowhere to go */
+  drafts: string | null;
+  /** messages in INBOX, as EXAMINE says */
+  inbox_messages: number | null;
+}
+
+/**
+ * An IMAP connection's check (T4-15): sign in (the host guard, the fill and
+ * LOGIN are `openImap`'s), LIST, find Drafts, EXAMINE INBOX — read-only, no
+ * message fetched — and LOGOUT. `ok` when all of it answers; `degraded` when
+ * it reads but has no Drafts mailbox (a draft would be refused); `failed` on
+ * a refused sign-in or an unreachable server; `absent` with no app password.
+ */
+async function checkImap(pool: ConnectionPool, name: string, used: Set<string>): Promise<Verdict & { probe?: string }> {
+  let session: ImapSession | undefined;
+  try {
+    session = await pool.openImap(name, { onUse: ({ names }) => names.forEach((n) => used.add(n)) });
+    const boxes = await session.mailboxes();
+    let drafts: string | null = null;
+    let why: string | undefined;
+    try {
+      drafts = (await session.drafts()).label;
+    } catch (err) {
+      if (!(err instanceof ImapError && err.code === "no_drafts")) throw err;
+      why = err.message;
+    }
+    const inbox = await session.examine("INBOX").catch(() => undefined);
+    const meta: ImapCheckMeta = { mailboxes: boxes.length, drafts, inbox_messages: inbox?.exists ?? null };
+    const probe = `signed in; ${boxes.length} mailbox${boxes.length === 1 ? "" : "es"}, Drafts ${drafts === null ? "not found" : `is ${drafts}`}${inbox ? `, ${inbox.exists} in INBOX` : ""}`;
+    if (why) return { status: "degraded", remediation: `${why} — reading works; drafting will be refused`, meta: { ...meta }, probe };
+    return { status: "ok", meta: { ...meta }, probe };
+  } catch (err) {
+    if (err instanceof ConnectionRefused || err instanceof EgressRefused) return refusalVerdict(err);
+    return { status: "failed", remediation: err instanceof Error ? pool.redactor.redactText(err.message) : String(err) };
+  } finally {
+    await session?.close();
+  }
 }
 
 /**
  * Check one connection. Never throws: every outcome is a verdict. Reported to
- * the pool's host as a `connection_check` event, like every dial.
+ * the pool's host as a `connection_check` event, like every dial, and
+ * stamped (`stampCheck`) in the instance's state directory when the catalog
+ * names one — what the listing serves as `last_checked` (X-96).
  */
 export async function checkConnection(pool: ConnectionPool, catalog: ConnectionCatalog, name: string): Promise<CheckResult> {
   const entry = catalog.entries.find((e) => e.name === name);
   const probe = describeReach(catalog, name);
   const started = Date.now();
   let seen: UpstreamTool[] | undefined;
+  let imapProbe: string | undefined;
+  const used = new Set<string>();
   const result = await runCheck(name, probe, async (): Promise<Verdict> => {
     if (!entry) return { status: "failed", remediation: `no connection named ${name} — \`metistry connections list\` names them` };
     if (entry.status !== "ok" || !entry.connection) {
       return { status: entry.status === "absent" ? "absent" : "failed", remediation: entry.issues.join("; ") };
+    }
+    if (entry.connection.reach.imap) {
+      const { probe: said, ...verdict } = await checkImap(pool, name, used);
+      imapProbe = said;
+      return verdict;
     }
     try {
       seen = await pool.upstreamTools(name, { fresh: true });
     } catch (err) {
       if (err instanceof ConnectionRefused || err instanceof EgressRefused) return refusalVerdict(err);
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-        return { status: "absent", remediation: `the command is not on this Mac (${entry.connection.reach.command?.command ?? "?"}) — install it, or give its full path in the connection` };
+        return entry.connection.reach.path
+          ? { status: "absent", remediation: `the folder or file is not on this Mac (${entry.connection.reach.path.path})` }
+          : { status: "absent", remediation: `the command is not on this Mac (${entry.connection.reach.command?.command ?? "?"}) — install it, or give its full path in the connection` };
       }
       return { status: "failed", remediation: err instanceof Error ? err.message : String(err) };
     }
@@ -101,15 +169,20 @@ export async function checkConnection(pool: ConnectionPool, catalog: ConnectionC
     }
     return { status: "ok", meta: { ...meta } };
   });
-  const out: CheckResult = seen ? { ...result, probe: `${probe}: ${seen.length} tool${seen.length === 1 ? "" : "s"} offered, ${Object.keys(entry?.connection?.tools ?? {}).length} listed` } : result;
+  const out: CheckResult = seen
+    ? { ...result, probe: `${probe}: ${seen.length} tool${seen.length === 1 ? "" : "s"} offered, ${Object.keys(entry?.connection?.tools ?? {}).length} listed` }
+    : imapProbe
+      ? { ...result, probe: `${probe}: ${imapProbe}` }
+      : result;
   await pool.emit({
     kind: "connection_check",
     connection: name,
     ok: out.status === "ok" || out.status === "degraded",
     ...(out.status === "ok" ? {} : { error: out.remediation }),
     ms: Date.now() - started,
-    secrets: [],
+    secrets: [...used].sort(),
     meta: { status: out.status, ...(out.meta ?? {}) },
   });
+  if (entry) await stampCheck(catalog.baseDir, name, out.status, new Date(), catalog.entries.map((e) => e.name));
   return out;
 }

@@ -21,16 +21,20 @@ export const CONNECTION_REFUSAL_CODES = [
   "needs_approval",
   /** the caller's own bearer is in the arguments — it is never forwarded upstream */
   "caller_credential",
+  /** a `{{ … }}` in the arguments — the door fills references, so one a caller writes would be a value it chose where to send (T4-10) */
+  "secret_reference",
   /** an HTTP connection's request to another origin, or a redirect — it goes to its own URL and nowhere else */
   "other_host",
   /** `runs_on` names a place this process is not (a host command from a containerised console) */
   "runs_elsewhere",
-  /** something this release does not dial: a non-MCP type, an auth scheme or reach that arrives later */
+  /** something this release does not dial: an agent, calendar, mail or tracker connection, or a builtin provider (each has its own consumer) */
   "not_built",
   /** a `{{ variable.x }}` that does not fill */
   "variable",
   /** a secret a command's environment needs: not granted to the connection, or no item in this instance */
   "secret",
+  /** an OAuth connection that cannot sign in: no client id, the broker (not built), no stored sign-in, or the provider refused the refresh — `metistry connections authorize <name>` (T4-10) */
+  "sign_in",
 ] as const;
 export type ConnectionRefusalCode = (typeof CONNECTION_REFUSAL_CODES)[number];
 

@@ -326,7 +326,7 @@ export function previewBody(p: RevertAnswer, edit: RollbackEdit): Record<string,
   };
 }
 
-const PROPOSAL_ROW_SQL = `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, work_id, snoozed_until FROM proposals WHERE id = $1`;
+const PROPOSAL_ROW_SQL = `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, work_id, snoozed_until, group_id FROM proposals WHERE id = $1`;
 
 export type RaiseOutcome = { ok: true; id: number; raised: boolean; preview: Record<string, unknown>; proposal: Record<string, unknown> | null } | { ok: false; code: ErrorCode; message: string };
 

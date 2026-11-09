@@ -12,9 +12,10 @@
 // §2.18, for this screen:
 //
 //   * Keyboard. ⌘↩ sends; ↑ in an empty composer brings back the last turn you
-//     wrote; `/` from the transcript focuses the composer; Esc leaves it;
-//     ⇧⌘N is File ▸ New Conversation (published through `shellScreenActions`);
-//     the *↓ New Reply* pill is a button, and Return on it scrolls.
+//     wrote; Esc leaves it; ⇧⌘N is File ▸ New Conversation (published through
+//     `shellScreenActions`); the *↓ New Reply* pill is a button, and Return on
+//     it scrolls. Screen 1 §6's `/` is not in components-02's table, so it is
+//     not bound (T6-16's audit, hotkeys.swift).
 //   * VoiceOver (screen-01 §7, verbatim with the configured name): a reply is
 //     *from <name>: …*; your turn is *your turn, 9:14 AM. …*; the pill is *New
 //     reply available*; a strip is *4 tools, collapsed*. A reply that arrives
@@ -263,18 +264,6 @@ public struct ChatView: View {
             while !Task.isCancelled {
                 await model.tick()
                 try? await Task.sleep(for: .seconds(1))
-            }
-        }
-        .background {
-            // `/` focuses the composer — a bare key, so it is attached only
-            // while the composer does not have focus, and a slash typed there
-            // is a slash.
-            if !composerFocused {
-                Button("Focus the Composer") { composerFocused = true }
-                    .keyboardShortcut("/", modifiers: [])
-                    .opacity(0)
-                    .frame(width: 0, height: 0)
-                    .accessibilityHidden(true)
             }
         }
         .shellScreenActions([

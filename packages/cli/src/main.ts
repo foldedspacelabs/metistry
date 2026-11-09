@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `metistry` — init | connect-repo | connect | secrets | console | doctor |
+// `metistry` — init | connect-repo | connect | secrets | console | enroll | doctor |
 // up | down | update (plan
 // §4.16; connect-repo and secrets are the install verbs the Mac app drives,
 // docs/product/desktop-app-plan.md). Hand-rolled argument parsing: a handful
@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { GITHUB_WRITE_SECRET, KEEP_AWAKE_VALUES, instanceFile, loadCompute, parseKeepAwake, parsePullArg, parsePushArg, parseSecretsFile, providerSecretNames, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
+import { KEEP_AWAKE_VALUES, instanceFile, parseKeepAwake, parsePullArg, parsePushArg, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
 import {
   assign,
   cacheReport,
@@ -47,14 +47,18 @@ import {
 import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake, type KeepAwakeFlags } from "./deployment-report.js";
 import { loadDeployment } from "./deployment.js";
 import { loadVaultSettings, renderVaultSettings, rollbackVault, setVaultSettings, VAULT_VERBS } from "./vault.js";
+import { parseRemoteProviderId, remoteAuthorize, remoteSet, remoteStatus, remoteTest, renderRemoteRows, renderRemoteStatus, REMOTE_VERBS, REMOTE_WAIT_DEFAULT_MS, type RemoteRegistry } from "./remote/index.js";
+import { readTextInput, valueInArgvRefusal, type Terminal } from "./stdin-value.js";
 import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
+import { applyFixes, doctorMode, renderCheckTrailer, renderFixes, type DoctorRunDeps, type DoctorRunReport } from "./doctor-fix.js";
 import { VARIABLE_VERBS, parseVariableVerb, renderVariables, variablesList, variablesSet, variablesUnset, type VariablesOptions } from "./variables.js";
 import {
   CONNECTION_VERBS,
   afterDoubleDash,
   connectionsAdd,
-  connectionsList,
+  connectionsAuthorize,
+  connectionsListing,
   connectionsPolicy,
   connectionsRemove,
   connectionsSet,
@@ -69,12 +73,12 @@ import {
   type ConnectionsOptions,
 } from "./connections.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
-import { loadInstanceCatalog, syncSecretNames } from "@foldedspacelabs/metistry-connections";
 import { realExec, type Exec } from "./exec.js";
-import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
-import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
+import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
+import { connect, connectList, connectRemove, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList, renderRemove } from "./connect.js";
 import { consoleCall, renderConsoleCallError, renderWhoami, runConsoleSession, whoami } from "./console-client.js";
 import { agentAutonomy, agentsDefine, agentsList, parseAutonomyFlags, renderAgents, renderAutonomy, renderDefine } from "./agents.js";
+import { enroll, enrollCancel, enrollStatus, NoDatabaseError, parseCodeId, renderEnrollCancelled, renderEnrollMinted, renderEnrollRefusal, renderEnrollStatus } from "./enroll.js";
 
 const AGENTS_USAGE =
   "usage: metistry agents list [--json] | metistry agents autonomy <id> [--level observe|propose|act_within_scope] [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]" +
@@ -84,6 +88,8 @@ import { askKeepAwake, init, type Ask } from "./init.js";
 import { migrateInbox } from "./migrate-inbox.js";
 import { migrateLayout } from "./migrate-layout.js";
 import { migrateShape } from "./migrate-shape.js";
+import type { MigrationSession } from "./migrate.js";
+import { CAPTURE_INBOX_TOKEN, describeRecorderTokens, ensureRecorderTokens, recorderConfigured, registerCaptureOwnerToken } from "./recorder-tokens.js";
 import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
 import { identitySet, readIdentity, renderIdentity, renderIdentitySet, IDENTITY_SET_FIELDS, type IdentityChange } from "./identity.js";
 import {
@@ -113,8 +119,11 @@ import {
   secretsRemove,
   secretsReplace,
   secretsSet,
+  deliveredSecretNames,
+  ensureSecret,
   syncSecrets,
   serviceAnswers,
+  type DeliveredSecrets,
   type TokenService,
   type NamedSecretsOptions,
   type SyncDirection,
@@ -147,7 +156,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "include-config", "no-app", "relaunch", "no-reexec"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "check", "fix", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "remove", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "no-browser", "plain", "include-config", "no-app", "relaunch", "no-reexec", "token", "use-app", "bundled", "access"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -319,7 +328,8 @@ const USAGE = `metistry — Metistry command line
       The token is never printed, never written to .env, never in .git/config.
 
   metistry connect <cursor|opencode|devin|claude-code> [--instance <dir>] [--rotate] [--remote]
-                   [--areas Areas/A,Projects/B] [--project <slug>] [--json]
+                   [--areas Areas/A,Projects/B] [--project <slug>] [--briefing on|off] [--json]
+  metistry connect --remove <cursor|opencode|devin|claude-code> [--instance <dir>] [--json]
   metistry connect --list [--json]
       Give one external dev tool its own way into this instance: register it as
       an EXTERNAL agent in the console (the agent id IS the tool name, so a
@@ -333,14 +343,23 @@ const USAGE = `metistry — Metistry command line
                      (0600, every other server preserved) as a "remote" server,
                      with the bearer named "Bearer {env:…_OPENCODE}" and the
                      value in the login Keychain — never in the file.
-        claude-code  mints the token docs/ops/claude-code-plugin.md has you
-                     mint by hand and prints the plugin's env lines; it does
-                     NOT install the plugin.
+        claude-code  both halves: registers the console's /mcp with Claude Code
+                     (claude mcp add --scope user, header "Bearer
+                     \${METISTRY_AGENT_TOKEN_CLAUDE_CODE}", never the value)
+                     and prints the env lines the plugin reads. Without
+                     claude on the PATH it prints the add line instead. It
+                     does NOT install the plugin.
         devin        has no config file to write — prints the name, URL and
                      Authorization value to paste at Customize -> MCPs.
       Grants start default-deny ({tier: "none", areas: []}); --areas widens the
       read grant to those TitleCase vault prefixes, --project adds project
-      membership. No flag can grant knowledge_write: an external principal
+      membership. --briefing off opts this agent out of the session-start briefing
+      (on by default for any agent with a read grant: the project page, open
+      tasks and recent sessions for the checkout, handed to a new session by the
+      tool's plugin — claude-code's SessionStart hook, opencode's system-prompt
+      transform; cursor and devin do not deliver it yet); --briefing on takes the
+      opt-out back. It is kept with the agent's grants, so a revoke clears it and
+      --areas never undoes it. No flag can grant knowledge_write: an external principal
       cannot reach it at the bridge at all. --rotate mints a replacement bearer
       (the old one stops authenticating at once) — without it an
       already-registered tool is told its token is unchanged rather than shown a
@@ -350,12 +369,19 @@ const USAGE = `metistry — Metistry command line
       answer the same 401 an unknown token gets — until you let it in from Needs
       You or with POST /api/agents/<id>/approve. Loopback tools stay immediate,
       and --remote is decided at enrolment, never added to a row afterwards.
+      --remove undoes what connect wrote, and is safe to repeat: it revokes the
+      tool's row (first — if the console is down nothing else is touched),
+      deletes its Keychain item, and puts the tool's config file back exactly
+      as connect found it (connect keeps a copy beside the file the first time
+      it writes one). Another server in the same file is never touched. Run
+      connect <tool> afterwards to bring a revoked tool back: the same id and a
+      new token, with grants back at default-deny.
       docs/ops/cursor.md, docs/ops/opencode.md, docs/ops/devin.md,
       docs/ops/console-api.md.
 
   metistry secrets sync [--from keychain|env] [--to env|keychain]
                         [--instance <dir>] [--env-file <path>]
-  metistry secrets mint <VAR> [--instance <dir>] [--env-file <path>]
+  metistry secrets mint [<VAR>] [--instance <dir>] [--env-file <path>]
   metistry secrets list [--json] [--instance <dir>] [--env-file <path>]
   metistry secrets purge --instance <dir> [--yes]
   metistry secrets retire-legacy-env [--yes] [--instance <dir>]
@@ -364,8 +390,10 @@ const USAGE = `metistry — Metistry command line
       .env's secret-shaped variables (names ending _TOKEN _PASSWORD _PRIVATE
       _SECRET _KEY); --to env rewrites just those
       lines in place (0600; every comment and non-secret line preserved) and
-      moves a product-checkout .env into the instance the first time. mint makes
-      a new random token in both. list prints names and where each lives, never
+      moves a product-checkout .env into the instance the first time. mint <VAR>
+      makes a new random token in both; bare, with METISTRY_LIVE_CAPTURE_URL
+      set, it makes the recorder's three (control, bridge, inbox) where they
+      are missing and keeps the ones that exist. list prints names and where each lives, never
       values (--json: the same rows as an array).
       Every item is filed under ONE account: this instance's instance_id. A
       third-party credential (a METISTRY_*_API_KEY, your AWS keys) is an
@@ -457,6 +485,29 @@ const USAGE = `metistry — Metistry command line
       (GET /api/events only) writes {id, event} frames until {id, cancel: true}
       or the console closes it, then {id, ended}. EOF on stdin ends the session.
 
+  metistry enroll [--json] [--instance <dir>] [--env-file <path>]
+  metistry enroll --cancel <code_id> [--json] [--instance <dir>] [--env-file <path>]
+  metistry enroll --status <code_id> [--json] [--instance <dir>] [--env-file <path>]
+      Add a phone (plan §2.22, M19). Mints a one-time passkey enrolment code on
+      THIS Mac — single use, 10 minutes, stored hashed in auth_enrollment_codes —
+      and prints the URL to open on the phone: <first METISTRY_ORIGIN entry>/#enroll=<code>.
+      No HTTP route mints one, by design: shell access to this Mac is the root
+      of trust for a first credential (docs/ops/auth.md). Refuses BEFORE minting
+      when the phone cannot complete the ceremony against that origin — a
+      loopback host (every install's default), http://, an IP literal, or an
+      origin this Mac itself cannot reach within 5 s (or that names another
+      instance) — each refusal in its own words, naming METISTRY_ORIGIN and the
+      fix; a refusal writes no row and exits 1. --json writes exactly one
+      document: {url, code_id, origin, expires_at} on a mint, {refused: {case,
+      message, origin, fix}} on a refusal. --cancel <code_id> expires an unused
+      code at once (the id --json printed, never the code); the Mac's Add a
+      Phone sheet runs it when it closes. Both land in runs (auth).
+      --status <code_id> is read-only: whether the phone's request for this code has
+      reached the console (§2.23, X-114). --json: {code_id, state: live|used|expired,
+      expires_at, opened_at, opened_via: proxy|main|null, provider}. Only "proxy" —
+      the listener a provider is pointed at — is proof the phone reached this Mac
+      from outside; the code itself is never printed. Exits 1 for an unknown id.
+
   metistry identity [--json] [--instance <dir>]
   metistry identity set [--name <name>] [--mention <@slug>] [--mark <glyph>] [--dry-run] [--json]
       The instance's identity.yaml (name, mention, voice, icon, instance_id) —
@@ -533,15 +584,23 @@ const USAGE = `metistry — Metistry command line
 
   metistry connections list [--json] [--instance <dir>]
   metistry connections show <name> [--json]
-  metistry connections add <name> --type mcp (--url <url> [--auth bearer|api_key|basic
-                           --secret <name> [--auth-header <Header>] [--username <user>]] [--header K=V]…
-                         | [--env K=V]… [--runs-on host|container] -- <command> [args…])
-                           [--provider <type>] [--description <text>] [--no-discover] [--dry-run]
+  metistry connections add <name> --type mcp|api|feed|files|mail|agent|tracker
+                           (--url <url> [--auth bearer|api_key|basic --secret <name> [--auth-header <Header>]
+                                          [--username <user>]] [--header K=V]…
+                           | --url <url> --auth oauth [--client-id-secret <name>] [--client-secret-secret <name>]
+                                          [--token-secret <name>] [--authorize-url <url> --token-url <url> --scope <s>…]
+                           | --imap <host[:port]> --username <user> --secret <name> [--plain]
+                           | --path <folder|file> [--include <glob>]… [--skip <glob>]…
+                           | [--env K=V]… [--runs-on host|container] -- <command> [args…])
+                           [--provider <type> [--config KEY=VALUE]…] [--description <text>] [--no-discover] [--dry-run]
   metistry connections set <name> [--url <url>] [--auth …] [--header K=V]… [--unset-header K]…
+                           [--config KEY=VALUE]… [--unset-config KEY]…
                            [--env K=V]… [--unset-env K]… [--runs-on …] [--description <text>]
+                           [--config KEY=VALUE]… [--unset-config KEY]… [--client-id-secret <name>] [--client-secret-secret <name>] [--token-secret <name>]
                            [-- <command> [args…]] [--dry-run]
+  metistry connections authorize <name> [--no-browser] [--timeout <seconds>]
   metistry connections policy <name> [<tool> allow|ask|never [--group reads|changes|starts_agent]]
-                              [--offer on|off] [--dry-run]
+                              [--offer on|off] [--fold on|off] [--dry-run]
   metistry connections remove <name> [--dry-run]
   metistry connections test <name> [--json]
       Servers Metistry reaches for you (.metistry/connections/<name>.yaml,
@@ -554,16 +613,44 @@ const USAGE = `metistry — Metistry command line
       agent Ask First, offer to agents off (--no-discover writes it without
       dialling). "policy" prints the tool table, or sets one tool to Allow,
       Ask First or Never — a tool that is not listed is refused before
-      anything is dialled. "test" dials it and compares what it offers with
+      anything is dialled; --fold off hands agents this connection's answers
+      whole, however large (on by default: connections_call folds a large
+      answer and keeps it for the caller to page). "test" dials it and compares what it offers with
       the file. "remove" deletes it; what referred to it turns absent. A
       command is given only the environment the file names — never this
       process's — and a granted secret there is given to that command only.
       --auth basic writes --username beside the secret that holds an app
       password (a CalDAV calendar: --provider caldav, icloud-calendar or
       fastmail-calendar); the password is filled at the egress door, never
-      written. A §4.7 protected path: every write goes through the reconciler as the
-      "user" principal. The console reads the same files at GET
-      /api/connections and never writes them.
+      written. --imap reaches a mailbox (--type mail --provider imap or
+      gmail-mail) with --username and the app password --secret names, over
+      TLS on 993 unless a port is given (--plain: a server on this Mac only);
+      nothing is dialled on add, "test" signs in, and nothing ever sends mail.
+      An api, feed or files connection is written with the tools
+      Metistry generates for it (api: get, request; feed: list_items,
+      get_item, search_items; files: list_files, read_file, search_files, or
+      read_page for a URL), every one at Ask First. --auth oauth signs in with
+      the connection type's client, or your own (--client-id-secret, the NAME
+      of a secret); a custom connection names its client (--authorize-url,
+      --token-url, --scope) and always brings its own id. "authorize" signs
+      in: it listens on 127.0.0.1 for one callback, opens the browser at the
+      provider (--no-browser prints the address), checks the state, exchanges
+      the code with its PKCE verifier through the egress door, and keeps the
+      refresh token in this instance's Keychain — never printed. "add" also
+      points a sync at its first connection in scheduled.yaml when the
+      provider is read by one and nothing names a connection for it yet.
+      --config KEY=VALUE fills a known service's config fields (--provider),
+      each judged against its connection type before anything is written: an
+      unknown key, a value of the wrong kind or a required field left out is
+      a usage error (exit 2); a secret field takes the NAME of a secret
+      (metistry secrets set), never a value — a value on a command line is
+      refused and not echoed; set --unset-config KEY removes one. An agent
+      connection (--type agent --provider devin|github-issues) is a target a
+      task is dispatched to (POST /api/tasks/:id/dispatch), never dialled —
+      pass --no-discover. A §4.7 protected path: every write goes
+      through the reconciler as the "user" principal. The console reads the
+      same files at GET /api/connections (with the installed connection
+      types under "types") and never writes them.
 
   metistry runs export [--since <cursor|timestamp>] [--until <timestamp>]
                        [--component <name>] [--limit N] [--json-lines]
@@ -635,9 +722,24 @@ const USAGE = `metistry — Metistry command line
       METISTRY_URL and METISTRY_OWNER_TOKEN come from the environment (.env in
       the checkout) or the login Keychain; neither is ever printed.
 
-  metistry doctor [--json] [--product-dir <checkout>]
+  metistry doctor [--check | --fix [--yes]] [--json] [--product-dir <checkout>]
       Validate every manifest in the checkout and probe every bridge, service,
-      container and launchd job. Exit 0 when nothing is failed.
+      container and launchd job — then REPAIR what it finds. Every row is
+      classified: fixable (doctor does it: restart a service that is down, apply
+      pending migrations under the advisory lock, write the cli shim, re-seed a
+      missing template, re-render the install …), your hand (the row says the
+      exact step: a TCC grant, a credential another service issues, a download),
+      or informational. In a terminal, plain "doctor" applies every fixable
+      row's fix, asks once per fix that moves files or restarts a running
+      service (--yes skips the question; never the default), re-checks ONCE and
+      prints before → after. Without a terminal, plain "doctor" is --check.
+      --check is read-only (what up, update, CI and the Mac app run); --fix
+      repairs without a terminal. Every fix is one of a closed table, runs
+      through the same step runner as "up", and is appended to
+      <instance>/.metistry/state/doctor-fixes.jsonl. A restart is tried once
+      per METISTRY_DOCTOR_RESTART_WINDOW_MIN (30); after that the row is yours,
+      with the log. --json adds "fix" and "fixed" to every row and "fixes[]".
+      Exit 0 when nothing is failed, no fix failed, and none waits for a --yes.
 
   metistry runtime install --from <Metistry.app | .../Contents/Resources/metistry>
                            [--to <dir>] [--force] [--dry-run]
@@ -818,7 +920,32 @@ const USAGE = `metistry — Metistry command line
       is not recommended, and never runs it. doctor reads pmset -g and says
       whether it is in effect (docs/ops/deployment-shapes.md).
 
-  metistry vault settings [--push <after_commit|manual|<n>m|<n>h>] [--pull <n>m|<n>h]
+  metistry remote [status] [--json] [--product-dir <checkout>] [--instance <dir>]
+  metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags]
+                      [--yes] [--dry-run] [--timeout <seconds>] [--json] [--instance <dir>]
+  metistry remote authorize <tailscale|cloudflare> [--no-browser] [--timeout 300] [--json]
+  metistry remote test [--json] [--instance <dir>]
+  metistry remote off [--yes] [--json] [--instance <dir>]
+      How your phone reaches this Mac (docs/ops/remote-access.md). The record is
+      the remote: block of .metistry/deployment.yaml — the provider, its mode,
+      the origin it yields and its non-secret settings; no credential is in it.
+      Every install starts at none: nothing exposed, METISTRY_ORIGIN loopback
+      only, Add a Phone refuses. set previews without --yes; with it, the new
+      provider is configured first, its origin must answer from this Mac, the
+      record is written (the same protected write as deployment set-shape), and
+      only then is the old provider revoked — the phone is never left with
+      nothing mid-change. A failed set-up writes nothing. off is set none
+      with the old provider's revoke. A provider's token is read from stdin
+      (--token for cloudflare; zrok and ngrok always) or typed hidden at a
+      prompt — never as an argument. Provider flags: tailscale [--mode
+      funnel|tailnet] [--use-app|--bundled] [--no-browser]; cloudflare --hostname <name.domain>
+      [--access] [--token]; zrok [--name <name>]; ngrok [--domain <name>];
+      port-forward [--ddns desec|cloudflare] [--hostname <name>] [--manual
+      <external-port>]. This version ships none and tailscale (Funnel by default;
+      the owner's Tailscale app when it is running, else the bundled node — docs/ops/
+      remote-access.md); the others arrive with their own tickets and set says so until then.
+
+  metistry vault settings [--push <after_commit|manual|<n>m|<n>h>] [--pull <n>m|<n>h>]
                           [--yes] [--json] [--product-dir <checkout>] [--instance <dir>]
       The vault's git sync policy (M18): when the reconciler pushes the
       instance repo to its remote — after_commit (once a flush has made
@@ -918,8 +1045,9 @@ const USAGE = `metistry — Metistry command line
 
   --dry-run prints every command and runs nothing.
 
-Product checkout resolution: --product-dir, METISTRY_PRODUCT_DIR, the checkout
-this package is installed in, the current directory's enclosing checkout.
+Product checkout resolution: --product-dir, METISTRY_PRODUCT_DIR, the release
+install this package runs from, the checkout this package is installed in, the
+current directory's enclosing checkout.
 
 Environment resolution: <instance>/state/.env first (--instance, else
 METISTRY_INSTANCE_DIR), then the product checkout's .env — deprecated, still
@@ -952,7 +1080,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
   {
     title: "every day",
     verbs: [
-      ["doctor", "validate every manifest; probe every bridge, service and job"],
+      ["doctor", "probe every bridge, service and job; repair what it finds"],
       ["restart|stop|start [<service>…]", "one service, several, or everything this shape runs"],
       ["logs <service>", "tail one service's log"],
       ["update", "pull, build, migrate under a lock, restart what changed, pin"],
@@ -968,6 +1096,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["compute route-report", "where real messages went — the router's fall-through rate, PoC-20 phase 0"],
       ["deployment [set-shape]", "the effective shape (D4 overlay) and its services"],
       ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
+      ["remote [status|set|authorize|test|off]", "how your phone reaches this Mac: none, or a provider — the record, the chooser, the switch"],
       ["vault settings", "when the reconciler pushes the vault to its remote, and pulls from it"],
       ["vault rollback", "undo a commit, a day or a file — a Needs You request, then one new commit"],
       ["agents list", "every registered agent and what it holds"],
@@ -978,7 +1107,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
       ["extensions list|add|remove", "your own units — templates, connection types, targets, overlays"],
       ["variables list|set|unset", "plain shared values agents read — never a secret, never a schedule"],
-      ["connections list|show|add|set|policy|remove|test", "servers Metistry reaches for you, and which of their tools may run"],
+      ["connections list|show|add|set|policy|remove|test|authorize", "what Metistry reaches for you, which of its tools may run, and signing in"],
     ],
   },
   {
@@ -986,6 +1115,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
     verbs: [
       ["connect <tool> | --list", "give Cursor, OpenCode, Devin or Claude Code its own way in"],
       ["console whoami | call | session", "authenticated requests against the console, as you"],
+      ["enroll [--cancel|--status <code_id>]", "add a phone: a one-time enrolment code, minted here and never over HTTP"],
       ["runs export", "the audit ledger as NDJSON, oldest first, resumable"],
       ["import-sessions", "summarise this machine's Claude Code sessions into /capture"],
     ],
@@ -1020,8 +1150,12 @@ export function renderHelp(ui: Ui = defaultUi()): string {
 export interface MainIo {
   out?: (s: string) => void;
   err?: (s: string) => void;
-  /** test seam: fakes for doctor's fetch/db/exec */
-  doctorDeps?: Partial<DoctorDeps>;
+  /** test seam: fakes for doctor's fetch/db/exec — and for the fixes a repair run applies (doctor-fix.ts) */
+  doctorDeps?: Partial<DoctorRunDeps>;
+  /** test seam: the remote-access adapters `remote` and doctor's `remote` rows use (default the ones this release ships) */
+  remoteProviders?: RemoteRegistry;
+  /** test seam: a pasted provider token, instead of stdin or the hidden prompt */
+  readToken?: (what: string) => Promise<string>;
   /** test seam: every subprocess up/update/init run */
   exec?: Exec;
   /** test seams for restart/stop/start/logs: the host platform decides whether launchd jobs exist at all (CI runs the suite on Linux) */
@@ -1030,8 +1164,12 @@ export interface MainIo {
   home?: string;
   /** test seam: the console request of `console whoami|call|session`, `connect`, `agents` and `runs export` */
   fetchFn?: typeof fetch;
-  /** test seam: `console call --body -` reads this instead of the real stdin */
+  /** test seam: the base fetch a connection's dials and an OAuth sign-in go through, under the egress guard (a fixture server on loopback) */
+  dialFetch?: typeof fetch;
+  /** test seam: what `console call --body -`, `agents define --prompt-file -`, a secret's value and `connect-repo --auth token` read instead of the real stdin — it stands in for both the pipe and the terminal prompt */
   readStdin?: () => Promise<string>;
+  /** test seam: the terminal those reads prompt at (default this process's, when stdin is one); `null` = none, read the pipe */
+  terminal?: Terminal | null;
   /** test seam: `console session --stdio` reads its request lines from this instead of the real stdin */
   sessionInput?: AsyncIterable<string>;
   /**
@@ -1041,6 +1179,8 @@ export interface MainIo {
    * app's first run and from a script.
    */
   ask?: Ask;
+  /** test seam: the database session the recorder's capture owner token is recorded through (`secrets mint`) */
+  openSession?: (env: NodeJS.ProcessEnv) => Promise<(MigrationSession & { end(): Promise<void> }) | null>;
 }
 
 /**
@@ -1194,6 +1334,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           force: flags.force === true,
           out,
           ...(io.exec ? { exec: io.exec } : {}),
+          ...(io.readStdin ? { readSecret: io.readStdin } : {}),
+          ...(io.terminal !== undefined ? { terminal: io.terminal } : {}),
         });
         out(`connected: ${instanceDir} → ${url} (branch ${r.branch}, credential ${r.credential})`);
         return 0;
@@ -1227,10 +1369,33 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       }
       const tool = parseTool(positional[0]);
       if (!tool) {
-        err(`usage: metistry connect <${CONNECT_TOOLS.join("|")}> [--rotate] [--remote] [--areas Areas/A,Projects/B] [--project <slug>] [--json]`);
+        err(`usage: metistry connect <${CONNECT_TOOLS.join("|")}> [--rotate] [--remote] [--areas Areas/A,Projects/B] [--project <slug>] [--briefing on|off] [--json]`);
+        err(`       metistry connect --remove <${CONNECT_TOOLS.join("|")}> [--json]`);
         err("       metistry connect --list [--json]");
         return 2;
       }
+      if (flags.remove === true) {
+        // the way back is its own verb: a flag that mints, widens or enrols beside it would be a contradiction, so it is refused rather than half-obeyed
+        const clash = ["rotate", "remote", "areas", "project", "briefing"].filter((f) => flags[f] !== undefined);
+        if (clash.length > 0) {
+          err(`metistry connect ${tool}: --remove undoes what connect wrote and cannot be combined with --${clash.join(", --")}`);
+          return 2;
+        }
+        try {
+          const r = await connectRemove({ tool, ...common });
+          out(flags.json === true ? JSON.stringify(r, null, 2) : renderRemove(r));
+          return r.problems.length > 0 ? 1 : 0;
+        } catch (e) {
+          err(`metistry connect --remove ${tool}: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
+      const briefingFlag = str(flags, "briefing");
+      if (flags.briefing !== undefined && briefingFlag !== "on" && briefingFlag !== "off") {
+        err(`metistry connect ${tool}: --briefing takes on or off`);
+        return 2;
+      }
+      const briefing = briefingFlag === "on" || briefingFlag === "off" ? briefingFlag : undefined;
       try {
         const r = await connect({
           tool,
@@ -1238,6 +1403,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           remote: flags.remote === true,
           ...(csv(str(flags, "areas")) ? { areas: csv(str(flags, "areas")) } : {}),
           ...(csv(str(flags, "project")) ? { projects: csv(str(flags, "project")) } : {}),
+          ...(briefing ? { briefing } : {}),
           ...common,
         });
         out(flags.json === true ? JSON.stringify(r, null, 2) : renderConnect(r));
@@ -1408,36 +1574,15 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         out(minted.detail);
         if (minted.id) instanceId = minted.id;
       }
-      // `--to env` delivers every named secret compute.yaml's providers
-      // reference (T4-18): the engine reads a key from its environment, never
-      // the Keychain. A compute.yaml that does not validate delivers nothing,
-      // and says so — the rest of the sync is unaffected.
-      let deliver: string[] = [];
+      // `--to env` delivers every owner-named secret a service reads — the
+      // engine's provider keys (T4-18), the connections' (T4-10, T4-24), the
+      // owner's github_write (T2-13) — as `METISTRY_SECRET_<NAME>`: the same
+      // answer `up`'s render uses (secrets.ts `deliveredSecretNames`). A
+      // source that does not read is a note; the rest of the sync is unaffected.
+      let deliver: DeliveredSecrets | undefined;
       if (loaded.instanceDir && positional[0] === "sync") {
-        try {
-          deliver = providerSecretNames((await loadCompute(instanceFile(loaded.instanceDir, "compute"))).compute);
-        } catch (e) {
-          out(`compute.yaml does not validate, so no provider key is delivered this run (${e instanceof Error ? e.message : String(e)})`);
-        }
-        // ...and every secret a sync-read connection lists (T4-24: the Linear
-        // key), so the console's sync can be filled at the egress door — for
-        // the secret's listed hosts only; the console never reads the Keychain
-        try {
-          const syncSecrets = syncSecretNames(await loadInstanceCatalog({ instanceDir: loaded.instanceDir, seedDir: resolveSeedDir(productDir) }));
-          deliver = [...new Set([...deliver, ...syncSecrets])];
-        } catch (e) {
-          out(`the connection types could not be read, so no sync's secret is delivered this run (${e instanceof Error ? e.message : String(e)})`);
-        }
-        // ...and the owner's own github_write when secrets.yaml names it
-        // (T2-13): the console's pull request doors post with it, filled only
-        // while its *Sent only to* list names api.github.com. Named by the
-        // file, never assumed: an instance without it delivers nothing
-        const secretsPath = instanceFile(loaded.instanceDir, "secrets");
-        try {
-          if (existsSync(secretsPath) && Object.hasOwn(parseSecretsFile(await readFile(secretsPath, "utf8")).secrets, GITHUB_WRITE_SECRET)) deliver = [...new Set([...deliver, GITHUB_WRITE_SECRET])];
-        } catch (e) {
-          out(`secrets.yaml does not validate, so ${GITHUB_WRITE_SECRET} is not delivered this run (${e instanceof Error ? e.message : String(e)})`);
-        }
+        deliver = await deliveredSecretNames({ instanceDir: loaded.instanceDir, productDir });
+        for (const n of deliver.notes) out(n);
       }
       // an installed launchd shape (this instance's supervisor.json): the
       // verb re-renders the jobs from `.env` itself, below
@@ -1449,7 +1594,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         envTarget: paths.write,
         exampleFile: productDir ? join(productDir, ".env.example") : undefined,
         instanceId,
-        deliver,
+        deliver: deliver?.names ?? [],
+        deliverComplete: deliver?.complete ?? false,
         out,
         ...(io.exec ? { exec: io.exec } : {}),
         // the Keychain exists only on darwin; CI runs this suite on Linux, so tests pin the platform
@@ -1472,11 +1618,22 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           }
           case "mint": {
             const name = positional[1];
+            const register = (token: string) => registerCaptureOwnerToken({ env: process.env, token, out, ...(io.openSession ? { openSession: io.openSession } : {}) });
             if (!name) {
-              err("usage: metistry secrets mint <VAR>");
-              return 2;
+              // bare: the recorder's three tokens, each made only where missing
+              if (!recorderConfigured(process.env)) {
+                err("usage: metistry secrets mint <VAR>   (bare, `secrets mint` makes the recorder's three tokens, and needs METISTRY_LIVE_CAPTURE_URL set)");
+                return 2;
+              }
+              const made = await ensureRecorderTokens({ ...secretsOpts, env: process.env });
+              for (const l of describeRecorderTokens(made)) out(l);
+              if (made.inbox) await register(made.inbox);
+              await followEnv(loaded, out);
+              return made.failed.length > 0 ? 1 : 0;
             }
             await mintSecret(name, secretsOpts);
+            // the inbox token is only a credential once the console has its hash
+            if (name === CAPTURE_INBOX_TOKEN) await register((await ensureSecret(name, secretsOpts)).value);
             await followEnv(loaded, out);
             return 0;
           }
@@ -1496,7 +1653,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
             return r.found.length + r.named.length > 0 && incomplete && flags.yes === true ? 1 : 0;
           }
           default:
-            err("usage: metistry secrets sync --to env|keychain | mint <VAR> | list [--named] | purge --instance <dir> [--yes] | retire-legacy-env [--yes]");
+            err("usage: metistry secrets sync --to env|keychain | mint [<VAR>] | list [--named] | purge --instance <dir> [--yes] | retire-legacy-env [--yes]");
             err("       metistry secrets set|replace|remove|hosts|grant <name> … (owner-named secrets — docs/ops/cli.md)");
             err("       metistry secrets migrate-scope [--dry-run] | purge-shared [--yes] (the retired shared scope)");
             return 2;
@@ -1619,7 +1776,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         if (verb === "add") {
           const origin = positional[1];
           if (!origin) {
-            err("usage: metistry instances add <origin>   (e.g. https://metis.example.com — the verb asks it who it is)");
+            err("usage: metistry instances add <origin>   (e.g. https://assistant.example.com — the verb asks it who it is)");
             return 2;
           }
           const selfId = await readInstanceId(instanceDir);
@@ -1643,6 +1800,111 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       } catch (e) {
         err(`metistry instances ${verb}: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
+      }
+    }
+    case "remote": {
+      // M20 (plan §2.23): how the phone reaches this Mac. The record is a
+      // §4.7 protected write through the reconciler as `user`, like set-shape;
+      // a token never arrives in argv (stdin-value.ts, the `secrets set` rule).
+      const usage = `usage: metistry remote [${REMOTE_VERBS.join("|")}] … (metistry --help)`;
+      const verb = positional[0] ?? "status";
+      if (!(REMOTE_VERBS as readonly string[]).includes(verb)) {
+        err(usage);
+        return 2;
+      }
+      if (!productDir) {
+        err("remote needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR — the seed's deployment.yaml is half of the record");
+        return 2;
+      }
+      const loadedRemote = loadEnv();
+      const instanceDir = str(flags, "instance") ?? loadedRemote.instanceDir;
+      if (!instanceDir) {
+        err("remote needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — deployment.yaml lives there");
+        return 2;
+      }
+      const json = flags.json === true;
+      const common = {
+        productDir,
+        instanceDir,
+        env: { ...process.env, METISTRY_INSTANCE_DIR: instanceDir },
+        platform: io.platform ?? process.platform,
+        uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+        fetchFn: io.fetchFn ?? fetch,
+        ...(io.exec ? { exec: io.exec } : {}),
+        ...(io.remoteProviders ? { providers: io.remoteProviders } : {}),
+        ...(io.readToken ? { readToken: io.readToken } : {}),
+        // With --json the one document is stdout's; the step notes — the
+        // sign-in link, each approval page, "waiting for <name>…" — go to
+        // stderr, so a driver (the Mac's guided flow, X-107) can show the
+        // owner where the flow is and still parse the result.
+        out: json ? err : out,
+      };
+      let timeoutS: number | undefined;
+      try {
+        timeoutS = seconds(flags, "timeout");
+      } catch (e) {
+        err(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
+        return 2;
+      }
+      try {
+        if (verb === "status") {
+          if (positional.length > 1) {
+            err(usage);
+            return 2;
+          }
+          const s = await remoteStatus(common);
+          out(json ? JSON.stringify(s, null, 2) : renderRemoteStatus(s, ui));
+          return s.ok ? 0 : 1;
+        }
+        if (verb === "test") {
+          const t = await remoteTest(common);
+          out(json ? JSON.stringify(t, null, 2) : renderRemoteRows(t.rows, ui));
+          return t.ok ? 0 : 1;
+        }
+        if (verb === "authorize") {
+          const provider = parseRemoteProviderId(positional[1]);
+          if (!provider || positional.length > 2) {
+            err("usage: metistry remote authorize <tailscale|cloudflare> [--no-browser] [--timeout 300] [--json]");
+            return 2;
+          }
+          const a = await remoteAuthorize({ ...common, provider, authorize: { noBrowser: flags["no-browser"] === true, timeoutMs: (timeoutS ?? 300) * 1000 } });
+          out(json ? JSON.stringify(a, null, 2) : `${a.provider}: ${a.signed_in ? "signed in" : "not signed in"} — ${a.detail}`);
+          return a.signed_in ? 0 : 1;
+        }
+        // set | off
+        const provider = verb === "off" ? "none" : parseRemoteProviderId(positional[1]);
+        if (!provider) {
+          // the slot is NOT echoed: a token pasted where the provider's name goes must not be printed back
+          err(`usage: metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags] [--yes]${positional[1] !== undefined ? " — that is not a known provider; the names are none, tailscale, relay, cloudflare, zrok, ngrok, port-forward" : ""}`);
+          return 2;
+        }
+        // A VALUE in argv is refused without being repeated: a token pasted
+        // after the provider, or given to --token, would land in shell
+        // history and `ps`. The refusal names stdin as the only way in.
+        if (positional.length > (verb === "off" ? 1 : 2)) {
+          err(valueInArgvRefusal("a provider's token (or anything after the provider's name)", `metistry remote set ${provider} --token < token.txt`));
+          return 2;
+        }
+        if (typeof flags.token === "string") {
+          err(valueInArgvRefusal("a provider's token", `metistry remote set ${provider} --token < token.txt`));
+          return 2;
+        }
+        const providerFlags: Record<string, string | boolean> = {};
+        for (const k of ["mode", "use-app", "bundled", "no-browser", "hostname", "access", "token", "name", "domain", "ddns", "manual"]) if (flags[k] !== undefined) providerFlags[k] = flags[k]!;
+        const yes = flags.yes === true && flags["dry-run"] !== true;
+        const r = await remoteSet({
+          ...common,
+          provider,
+          options: { ...(typeof flags.mode === "string" ? { mode: flags.mode } : {}), flags: providerFlags },
+          yes,
+          ...(timeoutS !== undefined ? { waitMs: timeoutS * 1000 } : { waitMs: REMOTE_WAIT_DEFAULT_MS }),
+        });
+        if (json) out(JSON.stringify(r, null, 2));
+        if (!yes) (json ? err : out)("preview only — pass --yes to do this.");
+        return 0;
+      } catch (e) {
+        err(`metistry remote ${verb}: ${e instanceof Error ? e.message : String(e)}`);
+        return e instanceof StepFailed ? e.code : 1;
       }
     }
     case "vault": {
@@ -1892,16 +2154,29 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         platform: io.platform ?? process.platform,
         uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
         fetchFn: io.fetchFn ?? fetch,
+        ...(io.dialFetch ? { dialFetch: io.dialFetch } : {}),
         ...(io.exec ? { exec: io.exec } : {}),
         dryRun: flags["dry-run"] === true,
         // --json is a wire contract (docs/ops/cli.md): progress to stderr
         out: json ? err : out,
       };
-      const auth = { auth: str(flags, "auth"), secret: str(flags, "secret"), authHeader: str(flags, "auth-header"), username: str(flags, "username") };
+      const scopes = repeatedFlag(argv, "scope");
+      const auth = {
+        auth: str(flags, "auth"),
+        secret: str(flags, "secret"),
+        authHeader: str(flags, "auth-header"),
+        username: str(flags, "username"),
+        authorizeUrl: str(flags, "authorize-url"),
+        tokenUrl: str(flags, "token-url"),
+        ...(scopes.length ? { scopes } : {}),
+        clientIdSecret: str(flags, "client-id-secret"),
+        clientSecretSecret: str(flags, "client-secret-secret"),
+        tokenSecret: str(flags, "token-secret"),
+      };
       try {
         if (verb === "list") {
-          const rows = await connectionsList(connOpts);
-          out(json ? JSON.stringify({ connections: rows }, null, 2) : renderConnections(rows));
+          const listing = await connectionsListing(connOpts);
+          out(json ? JSON.stringify(listing, null, 2) : renderConnections(listing.connections));
           return 0;
         }
         if (verb === "show") {
@@ -1921,17 +2196,31 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               type: str(flags, "type"),
               provider: str(flags, "provider"),
               url: str(flags, "url"),
+              imap: str(flags, "imap"),
+              plain: flags.plain === true,
+              path: str(flags, "path"),
+              include: repeatedFlag(argv, "include"),
+              skip: repeatedFlag(argv, "skip"),
               command,
               env: repeatedFlag(argv, "env"),
               headers: repeatedFlag(argv, "header"),
               runsOn: str(flags, "runs-on"),
               description: str(flags, "description"),
+              config: repeatedFlag(argv, "config"),
               discover: flags["no-discover"] !== true,
               ...auth,
             },
             connOpts,
           );
-          out(json ? JSON.stringify(r, null, 2) : (r.delivery?.detail ?? ""));
+          out(json ? JSON.stringify(r, null, 2) : [r.delivery?.detail ?? "", ...(r.sync ? [r.sync.delivery.detail] : [])].filter(Boolean).join("\n"));
+          return 0;
+        }
+        if (verb === "authorize") {
+          const t = str(flags, "timeout");
+          const timeoutS = t === undefined ? undefined : Number(t);
+          if (timeoutS !== undefined && (!Number.isFinite(timeoutS) || timeoutS <= 0 || timeoutS > 3600)) throw new StepFailed("--timeout is seconds, more than 0 and at most 3600");
+          const r = await connectionsAuthorize(args[1], { browser: flags["no-browser"] !== true, ...(timeoutS !== undefined ? { timeoutS } : {}) }, connOpts);
+          out(json ? JSON.stringify(r, null, 2) : (r.policy?.delivery.detail ?? ""));
           return 0;
         }
         if (verb === "set") {
@@ -1946,6 +2235,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               unsetHeaders: repeatedFlag(argv, "unset-header"),
               runsOn: str(flags, "runs-on"),
               description: str(flags, "description"),
+              config: repeatedFlag(argv, "config"),
+              unsetConfig: repeatedFlag(argv, "unset-config"),
               ...auth,
             },
             connOpts,
@@ -1954,7 +2245,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           return 0;
         }
         if (verb === "policy") {
-          const r = await connectionsPolicy(args[1], { tool: args[2], mode: args[3], group: str(flags, "group"), offer: str(flags, "offer") }, connOpts);
+          const r = await connectionsPolicy(args[1], { tool: args[2], mode: args[3], group: str(flags, "group"), offer: str(flags, "offer"), fold: str(flags, "fold") }, connOpts);
           out(json ? JSON.stringify(r, null, 2) : [renderPolicy(r.row), ...(r.delivery ? [r.delivery.detail] : [])].join("\n"));
           return 0;
         }
@@ -1963,7 +2254,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         return 0;
       } catch (e) {
         err(`metistry connections ${verb}: ${e instanceof Error ? e.message : String(e)}`);
-        return 1;
+        return e instanceof StepFailed ? e.code : 1; // 2: a usage error (a --config the type refuses), nothing judged or written
       }
     }
     case "runs": {
@@ -2045,7 +2336,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         const bodyFlag = str(flags, "body");
         if (bodyFlag !== undefined) {
           try {
-            if (bodyFlag === "-") body = await (io.readStdin ?? readStdin)();
+            if (bodyFlag === "-") body = await (io.readStdin ?? (() => readTextInput("the request body", io.terminal)))();
             else if (bodyFlag.startsWith("@")) body = await readFile(bodyFlag.slice(1), "utf8");
             else throw new Error(`--body takes @<file> or - (stdin), not ${JSON.stringify(bodyFlag)}`);
           } catch (e) {
@@ -2095,6 +2386,68 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         return 1;
       }
     }
+    case "enroll": {
+      const usage = "usage: metistry enroll [--json] [--instance <dir>] [--env-file <path>] | metistry enroll --cancel <code_id> [--json] | metistry enroll --status <code_id> [--json]";
+      if (positional.length > 0) {
+        err(usage);
+        return 2;
+      }
+      const loadedEnroll = loadEnv();
+      const common = { env: process.env, instanceDir: loadedEnroll.instanceDir, fetchFn: io.fetchFn };
+      if (flags.cancel !== undefined && flags.status !== undefined) {
+        err(`--cancel and --status are separate acts\n${usage}`);
+        return 2;
+      }
+      if (flags.status !== undefined) {
+        const codeId = parseCodeId(flags.status);
+        if (codeId === undefined) {
+          err(`--status takes the code id --json printed (a positive integer), not ${JSON.stringify(flags.status)}\n${usage}`);
+          return 2;
+        }
+        try {
+          const status = await enrollStatus({ ...common, codeId });
+          if (!status) {
+            err(`metistry enroll --status: no enrolment code has id ${codeId}.`);
+            return 1;
+          }
+          out(flags.json === true ? JSON.stringify(status) : renderEnrollStatus(status));
+          return 0;
+        } catch (e) {
+          err(`metistry enroll --status: ${e instanceof Error ? e.message : String(e)}`);
+          return e instanceof NoDatabaseError ? 2 : 1;
+        }
+      }
+      if (flags.cancel !== undefined) {
+        const codeId = parseCodeId(flags.cancel);
+        if (codeId === undefined) {
+          err(`--cancel takes the code id --json printed (a positive integer), not ${JSON.stringify(flags.cancel)}\n${usage}`);
+          return 2;
+        }
+        try {
+          const c = await enrollCancel({ ...common, codeId });
+          out(flags.json === true ? JSON.stringify(c) : renderEnrollCancelled(c));
+          return c.outcome === "not_found" ? 1 : 0;
+        } catch (e) {
+          err(`metistry enroll --cancel: ${e instanceof Error ? e.message : String(e)}`);
+          return e instanceof NoDatabaseError ? 2 : 1;
+        }
+      }
+      try {
+        const r = await enroll(common);
+        if (r.kind === "refused") {
+          // the refusal is the answer: its words on stderr for a person, and
+          // with --json one document on stdout for the Mac's sheet to show
+          err(renderEnrollRefusal(r.refusal));
+          if (flags.json === true) out(JSON.stringify({ refused: r.refusal }));
+          return 1;
+        }
+        out(flags.json === true ? JSON.stringify(r.minted) : renderEnrollMinted(r.minted, ui));
+        return 0;
+      } catch (e) {
+        err(`metistry enroll: ${e instanceof Error ? e.message : String(e)}`);
+        return e instanceof NoDatabaseError ? 2 : 1;
+      }
+    }
     case "agents": {
       const common = () => {
         const loaded = loadEnv();
@@ -2142,7 +2495,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               model: str(flags, "model"),
               effort: effort as Effort | undefined,
               description: str(flags, "description"),
-              prompt: promptFile === undefined ? undefined : promptFile === "-" ? await (io.readStdin ?? readStdin)() : await readFile(promptFile, "utf8"),
+              prompt: promptFile === undefined ? undefined : promptFile === "-" ? await (io.readStdin ?? (() => readTextInput("the operating prompt", io.terminal)))() : await readFile(promptFile, "utf8"),
             },
             ifSha256: str(flags, "if-sha256"),
             instanceDir,
@@ -2221,19 +2574,44 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         err("doctor needs a Metistry checkout to walk: pass --product-dir or set METISTRY_PRODUCT_DIR");
         return 2;
       }
+      if (flags.check === true && flags.fix === true) {
+        err("doctor: --check (read-only) and --fix (repair) exclude each other");
+        return 2;
+      }
       loadEnv();
+      const json = flags.json === true;
+      // Who can be asked decides what a bare `doctor` does (doctor-fix.ts): a
+      // person at a terminal gets the repairs and the y/N questions; a pipe, a
+      // script, the Mac app's refresh and `--json` get the read-only check —
+      // `--json` never asks, because the question would land in the document.
+      const ask = json ? undefined : io.ask ?? (process.stdin.isTTY && process.stdout.isTTY ? terminalAsk : undefined);
+      const mode = doctorMode({ check: flags.check === true, fix: flags.fix === true, interactive: ask !== undefined });
       // the probes are the slow part (every bridge over HTTP, launchctl,
       // docker): a TTY gets a spinner, a pipe gets nothing, and neither gets
       // a byte of it in the --json document
-      const probing = flags.json === true ? undefined : ui.spinner(`probing ${productDir}`, out);
+      const probing = json ? undefined : ui.spinner(`probing ${productDir}`, out);
+      let before;
       try {
-        const report = await doctor({ productDir, ...io.doctorDeps });
-        probing?.stop();
-        out(flags.json === true ? JSON.stringify(report, null, 2) : renderTable(report, ui));
-        return report.ok ? 0 : 1;
+        before = await doctor({ productDir, ...io.doctorDeps });
       } finally {
         probing?.stop();
       }
+      if (mode === "check") {
+        const report: DoctorRunReport = { ...before, mode };
+        if (json) out(JSON.stringify(report, null, 2));
+        else {
+          out(renderTable(report, ui));
+          const trailer = renderCheckTrailer(report, ui);
+          if (trailer) out(trailer);
+        }
+        return report.ok ? 0 : 1;
+      }
+      if (!json) out(renderTable(before, ui));
+      const { report, code } = await applyFixes(before, { deps: { productDir, ...io.doctorDeps }, yes: flags.yes === true, ask, out: json ? () => {} : out, ui });
+      if (json) out(JSON.stringify(report, null, 2));
+      else if (report.fixes && report.fixes.length > 0) out(renderFixes(report, ui));
+      else out(ui.dim("nothing to fix"));
+      return code;
     }
     case "runtime": {
       if (positional[0] !== "install") {

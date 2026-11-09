@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { looksLikeKey } from "@foldedspacelabs/metistry-core";
 import { ASK_KEY, INSTALL_KEY, PUSH_WORDS, askFor, deviceOf, installOffer, mountNotify, pushState } from "../web/notify.js";
+import { mountNeedsYou, needsYouRoute } from "../web/needs-you.js";
+import { withRequestShape } from "../src/server.js";
 import { fakeBrowser, settle } from "./pwa-fake-dom.js";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
@@ -205,9 +207,40 @@ describe("tap opens that card", () => {
     expect(other.focus).not.toHaveBeenCalled();
   });
 
-  it("the page routes the message: Needs You, a card's room or artifact, else home", () => {
+  it("the page routes the message: Needs You with its card open, a card's room or artifact, else home", () => {
     expect(APP).toMatch(/e\.data\?\.type === "metistry\.open" && signedIn\) openLink\(e\.data\.url\)/);
-    expect(APP).toMatch(/hash\.startsWith\("#\/needs-you"\)\) return show\("triage"\)/);
+    expect(APP).toMatch(/const request = needsYouRoute\(hash\);\n\s*if \(request\) \{ needsYou\.open\(request\.id\); return show\("triage"\); \}/);
+    // a cold start from the tap opens the same card
+    expect(APP).toMatch(/const request = needsYouRoute\(location\.hash\);\n\s*if \(request\) \{ needsYou\.open\(request\.id\);/);
+  });
+
+  it("a push's link names its card (X-32): #/needs-you/<id> is that card, #/needs-you the queue, anything else not Needs You", () => {
+    expect(needsYouRoute("#/needs-you/42")).toEqual({ id: "42" });
+    expect(needsYouRoute("#/needs-you")).toEqual({ id: null });
+    for (const h of ["#/needs-you/", "#/needs-you/0", "#/needs-you/4x", "#/needs-you/1/../2", "#/needs-youx", "#/rooms/work/1", "", undefined]) {
+      expect(needsYouRoute(h), String(h)).toBeNull();
+    }
+  });
+
+  it("the card a link names is open when Needs You loads; one answered since the push leaves the queue showing", async () => {
+    const row = (id: number) => withRequestShape({ id, ts: "2026-09-30T08:00:00.000Z", kind: "decision", source_agent: "a", trust: "internal", payload: { title: `ask ${id}`, options: ["Yes", "No"] }, decision: "pending" });
+    const b = fakeBrowser({ respond: () => ({ body: { proposals: [row(5), row(6)] } }) });
+    const view = mountNeedsYou({ $: b.$, api: b.api, setNeeds: () => {}, show: () => {} });
+    view.open("6");
+    await view.load();
+    expect(b.$("triage").classList.contains("has-detail")).toBe(true);
+    expect(b.$("triage-detail").hidden).toBe(false);
+    expect(b.$("triage-detail").innerHTML).toContain("ask 6");
+    expect(b.$("triage-detail").innerHTML).not.toContain("ask 5");
+    await view.load(); // asked once: the next load keeps what the owner has open, and opens nothing new
+
+    const later = fakeBrowser({ respond: () => ({ body: { proposals: [row(5)] } }) });
+    const queue = mountNeedsYou({ $: later.$, api: later.api, setNeeds: () => {}, show: () => {} });
+    queue.open("6"); // answered on the Mac since the push
+    await queue.load();
+    expect(later.$("triage").classList.contains("has-detail")).toBe(false);
+    expect(later.$("triage-detail").hidden).toBe(true);
+    expect(later.$("proposal-list").innerHTML).toContain("ask 5");
   });
 });
 

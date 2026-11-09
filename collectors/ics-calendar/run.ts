@@ -43,6 +43,8 @@
 import { ICS_MODULE, ICS_SYNC, icsOccurrences, knownZone, readIcsFeed, zonedMidnight, zonedToday, type SyncOpener } from "@foldedspacelabs/metistry-connections";
 import type { Db } from "../github-state/run.js";
 import { replaceCalendarWindow, saveSyncState, toRow, type CalendarRow } from "../eventkit-calendar/run.js";
+import { syncConnectionCheck, type CheckExtras } from "../check-context.js";
+import type { CheckResult } from "@foldedspacelabs/metistry-core";
 
 /** How far ahead a pass reads — the eventkit sync's span, so every source covers the same days. */
 export const SYNC_DAYS = 14; // limit: fixed — Today, Next Up and tomorrow's plan all fall inside two weeks
@@ -58,6 +60,23 @@ export interface IcsCtx {
   ownerTimeZone?: string | undefined;
   /** the clock (a test's) */
   now?: () => number;
+}
+
+/**
+ * Behavioral probe (X-87): the ICS connection resolves (an https feed address,
+ * pinned to its own origin) and, when doctor hands in the shared connection
+ * check, the feed still answers. Reads no events.
+ */
+export async function check(ctx: IcsCtx & CheckExtras = {}): Promise<CheckResult> {
+  const { openSync } = ctx;
+  return syncConnectionCheck({
+    name: "ics-calendar",
+    probe: "the ICS connection opens (feed address pinned to its own origin) and answers the shared connection check",
+    noInstance: "no instance to read a connection from (METISTRY_INSTANCE_DIR is unset) — the sync reads the ICS connection of an instance; degrades absent",
+    addHint: "`metistry connections add` an ics connection with the feed address (docs/ops/connections.md, ICS)",
+    open: openSync ? () => openSync({ sync: ICS_SYNC, module: ICS_MODULE }) : undefined,
+    extras: ctx,
+  });
 }
 
 /** The window a pass reads: the owner's midnight today, for SYNC_DAYS days — as instants. */

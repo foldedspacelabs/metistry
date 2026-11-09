@@ -1,6 +1,6 @@
 // The first-launch wizard: navigation, and the reason for every choice.
 //
-// It replaces the scaffold's "First run" tab group, which was a list of seven
+// It replaces the scaffold's "First run" tab group, which was a list of
 // screens you could click in any order — fine for a developer checking that a
 // verb ran, wrong for the one moment the app has to explain itself. This is a
 // sheet: one step at a time, Back · Continue · Skip, and every choice presented
@@ -14,6 +14,28 @@
 
 import Foundation
 import Observation
+
+/// How the wizard refers to the assistant. The name is the owner's to choose
+/// (`identity.yaml` holds it; code never spells it), so copy that talks about
+/// the assistant takes it from here: the typed name once there is one, and the
+/// generic phrase only before. Sentence case either way — a name is used as
+/// typed, the generic phrase is capitalised at the start of a sentence.
+public struct WizardCopy: Sendable, Equatable {
+    /// The trimmed name, or `nil` while none is known.
+    public let name: String?
+
+    public init(name: String?) {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.name = (trimmed?.isEmpty == false) ? trimmed : nil
+    }
+
+    /// Mid-sentence: "Ada" or "the assistant".
+    public var subject: String { name ?? "the assistant" }
+    /// Opening a sentence: "Ada" or "The assistant".
+    public var lead: String { name ?? "The assistant" }
+    /// Mid-sentence possessive: "Ada's" or "the assistant's".
+    public var possessive: String { name.map { "\($0)'s" } ?? "the assistant's" }
+}
 
 /// One choice, with both sides of it. `pro` and `con` are not optional: a choice
 /// offered without a cost is a choice the app has already made for the user and
@@ -101,20 +123,26 @@ public enum WizardOptions {
     /// The two deployment shapes. Both descriptions are what
     /// `docs/ops/deployment-shapes.md` and the plan's open decision #15 say;
     /// neither is written by this app (see `FirstRunModel.previewShape`).
-    public static let shape: [WizardOption<String>] = [
-        .init(
-            value: "compose",
-            title: "Docker Compose",
-            pro: "Postgres, the console and the assistant in containers — the shape Linux and cloud use, and the assistant's container is defense in depth behind invariant 9's allowlist.",
-            con: "Docker Desktop is the largest thing a new install has to download, and it is where the lock-ups came from."
-        ),
-        .init(
-            value: "launchd",
-            title: "Everything Under Launchd",
-            pro: "No Docker: a bundled Postgres and Node services, all started by launchd — the one-click shape the Mac app is for.",
-            con: "The assistant runs on the host, so its confinement has to come from a sandbox profile instead of a container. Open decision #15."
-        ),
-    ]
+    public static let shape: [WizardOption<String>] = shape(assistantName: nil)
+
+    /// The same two shapes, naming the assistant once the wizard knows it.
+    public static func shape(assistantName: String?) -> [WizardOption<String>] {
+        let a = WizardCopy(name: assistantName)
+        return [
+            .init(
+                value: "compose",
+                title: "Docker Compose",
+                pro: "Postgres, the console and \(a.subject) in containers — the shape Linux and cloud use, and \(a.possessive) container is defense in depth behind invariant 9's allowlist.",
+                con: "Docker Desktop is the largest thing a new install has to download, and it is where the lock-ups came from."
+            ),
+            .init(
+                value: "launchd",
+                title: "Everything Under Launchd",
+                pro: "No Docker: a bundled Postgres and Node services, all started by launchd — the one-click shape the Mac app is for.",
+                con: "\(a.lead) runs on the host, so its confinement has to come from a sandbox profile instead of a container. Open decision #15."
+            ),
+        ]
+    }
 
     /// Step 6, since the owner decision of 2026-09-10. The framing is the
     /// change: this is no longer "get a door", it is "this Mac already has one —
@@ -213,9 +241,15 @@ public final class WizardModel {
     /// the same door, opened for a browser or a phone.
     public func isSatisfied(_ step: FirstRunStep) -> Bool {
         switch step {
+        case .remoteAccess:
+            // None preselected, and continuing with None satisfies the step
+            // (§2.23 step 1): an install that exposes nothing is correct. A
+            // provider satisfies it once `remote set … --yes` wrote the record.
+            return steps.remoteAccess.satisfiesStep
         case .door:
             if steps.consoleSignIn.signIn?.isSignedIn == true { return true }
             if case .enrolled = steps.passkey.phase { return true }
+            if steps.phoneAdded != nil { return true } // Add a Phone… reached *Added* (§2.22)
             return false
         case .compute:
             if case .skipped = steps.compute.phase { return true } // a knowing choice, not an unfinished step
@@ -244,7 +278,7 @@ public final class WizardModel {
 
     public var isOnLastStep: Bool { current == FirstRunStep.allCases.last }
 
-    /// "Step 3 of 7" — sentence case, it is prose.
+    /// "Step 3 of 8" — sentence case, it is prose.
     public var progressLabel: String {
         "Step \(current.rawValue) of \(FirstRunStep.allCases.count)"
     }

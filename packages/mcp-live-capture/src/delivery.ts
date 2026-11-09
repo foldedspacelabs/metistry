@@ -53,6 +53,8 @@ export interface SessionRecordJson {
   microphone?: boolean;
   gaps?: { from_s: number; to_s: number; reason: string }[];
   delivery?: { inbox_id: number; at: string } | null;
+  /** The audio bytes kept on this Mac when the transcript was read (T8-4) — the console's `capture_sessions.media_bytes`. */
+  media_bytes?: number;
 }
 
 /** One line of `transcript.jsonl`. */
@@ -114,6 +116,8 @@ export function renderTranscript(session: SessionRecordJson, lines: readonly Tra
     ["ended_reason", session.ended_reason ?? ""],
     ["apps", (session.apps ?? []).join(", ")],
     ["source", "live-capture"],
+    // T8-4: how much audio the Mac keeps for this session, until retention deletes it
+    ...(typeof session.media_bytes === "number" && Number.isFinite(session.media_bytes) && session.media_bytes >= 0 ? [["media_bytes", String(Math.floor(session.media_bytes))] as [string, string]] : []),
   ];
   const head = ["---", ...fm.map(([k, v]) => `${k}: ${JSON.stringify(v)}`), "---", ""];
   const body = lines.map((l) =>
@@ -221,7 +225,7 @@ export class Deliverer {
       answer = undefined;
     }
     if (res.status === 401 || res.status === 403) {
-      return { ok: false, status: res.status, why: `the console refused the capture token (HTTP ${res.status}) — METISTRY_LIVE_CAPTURE_INBOX_TOKEN must be a live owner token (docs/ops/capture-shortcut.md §1); the transcript stays on this Mac` };
+      return { ok: false, status: res.status, why: `the console refused the capture token (HTTP ${res.status}) — METISTRY_LIVE_CAPTURE_INBOX_TOKEN must be a live owner token — \`metistry secrets mint METISTRY_LIVE_CAPTURE_INBOX_TOKEN\` makes a fresh one, then restart the bridge; the transcript stays on this Mac` };
     }
     const id = (answer as { id?: unknown } | undefined)?.id;
     if (res.status !== 201 || typeof id !== "number" || !Number.isInteger(id) || id <= 0) {

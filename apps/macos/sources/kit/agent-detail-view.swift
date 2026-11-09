@@ -577,7 +577,7 @@ struct AccessEditorSheet: View {
             let fallback = PermissionWords.mode(AgentAutonomy.defaults[level]?[kind] ?? "deny") ?? ""
             Picker(selection: Binding(get: { draft.autonomy.actions[kind] ?? "" }, set: { model.access?.autonomy.actions[kind] = $0.isEmpty ? nil : $0 })) {
                 Text(verbatim: "Level's Default (\(fallback))").tag("")
-                ForEach(AgentAutonomy.modes.reversed(), id: \.self) { Text(verbatim: PermissionWords.mode($0) ?? $0).tag($0) }
+                ForEach(AgentAutonomy.offeredModes(kind).reversed(), id: \.self) { Text(verbatim: PermissionWords.mode($0) ?? $0).tag($0) }
             } label: {
                 Text(verbatim: "\(AgentAutonomy.kindLabel(kind)) — now \(PermissionWords.mode(effective[kind] ?? "deny") ?? "")")
             }

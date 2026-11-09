@@ -25,7 +25,9 @@ import Testing
     defer { withExtendedLifetime(session) {} }
     // The recorded syncs, and no door serving collector_health: unknown, folded.
     let line = try #require(model.sourcesLine)
-    #expect(line.text == "4 sources · freshness unknown")
+    let n = try recordedSyncCount()
+    #expect(line.rows.count == n, "one row per recorded sync")
+    #expect(line.text == "\(n) sources · freshness unknown")
     #expect(!line.faulted)
     #expect(!model.sourcesExpanded, "a line with no fault stays folded until clicked")
     #expect(line.rows.allSatisfy { $0.state == .unknown }, "\(line.rows)")
@@ -33,16 +35,16 @@ import Testing
 
     let sources = try #require(model.sources.section.value)
     let ok = CollectorHealth(lastOK: recordedNow.addingTimeInterval(-120), streak: 0)
-    // Three of four answering is not "all current": one unanswered source is unknown.
+    // All but one answering is not "all current": one unanswered source is unknown.
     var three: [String: CollectorHealth] = [:]
     for s in sources.dropLast() { three[s.name] = ok }
-    #expect(SourcesLine.make(sources, health: three, now: recordedNow).text == "4 sources · freshness unknown")
+    #expect(SourcesLine.make(sources, health: three, now: recordedNow).text == "\(n) sources · freshness unknown")
 
     // Every source answering, each checked within its cadence: now it may say current.
     var all = three
     all[sources.last!.name] = ok
     let current = SourcesLine.make(sources, health: all, now: recordedNow)
-    #expect(current.text == "4 sources, all current")
+    #expect(current.text == "\(n) sources, all current")
     #expect(current.rows.allSatisfy { $0.state == .current })
 
     // A fault opens the line by itself, and failed carries two timestamps (§6).
@@ -50,7 +52,7 @@ import Testing
     failing["devin-sessions"] = CollectorHealth(lastOK: recordedNow.addingTimeInterval(-2 * 86_400), lastFailure: recordedNow.addingTimeInterval(-3600), lastError: "token expired", streak: 3)
     failing["aws-costs"] = CollectorHealth(lastOK: recordedNow.addingTimeInterval(-3 * 86_400), streak: 0)
     let faulted = SourcesLine.make(sources, health: failing, now: recordedNow)
-    #expect(faulted.text == "4 sources · 2 behind")
+    #expect(faulted.text == "\(n) sources · 2 behind")
     #expect(faulted.faulted)
     let devin = try #require(faulted.rows.first { $0.name == "devin-sessions" })
     #expect(devin.state == .failed)
@@ -372,7 +374,8 @@ import Testing
     let page = try #require(model.page?.value)
     #expect(page.title == "Roadmap")
     #expect(page.outgoing.map(\.path) == ["Projects/Metistry/Design.md"])
-    #expect(page.incoming.isEmpty)
+    // the recorded fold names the roadmap, so the roadmap links back to it
+    #expect(page.incoming.map(\.path) == ["Journal/Fold/2026-09-28.md"])
     #expect(KnowledgePageRead.spoken(page.outgoing[0]) == "Design, link, Projects/Metistry/Design.md")
     #expect(console.calls.map(\.path).contains { $0.hasPrefix("/api/knowledge/links?path=Projects%2FMetistry%2FRoadmap.md") })
     await model.back()
@@ -432,7 +435,7 @@ import Testing
     #expect(said.contains("Needs Your Eye, 3 waiting"), "the count, in the heading: \(said)")
     #expect(said.contains("Draft, Areas/Health/Sleep.md, the taper. Review"), "said: \(said)")
     #expect(said.contains("Conflict, Areas/Health/2026/sleep.md, Two versions of this note — a sync kept both. Resolve"), "said: \(said)")
-    #expect(said.contains("Sources, 4 sources · freshness unknown, collapsed"), "said: \(said)")
+    #expect(said.contains("Sources, \(try recordedSyncCount()) sources · freshness unknown, collapsed"), "said: \(said)")
     #expect(said.contains { $0.hasPrefix("Areas/Health, Sleep, labs, and the protein blend, Changed") }, "said: \(said)")
     #expect(said.contains("Aide wrote"), "the fold's author, templated")
     #expect(said.contains(KnowledgeWords.foldRule("Aide")))
@@ -567,6 +570,12 @@ import Testing
 private let utc = TimeZone(identifier: "UTC")!
 /// A day after the recorded knowledge fixtures.
 private let recordedNow = WireTime.date("2026-09-27T03:21:35.215Z")!
+
+/// How many syncs the recorded `GET /api/scheduled` lists — the sources line's
+/// count. The recorder's seed decides it, so it is read, not written here (X-29).
+private func recordedSyncCount() throws -> Int {
+    try #require(ConsoleFixture.load("get-api-scheduled").replyJSON?["syncs"]?.arrayValue).count
+}
 private let copyPath = "Areas/Health/2026/sleep.sync-conflict-20260927-031200-7QX2LMA.md"
 private let originalPath = "Areas/Health/2026/sleep.md"
 private let mineSHA = String(repeating: "a", count: 64)

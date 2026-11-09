@@ -8,6 +8,11 @@
 //   METISTRY_LC_SOCKET     serve this Unix socket
 //   METISTRY_LC_LOCALE     the transcriber's language (default: the Mac's)
 //
+// Window and Screen present the system picker (SCContentSharingPicker) from
+// here, so the helper runs as an accessory app — no Dock icon, no menu —
+// with AppKit's run loop: the picker's answers and the main queue both need
+// it.
+//
 // It ships as lc-helper.app — a bundle, so TCC keys the three grants on its
 // bundle identifier and signature rather than on a path (scripts/build-helper.sh,
 // helper/Info.plist) — and runs as its own launchd job,
@@ -25,9 +30,9 @@ guard let captureDir = captureDirectory(env) else {
 
 let ownBundleID = Bundle.main.bundleIdentifier ?? "com.foldedspacelabs.metistry.live-capture"
 let store = FileSessionStore(root: URL(fileURLWithPath: captureDir, isDirectory: true))
-let recorder = Recorder(backend: SystemBackend(), store: store, disk: SystemDisk(), ownBundleID: ownBundleID)
+let recorder = Recorder(backend: SystemBackend(), picture: SystemPicture(), store: store, disk: SystemDisk(), ownBundleID: ownBundleID)
 let os = ProcessInfo.processInfo.operatingSystemVersion
-let service = HelperService(recorder: recorder, grants: SystemGrants(), transcriber: SystemTranscriberProbe(), osVersion: "\(os.majorVersion).\(os.minorVersion)")
+let service = HelperService(recorder: recorder, grants: SystemGrants(), transcriber: SystemTranscriberProbe(), osVersion: "\(os.majorVersion).\(os.minorVersion)", reviewer: SpanTranscriber())
 
 // A session left recording by a crash is ended at its last write, first. It
 // is then owed like any ended session: the bridge's delivery loop hands its
@@ -42,6 +47,19 @@ let lifecycle = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "meti
 lifecycle.schedule(deadline: .now() + 5, repeating: 5)
 lifecycle.setEventHandler { recorder.tick() }
 lifecycle.resume()
+
+// Retention (T8-4): the rule runs here, on the machine that holds the audio,
+// at start and every hour — so the 30-day ceiling needs no console, no bridge
+// and nobody's word. The console's ingestion report (the `retention` op) only
+// ever brings a deletion forward.
+let retention = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "metistry.live-capture.retention"))
+retention.schedule(deadline: .now() + 10, repeating: 3600)
+retention.setEventHandler {
+    for r in recorder.applyRetention() where r.audioDeletedAt != nil {
+        print("retention: session \(r.sessionID)'s media deleted (\(r.audioDeletedReason ?? "retention"))")
+    }
+}
+retention.resume()
 
 // Sleep pauses and marks the gap; wake resumes (or stops, past ten hours).
 let workspace = NSWorkspace.shared.notificationCenter
@@ -96,14 +114,15 @@ func serve(socketPath: String) {
     }
 }
 
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
 if let socketPath = env["METISTRY_LC_SOCKET"], !socketPath.isEmpty {
     Thread { serve(socketPath: socketPath) }.start()
-    RunLoop.main.run()
 } else {
     Thread {
         while let line = readLine(strippingNewline: true) { print(service.handle(line)) }
         recorder.stop(.helperStopped)
         exit(0)
     }.start()
-    RunLoop.main.run()
 }
+app.run()

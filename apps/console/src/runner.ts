@@ -140,7 +140,7 @@ import {
   type TemplateReader,
 } from "@foldedspacelabs/metistry-core";
 import type { RegisteredCollector, Db, CollectorCtx } from "@metistry-apps/collectors";
-import { vaultReader, type BriefVault, type PlanCtx, type UpdateCheckCtx } from "@metistry-apps/routines";
+import { vaultReader, type BriefVault, type LiveCaptureDoor, type PlanCtx, type UpdateCheckCtx } from "@metistry-apps/routines";
 
 export { scheduleToSeconds }; // one import path for the runner's callers and tests
 
@@ -170,6 +170,8 @@ export type ComponentCtx = CollectorCtx &
     vault?: BriefVault | undefined;
     /** the §2.21 act key: a routine passing it on its vault writes makes them one commit (the Morning Brief's file and its daily-note section) */
     runId?: number | undefined;
+    /** The live-capture bridge (T8-4): Recording Retention reports ingestion to the Mac through it. Absent: the Mac keeps its own 30-day ceiling. */
+    liveCapture?: LiveCaptureDoor | undefined;
   };
 
 /**

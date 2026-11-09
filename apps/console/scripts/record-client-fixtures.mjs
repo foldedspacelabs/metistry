@@ -67,7 +67,8 @@ import { linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { ConflictMoved } from "../dist/knowledge-routes.js";
 import { GithubWriteClient } from "../dist/github-write.js";
-import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, shapeDiff } from "./client-fixtures.mjs";
+import { envSecretSource, loadInstanceCatalog, planDraft, stampCheck } from "@foldedspacelabs/metistry-connections";
+import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, recordingMonthStart, runsExportCursor, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
 
@@ -91,6 +92,10 @@ for (const a of argv) {
 // "today" here once overwrote the task note on the one date the two matched.
 const RECORDING_NOW = new Date("2026-09-28T12:00:00.000Z");
 const RECORDING_DAY = "2026-09-28"; // RECORDING_NOW's day in UTC, the zone the doors count days in here
+// Usage's two-bar month (X-31): the 1st of RECORDING_NOW's month, not the
+// real wall clock's — a re-record on the real 1st used to move this to the
+// current month's start and collapse the two bars into one.
+const RECORDING_MONTH_START = recordingMonthStart(RECORDING_NOW);
 process.env.TZ = "UTC"; // the doors fall back to TZ for their zone; the recording's is UTC, whatever this shell's is
 
 // ---- the scratch database ---------------------------------------------------------
@@ -149,11 +154,16 @@ await writeFile(
 );
 
 // the Secrets list (§2.14): a policy file, and a Keychain in memory — never the
-// login Keychain — holding this instance's item, so `present` reads true
+// login Keychain — holding this instance's item, so `present` reads true.
+// github_write is the owner-door secret (X-41): it carries no grants — a
+// connection or an agent is refused one at the tool — so github_mcp_key
+// (the MCP server's own, narrower token) is what demonstrates a grant here.
 await writeFile(
   layout.path("secrets"),
   `secrets:
   github_write:
+    hosts: [api.github.com]
+  github_mcp_key:
     hosts: [api.github.com]
     grants:
       connection:github: on
@@ -164,7 +174,7 @@ await writeFile(
 // so `read_by` and `used_in` have something to say
 await writeFile(layout.path("variables"), `variables:\n  team_name: Platform\n  company: Acme\n`);
 // the Connections list (§2.6, T4-8a): a stdio MCP server whose token is the
-// github_write secret above (granted to connection:github, and held), with a
+// github_mcp_key secret above (granted to connection:github, and held), with a
 // tool at each mode; and a sync in scheduled.yaml that reads it, for *used by*.
 // Nothing dials it: a read of the list never starts the command.
 await mkdir(join(layout.path("metistryDir"), "connections"), { recursive: true });
@@ -179,9 +189,9 @@ reach:
     command: npx
     args: [-y, "@modelcontextprotocol/server-github"]
     env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secret.github_write }}"
+      GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secret.github_mcp_key }}"
       GITHUB_TEAM: "{{ variable.team_name }}"
-secrets: [github_write]
+secrets: [github_mcp_key]
 variables: [team_name]
 tools:
   search_issues: { group: reads, mode: on }
@@ -190,11 +200,36 @@ tools:
 offer_to_agents: false
 `,
 );
+// …and a second, offered to agents (X-96): an HTTP MCP server whose two headers
+// name two different things — a secret and a variable — so `header_secrets`
+// has a header per entry; it is granted to an agent below (`used_by`), and a
+// check of it is stamped (`last_checked`). Nothing dials it either.
+await writeFile(
+  join(layout.path("metistryDir"), "connections", "intranet.yaml"),
+  `name: intranet
+type: mcp
+provider: custom
+description: The team's docs server
+reach:
+  http:
+    url: https://api.github.com/mcp
+    headers:
+      X-Api-Key: "{{ secret.github_mcp_key }}"
+      X-Team: "{{ variable.team_name }}"
+secrets: [github_mcp_key]
+variables: [team_name]
+tools:
+  read_page: { group: reads, mode: on }
+offer_to_agents: true
+`,
+);
+await stampCheck(instanceDir, "intranet", "degraded", new Date("2026-09-30T06:50:00.000Z"));
 await writeFile(join(layout.path("metistryDir"), "scheduled.yaml"), `syncs:\n  github-state:\n    connection: github\n`);
 
 const fixtureKeychain = memoryKeychain();
 const instanceSecrets = new InstanceSecrets(fixtureKeychain, await readInstanceId(instanceDir));
 await instanceSecrets.set("github_write", "fixture-value-never-recorded");
+await instanceSecrets.set("github_mcp_key", "fixture-value-never-recorded");
 
 // ---- the outside world, faked in-process ------------------------------------------
 
@@ -269,6 +304,66 @@ const linearFake = async (input, init) => {
   return json({ errors: [{ message: "the recording answers Close in Linear only" }] });
 };
 const trackers = linearTrackerOpener({ instanceDir: trackerDir, seedDir: join(REPO_ROOT, "seed"), extensions: false, env: { METISTRY_SECRET_LINEAR_API_KEY: "fixture-not-a-key" }, fetch: linearFake });
+
+// Respond to an invitation (T4-17): the CalDAV account named `calendar`, as
+// the opener hands it over when its provider can answer — a fake behind it
+// that previews the owner's own attendee line and changes nothing. The Mac's
+// calendar and anything else is absent: it cannot answer.
+const calendars = async (connection) =>
+  connection === "calendar"
+    ? {
+        ok: true,
+        rsvp: {
+          connection: "calendar",
+          provider: "icloud-calendar",
+          targetOf: (row) => row.ical_uid,
+          preview: async () => ({ title: "Vendor review", organizer: "dana@example.com", as: "me@example.com", etag: '"fixture-etag"', unchanged: false }),
+          respond: async () => ({ unchanged: false }),
+          secretsUsed: () => [],
+        },
+      }
+    : { ok: false, status: "absent", why: `${connection} is not a connection of this instance — it cannot answer an invitation` };
+
+// Draft Reply (T4-17): the mailbox named `mail`, as the opener hands it over —
+// a fake session whose one message is Ada's, headers only, and whose Drafts
+// renders with the provider's own planDraft. Nothing is appended in the
+// recording (the preview is the recorded call), and nothing can send.
+const ADA_MESSAGE = {
+  ref: "mail/INBOX/1700/5521",
+  source: "comms",
+  mailbox: "INBOX",
+  uid: 5521,
+  uid_validity: 1700,
+  date: "2026-09-28T14:01:00.000Z",
+  received: "2026-09-28T14:02:00.000Z",
+  from: { name: "Ada Lovelace", address: "ada@example.net" },
+  reply_to: [],
+  to: [{ name: null, address: "me@example.com" }],
+  cc: [],
+  subject: "Thursday?",
+  message_id: "<a-5521@example.net>",
+  in_reply_to: "<root-5520@example.net>",
+  references: ["<root-5520@example.net>"],
+  flags: ["\\seen"],
+  size: 1024,
+  automated: false,
+};
+const mailSession = {
+  readMessage: async (mailbox, uid) => {
+    if (mailbox !== "INBOX" || uid !== 5521) throw new Error("the recording's mailbox holds one message");
+    return ADA_MESSAGE;
+  },
+  previewDraft: async (input) => {
+    const plan = planDraft(input, { username: "me@example.com", fixed: { date: "Mon, 28 Sep 2026 12:00:00 +0000", message_id: "<draft-8812@example.com>" } });
+    return { connection: "mail", mailbox: "Drafts", mailbox_label: "Drafts", plan, confirm: { digest: plan.digest, date: plan.date, message_id: plan.message_id } };
+  },
+  appendDraft: async (_input, confirm) => ({ connection: "mail", mailbox: "Drafts", uid: 8812, message_id: confirm.message_id, digest: confirm.digest }),
+  close: async () => {},
+};
+const mail = async ({ connection }) =>
+  connection === "mail"
+    ? { ok: true, sync: { connection: "mail", provider: "imap", server: "imap.example.com:993", username: "me@example.com", capabilities: ["read", "draft"], raise: {}, open: async () => mailSession, secretsUsed: () => [] } }
+    : { ok: false, status: "absent", why: `there is no mail connection named ${connection}` };
 
 const vault = memoryVault();
 const PAGE = "Projects/Metistry/Roadmap.md";
@@ -360,10 +455,29 @@ const runsStarted = [];
 // the owner's meeting template (T2-11), as `metistry init` seeds it — what the meeting-note door renders
 await vault.write("Templates/Meeting.md", readFileSync(join(REPO_ROOT, "seed/vault/Templates/Meeting.md")), { principal: "user", message: "fixture" });
 
-const queries = new QueryStore(pool);
+// `as_of` is RECORDING_NOW (X-31), not `Date.now()` — every named-query
+// fixture (`GET /api/q/*`, `GET /api/needs-you/count`, …) carries this field,
+// and left to the wall clock it moved on every re-record regardless of
+// anything the query itself read.
+const queries = new QueryStore(pool, () => RECORDING_NOW.getTime());
 await queries.loadDir(join(REPO_ROOT, "seed/queries"));
-const targets = new TargetRegistry({ env: { METISTRY_GITHUB_WRITE_TOKEN: "fixture-not-a-token", METISTRY_GITHUB_DISPATCH_REPO: "example/fixtures" }, fetchFn: fakeFetch });
+// the crews' local-crew (the one `targets/` manifest left, X-85), and a
+// `github-issues` agent connection in an instance of its own (T4-11) so the
+// Connections list above records exactly what it did: the write token is a
+// reference filled at the connection's egress door; GitHub is the fake above
+const targetsDir = join(root, "agent-targets");
+await mkdir(join(targetsDir, ".metistry", "connections"), { recursive: true });
+await writeFile(
+  join(targetsDir, ".metistry", "connections", "github-issues.yaml"),
+  'name: github-issues\ntype: agent\nprovider: github-issues\nreach:\n  http:\n    url: https://api.github.com\n    auth: { scheme: bearer, secret: github_write_token }\nsecrets: [github_write_token]\nconfig:\n  repo: "example/fixtures"\n',
+);
+await writeFile(join(targetsDir, ".metistry", "secrets.yaml"), 'secrets:\n  github_write_token:\n    hosts: [api.github.com]\n    grants: { "connection:github-issues": on }\n');
+const targets = new TargetRegistry({ fetchFn: fakeFetch });
 await targets.loadDir(join(REPO_ROOT, "targets"));
+targets.bindConnections({
+  catalog: () => loadInstanceCatalog({ instanceDir: targetsDir, seedDir: join(REPO_ROOT, "seed") }),
+  secrets: envSecretSource({ METISTRY_SECRET_GITHUB_WRITE_TOKEN: "fixture-not-a-token" }),
+});
 
 // the shipped crew, loaded as the console loads it: an actor with a definition
 // (T4-6). Synced after the seeded rows below, so its audit rows come after them
@@ -442,6 +556,8 @@ const server = makeServer(pool, queries, {
     sync: { connection: "linear", provider: "linear", url: "https://api.linear.app/graphql", origin: "https://api.linear.app", headers: {}, fetch: fakeLinear, capabilities: ["read", "create"], raise: {}, secretsUsed: () => [] },
   }),
   trackers,
+  calendars,
+  mail,
   variables: { instanceDir, file: layout.path("variables") },
   connections: { instanceDir, seedDir: join(REPO_ROOT, "seed"), presence: instanceSecrets.presence() },
   // the reconciler's GET /vault/status, as a week of use leaves it: two
@@ -543,6 +659,29 @@ const P = "metistry";
 const ids = {};
 const one = async (sql, params = []) => (await pool.query(sql, params)).rows[0];
 
+// X-102: this script gives rows fixed keys (`work` 41 and 42, the Linear issue
+// `linear:ENG-42`, the agents `cursor` / `old-laptop` / `opencode`, the stream's
+// comment ids …), so a second run on the same scratch database — `--check`
+// after a record — collided on the first of them. Every table the migrations
+// made is emptied, and its identities restarted, before anything is seeded: the
+// database is exactly what `ops/scripts/test-db.sh` leaves, whatever ran on it
+// before. (No migration seeds a row on a fresh database — 0011 only backfills.)
+// `testDb()` is the only way this script opens Postgres and it refuses anything
+// but a `metistry_test_*` scratch database, so this reaches nothing else.
+{
+  const { rows } = await pool.query(`SELECT quote_ident(tablename) AS t FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'`);
+  if (rows.length) await pool.query(`TRUNCATE ${rows.map((r) => r.t).join(", ")} RESTART IDENTITY CASCADE`);
+}
+
+// get-api-runs-export (X-31): `runs_export` orders oldest-first with no
+// floor, so on a dirty scratch database — this script run again on the rows
+// an earlier one left behind — its first page is whatever ancient leftover
+// sorts first, never this run's own seed. Captured before this run inserts
+// its first `runs` row, so the export request below starts exactly where
+// this recording's own rows begin, on a fresh database or a dirty one alike.
+const runsBaseline = await one(`SELECT coalesce(max(ts)::text, '1970-01-01 00:00:00+00') AS ts, coalesce(max(id), 0) AS id FROM runs`);
+const RUNS_EXPORT_SINCE = runsExportCursor(runsBaseline);
+
 // …with its own read grant (0032), which every member inherits (T4-7) and the
 // Projects screen draws as *every member gets these* (T6-8). cursor, the member
 // below, already holds `Projects`, so it inherits nothing new from it.
@@ -568,7 +707,10 @@ await pool.query(
   [replyTurnId, String(ids.inbound)],
 );
 
-const proposal = async (kind, payload) => Number((await one(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ($1, 'assistant', 'internal', $2::jsonb) RETURNING id`, [kind, JSON.stringify(payload)])).id);
+// `ts` is RECORDING_NOW (X-31), not the row's default `now()` — left to the
+// default, `GET /api/proposals` moves its `ts` field on every re-record even
+// though nothing about the proposal changed.
+const proposal = async (kind, payload) => Number((await one(`INSERT INTO proposals (ts, kind, source_agent, trust, payload) VALUES ($1, $2, 'assistant', 'internal', $3::jsonb) RETURNING id`, [RECORDING_NOW.toISOString(), kind, JSON.stringify(payload)])).id);
 // its own thread: a message into a decision's thread answers it (docs/ops/reply-feedback.md)
 ids.decision = await proposal("decision", { title: "Which fixture format?", options: ["one file per route", "one file per store"], thread: "fixtures-triage" });
 ids.knowledge = await proposal("knowledge", { title: "Add the store list to the roadmap", path: PAGE, summary: "fourteen domain stores, one per screen family" });
@@ -582,7 +724,12 @@ ids.run = Number((await one(
 )).id);
 await pool.query(`INSERT INTO runs (component, kind, tool, ok, duration_ms, meta) VALUES ('assistant', 'tool', 'knowledge_search', true, 12, jsonb_build_object('turn_id', $1::text)), ('assistant', 'tool', 'tasks_update', true, 30, jsonb_build_object('turn_id', $1::text))`, [turnId]);
 // the egress fill's stamp: the NAMES a run filled in, which is where *last used* comes from
-await pool.query(`INSERT INTO runs (ts, component, kind, ok, meta) VALUES ('2026-09-28T13:00:02.000Z', 'egress-proxy', 'egress', true, jsonb_build_object($1::text, jsonb_build_array('github_write')))`, [SECRET_USE_META_KEY]);
+await pool.query(
+  `INSERT INTO runs (ts, component, kind, ok, meta) VALUES
+     ('2026-09-28T13:00:02.000Z', 'egress-proxy', 'egress', true, jsonb_build_object($1::text, jsonb_build_array('github_write'))),
+     ('2026-09-27T09:00:02.000Z', 'connections', 'egress', true, jsonb_build_object($1::text, jsonb_build_array('github_mcp_key')))`,
+  [SECRET_USE_META_KEY],
+);
 // a rename through `metistry identity set` (T2-16): the reconciler records every
 // protected write it accepts as a `config_write` run, which is how Activity shows it
 await pool.query(`INSERT INTO runs (component, kind, tool, ok, finished_at, duration_ms, meta) VALUES ('reconciler', 'config_write', 'vault_write', true, now(), 3, $1::jsonb)`, [
@@ -606,15 +753,18 @@ await pool.query(
 // chart has two bars whatever day the recorder runs), a routine's, one call
 // nothing could price (`cost_source: unknown`, recorded at $0 — the popover's
 // *count as $0* line), and two days of AWS spend, which is not compute.
+// RECORDING_MONTH_START and RECORDING_NOW (X-31), not `date_trunc('month',
+// now())` and `now()` — a re-record on the real 1st of a month used to
+// truncate the "first of the month" row onto the same day as the "today"
+// rows, collapsing Usage's two-bar chart into one.
 await pool.query(
   `INSERT INTO runs (ts, component, kind, provider, model, tokens_in, tokens_out, cache_read_tokens, cost_usd, ok, started_at, finished_at, meta) VALUES
-     (date_trunc('month', now()) + interval '12 hours', 'crew:fixtures', 'crew_run', 'openrouter', 'anthropic/claude-sonnet-4', 4200, 610, 3100, 0.018400, true, now(), now(), '{"tier":"deep"}'),
-     (now(), 'standup', 'routine_run', 'lmstudio', 'gemma', 1800, 240, 0, 0.001900, true, now(), now(), '{"outcome":"acted","tier":"default","display_name":"Standup"}'),
-     (now(), 'assistant', 'turn', 'openrouter', 'mistralai/unpriced-fixture', 600, 80, NULL, 0, true, now(), now(), '{"cost_source":"unknown","tier":"default"}')`,
+     ($1, 'crew:fixtures', 'crew_run', 'openrouter', 'anthropic/claude-sonnet-4', 4200, 610, 3100, 0.018400, true, $1, $1, '{"tier":"deep"}'),
+     ($2, 'standup', 'routine_run', 'lmstudio', 'gemma', 1800, 240, 0, 0.001900, true, $2, $2, '{"outcome":"acted","tier":"default","display_name":"Standup"}'),
+     ($2, 'assistant', 'turn', 'openrouter', 'mistralai/unpriced-fixture', 600, 80, NULL, 0, true, $2, $2, '{"cost_source":"unknown","tier":"default"}')`,
+  [RECORDING_MONTH_START, RECORDING_NOW.toISOString()],
 );
-await pool.query(
-  `INSERT INTO metrics (ts, name, value) VALUES (date_trunc('month', now()) + interval '12 hours', 'aws.cost_usd', 1.37), (now(), 'aws.cost_usd', 0.41)`,
-);
+await pool.query(`INSERT INTO metrics (ts, name, value) VALUES ($1, 'aws.cost_usd', 1.37), ($2, 'aws.cost_usd', 0.41)`, [RECORDING_MONTH_START, RECORDING_NOW.toISOString()]);
 
 await pool.query(
   `INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES
@@ -674,6 +824,19 @@ await pool.query(
   ])],
 );
 
+// an invitation (T4-17): tomorrow's vendor review on the owner's CalDAV
+// account, organised by Dana, the owner's answer still needs-action — the
+// event Respond answers through the account that can
+await pool.query(
+  `INSERT INTO calendar_events (connection, event_id, ical_uid, starts_at, ends_at, title, organizer, attendees, self_status)
+   VALUES ('calendar', 'evt-review-0929', 'vendor-review-0929@example.com', '2026-09-29T18:00:00Z', '2026-09-29T19:00:00Z', 'Vendor review', 'dana@example.com', $1::jsonb, 'pending')
+   ON CONFLICT (connection, event_id) DO NOTHING`,
+  [JSON.stringify([
+    { name: "Dana", email: "dana@example.com", status: "accepted", role: "chair", type: "person", self: false },
+    { name: "Me", email: "me@example.com", status: "pending", role: "required", type: "person", self: true },
+  ])],
+);
+
 // the board's other two shapes (T1-2): a Blocked card waiting on that todo
 // (`meta.blocked_by`, resolved to its text), and a Done card whose crew
 // reported back — the `reported` facet, from the one work→runs join. Ids
@@ -697,10 +860,22 @@ await pool.query(
    ON CONFLICT (session_id, turn_id) DO NOTHING`,
 );
 
-// devices: two sessions on one passkey — one to list, one to revoke
+// a recording (T8-4): its transcript filed under Journal/Transcripts/ and
+// ingested two minutes after it ended; its audio still kept on the Mac
+await pool.query(
+  `INSERT INTO capture_sessions (id, started_at, ended_at, apps, media_bytes, transcript_path, folded_at)
+   VALUES ('20260928-133000-00ab', '2026-09-28T13:30:00Z', '2026-09-28T13:45:00Z', '{us.zoom.xos}', 26214400, 'Journal/Transcripts/2026-09-28-20260928-133000-00ab.md', '2026-09-28T13:47:00Z')
+   ON CONFLICT (id) DO NOTHING`,
+);
+
+// devices (§2.22): a device is a passkey with its sessions under it — an
+// iPhone signed in twice, and an iPad once; Remove is posted at the iPad
+const iphone = `fixture-${mintToken(6)}`;
 const pkId = `fixture-${mintToken(6)}`;
-await authStore.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: ["internal"], origin: "http://127.0.0.1:8080", label: "iPhone" });
-await authStore.issueSession(pool, pkId, policy);
+await authStore.storePasskey(pool, { id: iphone, publicKey: new Uint8Array([1]), signCount: 0, transports: ["internal"], origin: "http://127.0.0.1:8080", label: "iPhone" });
+await authStore.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: ["internal"], origin: "http://127.0.0.1:8080", label: "iPad" });
+await authStore.issueSession(pool, iphone, policy);
+await authStore.issueSession(pool, iphone, policy);
 await authStore.issueSession(pool, pkId, policy);
 ids.session = Number((await one(`SELECT max(s.id) AS id FROM auth_sessions s WHERE s.passkey_id = $1`, [pkId])).id);
 
@@ -715,18 +890,22 @@ ids.rotateAgent = await agent("opencode", "OpenCode");
 // change something: they narrow cursor's grant, and raise cursor's autonomy.)
 await agents.setGrants(pool, ids.agent, { tier: "areas", areas: ["Projects", "Areas/Ops"], queries: true });
 await agents.setProjects(pool, ids.agent, [P]);
+// …and one is lent the intranet connection (X-96: the Connections detail's *Used by*)
+await agents.setGrants(pool, ids.rotateAgent, { tier: "none", areas: [], connections: ["intranet"] });
 await agents.setAutonomy(pool, ids.rotateAgent, { level: "propose" }, { allowWidening: true });
+// `ts`/`decided_at` are RECORDING_NOW (X-31), not `now()`.
 await pool.query(
-  `INSERT INTO proposals (kind, source_agent, trust, payload, decision, decided_at) VALUES ('access_request', $1, 'external', $2::jsonb, 'allow', now())`,
-  [ids.agent, JSON.stringify({ area: "Areas/Ops", reason: "the runbooks live there", granted: { area: "Areas/Ops", by: "user" } })],
+  `INSERT INTO proposals (ts, kind, source_agent, trust, payload, decision, decided_at) VALUES ($1, 'access_request', $2, 'external', $3::jsonb, 'allow', $1)`,
+  [RECORDING_NOW.toISOString(), ids.agent, JSON.stringify({ area: "Areas/Ops", reason: "the runbooks live there", granted: { area: "Areas/Ops", by: "user" } })],
 );
 // three questions in one request (T2-3): pick one, pick any with Something
 // else…, and one that takes its own options only — as `requests_create` kind
 // `question` stores them (context, provenance), asked by the assistant; the
 // stepped card's fixture. Seeded after every other proposal so no recorded id
 // moves, and a minute older than them so the queue's newest question is still
-// the one the component samples draw.
-ids.questions = Number((await one(`INSERT INTO proposals (ts, kind, source_agent, trust, payload) VALUES (now() - interval '1 minute', 'decision', 'assistant', 'external', $1::jsonb) RETURNING id`, [
+// the one the component samples draw. A minute off RECORDING_NOW (X-31), not
+// off `now()`.
+ids.questions = Number((await one(`INSERT INTO proposals (ts, kind, source_agent, trust, payload) VALUES ($2, 'decision', 'assistant', 'external', $1::jsonb) RETURNING id`, [
   JSON.stringify({
     title: "Three things before I open the fixtures PR",
     questions: [
@@ -737,6 +916,7 @@ ids.questions = Number((await one(`INSERT INTO proposals (ts, kind, source_agent
     context: { prose: "The recorder writes one file per route; the PR needs a home and reviewers.", refs: ["gh:foldedspacelabs/metistry#339"] },
     provenance: { agent: "assistant", via: "mcp-brain", submitted_at: "2026-09-28T12:50:00.000Z" },
   }),
+  new Date(RECORDING_NOW.getTime() - 60_000).toISOString(),
 ])).id);
 // the instance's own assistant, registered from its configuration as the console does at start
 await agents.ensureInternalAgent(pool, agents.INTERNAL_ASSISTANT_ID, { token: mintToken(32) });
@@ -772,11 +952,15 @@ const REQUESTS = [
   ["GET /api/projects", () => ({ path: "/api/projects" })],
   ["GET /api/targets", () => ({ path: "/api/targets" })],
   ["GET /api/runs/:id", () => ({ path: `/api/runs/${ids.run}` })],
-  ["GET /api/runs/export", () => ({ path: "/api/runs/export?limit=3", ndjson: true })],
+  // `since` is this run's own baseline (RUNS_EXPORT_SINCE, X-31): a dirty
+  // scratch database's leftover rows sort before it and never enter the page.
+  ["GET /api/runs/export", () => ({ path: `/api/runs/export?since=${encodeURIComponent(RUNS_EXPORT_SINCE)}&limit=3`, ndjson: true })],
   // Chat's working indicator (T2-17): the same turn_id `run_detail`'s tool calls above carry.
   ["GET /api/turns/:turn_id/progress", () => ({ path: `/api/turns/${turnId}/progress` })],
   // Run detail's conversation (T2-17): the unfolded session seeded below, two turns.
   ["GET /api/sessions/:id", () => ({ path: "/api/sessions/7b1f2c9e-0000-4000-8000-000000000001" })],
+  // Settings ▸ Live Capture (T8-4): the recording seeded above — transcript ingested, audio kept for 7 more days
+  ["GET /api/recordings/:id", () => ({ path: "/api/recordings/20260928-133000-00ab" })],
   ["GET /api/compute", () => ({ path: "/api/compute" })],
   ["GET /api/compute/models", () => ({ path: "/api/compute/models" })],
   // T4-18: grouped by model, the switched-off ollama skipped, every listing read now
@@ -873,6 +1057,10 @@ const REQUESTS = [
   ["POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply", () => ({ path: "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/reply", body: { body: "Fixed in the next push.", head_sha: PR_HEAD } })],
   ["POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve", () => ({ path: "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/resolve", body: { head_sha: PR_HEAD } })],
   ["POST /api/trackers/:connection/issues/:key/complete", () => ({ path: "/api/trackers/linear/issues/MET-42/complete", body: {} })],
+  // Accept tomorrow's vendor review (T4-17): the preview, which names the calendar that answers and sends nothing
+  ["POST /api/calendar/invitations/:id/respond", () => ({ path: "/api/calendar/invitations/evt-review-0929/respond", body: { response: "accepted" } })],
+  // Draft Reply to Ada (T4-17): the preview, addressed from her message's headers; nothing is appended, nothing sends
+  ["POST /api/mail/messages/:id/draft", () => ({ path: `/api/mail/messages/${encodeURIComponent("mail/INBOX/1700/5521")}/draft`, body: { body: "Thanks — Thursday works." } })],
 
 
   // the reads that show the writes above: a room with a comment, a feed with a capture in it

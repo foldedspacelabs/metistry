@@ -1,11 +1,12 @@
 // `completeJson()` and `scoreChoice()` share one resolution — the provider,
-// the money rule, the bearer and the URL — in core's `resolveOnMachineCall`.
+// the money rule, the credential's door and the URL — in core's
+// `resolveOnMachineCall`.
 // `scoreChoice` moved into `packages/core` with T9-2 (its own tests moved
 // with it, to packages/core/test/score-choice.test.ts); what stays here is
 // the property the move had to keep: the collector's JSON call and the
 // scorer refuse an off-machine provider identically, before any request.
 import { describe, expect, it } from "vitest";
-import { codesFor, parseCompute, scoreChoice, type Compute } from "@foldedspacelabs/metistry-core";
+import { codesFor, parseCompute, parseSecretsFile, scoreChoice, type Compute } from "@foldedspacelabs/metistry-core";
 import { completeJson, type ComputeAccess } from "../compute-client.js";
 
 const messages = [{ role: "system" as const, content: "which one?" }];
@@ -61,5 +62,48 @@ describe("completeJson and scoreChoice share one resolution", () => {
       expect(b.why).toBe(a.why);
     }
     expect(server.sent).toHaveLength(0);
+  });
+});
+
+// X-7 (ruling 2 of the W2 checkpoint): both go through core's `computeFetch`.
+// A `{{ secret.x }}` key reaches the model server only on the owner's grant
+// to `provider:<name>` — and neither caller ever holds it to send by hand.
+describe("**a provider key without its grant is refused before dialling** (completeJson and scoreChoice)", () => {
+  const keyed: Compute = parseCompute(`
+providers:
+  keyed:
+    kind: openai-compatible
+    base_url: http://127.0.0.1:1235/v1
+    locality: on_machine
+    auth: { secret: "{{ secret.local_key }}" }
+`);
+  const env = { METISTRY_SECRET_LOCAL_KEY: "local-SENTINEL-key-5150" };
+  const policy = (grants: string) => () => ({ ok: true as const, file: parseSecretsFile(`secrets:\n  local_key:\n    hosts: ["127.0.0.1:1235"]\n    grants:\n${grants}`) });
+
+  it("no grant: both return the refusal as their reason, and nothing is sent", async () => {
+    const server = fake();
+    const access = { ...ctx(keyed, server.fn, env), secretsPolicy: policy("      agent:assistant: on\n") };
+    const a = await scoreChoice(access, { collector: "inbox-drain", modelRef: "keyed/m", options: [{ key: "a", description: "it is a" }], codes: codesFor(1), messages });
+    const b = await completeJson({ ...access, usesModel: "keyed/m" }, { collector: "inbox-drain", schema: {}, schemaName: "x", messages });
+    expect(a.ok).toBe(false);
+    expect(b.ok).toBe(false);
+    if (!a.ok && !b.ok) {
+      expect(a.why).toContain("not_granted");
+      expect(b.why).toContain("not_granted");
+      expect(b.why).toContain("provider:keyed");
+      expect(b.why).not.toContain(env.METISTRY_SECRET_LOCAL_KEY);
+    }
+    expect(server.sent).toHaveLength(0);
+  });
+
+  it("granted: the call is made, to the provider's host, with the key the door attached", async () => {
+    const seen: Array<{ url: string; auth: string | null }> = [];
+    const fn = (async (url: string, init: RequestInit) => {
+      seen.push({ url, auth: new Headers(init.headers).get("authorization") });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"x":1}' } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const b = await completeJson({ ...ctx(keyed, fn, env), secretsPolicy: policy("      provider:keyed: on\n"), usesModel: "keyed/m" }, { collector: "inbox-drain", schema: {}, schemaName: "x", messages });
+    expect(b.ok).toBe(true);
+    expect(seen).toEqual([{ url: "http://127.0.0.1:1235/v1/chat/completions", auth: `Bearer ${env.METISTRY_SECRET_LOCAL_KEY}` }]);
   });
 });

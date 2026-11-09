@@ -19,7 +19,7 @@
 // `describeScope` render an agent the CLI read over HTTP and one the console
 // read out of Postgres in the same words.
 
-import { describePermissions, inheritGrants, type GrantSource, type GrantTier, type InheritedReach, type Principal, type ProjectGrant, type Role, type Scope } from "./access.js";
+import { describePermissions, inheritGrants, reachableConnections, type GrantSource, type GrantTier, type InheritedReach, type PermissionConnection, type Principal, type ProjectGrant, type Role, type Scope } from "./access.js";
 import type { ActionAutonomy } from "./actions.js";
 import type { Compute } from "./compute.js";
 import { crewModelIssue, isLegacyCrewModel, SAME_AS_ASSISTANT } from "./crew-model.js";
@@ -153,7 +153,14 @@ export type PermissionProvenance =
   /** Held only while this routine runs — a per-run grant (§2.5, T3-8). */
   | { readonly kind: "routine"; readonly routine: string }
   /** Inherited from a project the actor is a member of (T4-7, D13): the project's own grant, not the actor's. Leaving the project takes it away. */
-  | { readonly kind: "project"; readonly project: string };
+  | { readonly kind: "project"; readonly project: string }
+  /**
+   * Reached through Metistry's proxy (screen 7 §10, amendments §3.2 — *Through
+   * Metistry*; T4-10): a connection's tool, called by Metistry with the
+   * owner's credential, never held by the actor. Every entry of a connection
+   * row carries it; the row's ⧉ says it once (`permissionProvenanceText`).
+   */
+  | { readonly kind: "proxy" };
 
 /** One thing in a cell: an area, a project, a verb, a connection tool. */
 export interface PermissionEntry {
@@ -312,8 +319,13 @@ export interface ActorSources {
   readonly crew: (id: string) => ActorCrewSource | undefined;
   /** `compute.yaml`, parsed — for a legacy crew `model:`'s `assignments.crews` (one release). */
   readonly compute: Compute;
-  /** Connections granted to this actor (F-3, T4-8). `() => []` until they exist. */
-  readonly connections: (id: string) => readonly string[];
+  /**
+   * The connections this actor might reach (F-3, T4-8; T4-10): by name, or
+   * with their tools, modes and whether the owner offered them to agents —
+   * then `describePermissions` asks `may()` which this actor reaches, so a
+   * host may hand every connection to every actor.
+   */
+  readonly connections: (id: string) => readonly (string | PermissionConnection)[];
   readonly grantHistory: (id: string) => ActorGrantHistory;
   /**
    * Every project's own read grant (0032, T4-7). A crew or external member
@@ -474,7 +486,9 @@ export const resolveActor: ResolveActor = (id, sources) => {
   const row = sources.registry(id);
   const live = row !== undefined && !row.revoked ? row : undefined;
   const history = sources.grantHistory(id);
-  const connections = [...sources.connections(id)];
+  const lent = [...sources.connections(id)];
+  /** `tools.connections`: the names of those this principal reaches — `may()`'s answer, the one the table and the proxy give. */
+  const reaches = (p: Principal): string[] => reachableConnections(p, lent).map((c) => (typeof c === "string" ? c : c.name));
   /** A member's scope: its row ∪ its projects' grants (`inheritGrants`), and the history that marks what came via which project. */
   const member = (r: ActorRegistryRow): { scope: Scope; history: ActorGrantHistory } => {
     const { grants, via } = inheritGrants(r.grants, r.projects, sources.projectGrants ?? []);
@@ -494,9 +508,9 @@ export const resolveActor: ResolveActor = (id, sources) => {
         scope,
         autonomy: actionAutonomyOf(r?.autonomy),
         source: "environment",
-        lines: r ? describePermissions(principal, { connections, history }) : [],
+        lines: r ? describePermissions(principal, { connections: lent, history }) : [],
       },
-      tools: { groups: null, connections },
+      tools: { groups: null, connections: reaches(principal) },
       compute: { kind: "router" },
       limits: null,
     };
@@ -531,9 +545,9 @@ export const resolveActor: ResolveActor = (id, sources) => {
           scope,
           autonomy: actionAutonomyOf(live.autonomy),
           source,
-          lines: crewPermissionRows(id, describePermissions(principal, { connections, history: lineage })),
+          lines: crewPermissionRows(id, describePermissions(principal, { connections: lent, history: lineage })),
         },
-        tools: { groups, connections },
+        tools: { groups, connections: reaches(principal) },
         compute: crewCompute(id, crew.manifest, sources.compute),
         limits: { maxTurns: crew.manifest.max_turns, budgetUsdPerRun: crew.manifest.budget_usd_per_run },
       };
@@ -553,9 +567,9 @@ export const resolveActor: ResolveActor = (id, sources) => {
           scope,
           autonomy: actionAutonomyOf(live.autonomy),
           source,
-          lines: externalPermissionRows(id, describePermissions(principal, { connections, history: lineage })),
+          lines: externalPermissionRows(id, describePermissions(principal, { connections: lent, history: lineage })),
         },
-        tools: { groups: null, connections },
+        tools: { groups: null, connections: reaches(principal) },
         compute: null,
         limits: null,
       };

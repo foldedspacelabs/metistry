@@ -1,7 +1,8 @@
-// First run: the seven steps from docs/product/desktop-app-plan.md, each one a
-// `metistry` verb the app runs with a progress view.
+// First run: the eight steps — docs/product/desktop-app-plan.md's seven, and
+// Set Up Remote Access (plan §2.23, X-107) between Services and Door — each
+// one a `metistry` verb the app runs with a progress view.
 //
-// All seven do something now. Step 1 installs the bundle's read-only runtime to
+// All eight do something now. Step 1 installs the bundle's read-only runtime to
 // a writable product dir (`metistry runtime install`); step 5 SETS the
 // deployment shape after previewing it (`metistry deployment set-shape --yes`)
 // rather than explaining that it cannot; step 7 chooses where the assistant's
@@ -37,6 +38,8 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
     case versioning
     case secrets
     case services
+    /// Set Up Remote Access (plan §2.23, X-107): how the phone reaches this Mac — the guided flow, between Services and Door.
+    case remoteAccess
     case door
     case compute
 
@@ -49,6 +52,7 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
         case .versioning: return "Versioning"
         case .secrets: return "Secrets"
         case .services: return "Services"
+        case .remoteAccess: return "Remote Access"
         case .door: return "Door"
         case .compute: return "Compute"
         }
@@ -56,11 +60,18 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
 
     /// One sentence, sentence case, saying what the step does — design-system
     /// P10 (Title Case names things; sentence case says things).
-    public var summary: String {
+    public var summary: String { summary(assistantName: nil) }
+
+    /// The same sentence, naming the assistant once the wizard knows its name.
+    public func summary(assistantName: String?) -> String {
+        let a = WizardCopy(name: assistantName)
         switch self {
         case .runtime:
             return "Find the metistry CLI: the copy bundled inside this app, a product checkout you point it at, or one already on your PATH."
         case .instance:
+            if let name = a.name {
+                return "Create the private instance repo — vault, identity, config — for \(name). That name lives in identity.yaml and nowhere else."
+            }
             return "Create the private instance repo — vault, identity, config — and name the assistant. That name lives in identity.yaml and nowhere else."
         case .versioning:
             return "Point the instance repo at a private GitHub repository, with a token the reconciler can push with unattended."
@@ -68,10 +79,12 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
             return "Make the login Keychain the canonical secret store, with .env generated from it instead of edited by hand."
         case .services:
             return "Bring the install to running: containers or launchd jobs, then doctor."
+        case .remoteAccess:
+            return "Choose how your phone reaches this Mac. None is the default and exposes nothing; Tailscale Funnel is the recommended way, and every step is the provider's own page."
         case .door:
             return "Your Mac is signed in automatically. Enrol a passkey only for browsers and your phone."
         case .compute:
-            return "Choose where the assistant's turns run: a cloud provider on your own key, a local server, or nothing yet."
+            return "Choose where \(a.possessive) turns run: a cloud provider on your own key, a local server, or nothing yet."
         }
     }
 
@@ -84,17 +97,20 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
         case .versioning: return "metistry connect-repo <url> --instance <folder> --auth device"
         case .secrets: return "metistry secrets sync"
         case .services: return "metistry up"
+        case .remoteAccess: return nil
         case .door: return nil
         case .compute: return nil
         }
     }
 
-    /// Steps 6 and 7 do real work, but not by running ONE `metistry` verb: one
-    /// talks to `AuthenticationServices` and the console, the other runs two
-    /// compute verbs in order and writes a key to the first one's stdin. They
-    /// own their own models, so the generic run row does not apply to them.
+    /// Steps 6, 7 and 8 do real work, but not by running ONE `metistry` verb:
+    /// the guided flow runs `metistry remote` three ways and shows where the
+    /// provider's own pages are; the door talks to `AuthenticationServices`
+    /// and the console; compute runs two verbs in order and writes a key to
+    /// the first one's stdin. They own their own models, so the generic run
+    /// row does not apply to them.
     public var hasOwnScreen: Bool {
-        self == .door || self == .compute
+        self == .remoteAccess || self == .door || self == .compute
     }
 }
 
@@ -160,7 +176,7 @@ public enum RepoPlan: String, CaseIterable, Sendable, Identifiable {
     public var id: String { rawValue }
 }
 
-/// Step 6's two shapes, since the owner decision of 2026-09-10.
+/// Step 7's two shapes, since the owner decision of 2026-09-10.
 ///
 /// This Mac needs nothing: the app is the same package as the CLI on the same
 /// machine, so the console takes its local owner token as the `user` principal
@@ -207,7 +223,11 @@ public final class FirstRunModel {
     /// is a single `metistry` verb, so neither fits the generic run row.
     public let passkey: PasskeyEnrolmentModel
     public let compute: ComputeStepModel
-    /// Step 6 now LEADS with this: whether the console already takes this Mac as
+    /// Step 6, Set Up Remote Access (plan §2.23, X-107): the guided flow over
+    /// `metistry remote`, the same model Settings ▸ Remote Access ▸ Change…
+    /// presents. None preselected; its Add a Phone… is step 7's sheet.
+    public let remoteAccess: RemoteAccessFlowModel
+    /// Step 7 now LEADS with this: whether the console already takes this Mac as
     /// the owner. It is the same instance the Status header and Settings →
     /// Connections show, so the wizard cannot disagree with the rest of the app
     /// about who is signed in.
@@ -251,9 +271,18 @@ public final class FirstRunModel {
     public var keepAwake: KeepAwakeSetting?
     public var repoPlan: RepoPlan = .now
     public var repoAuth: RepoAuth = .device
-    /// Step 6's choice. `thisMacOnly` is the default because it is what is
+    /// Step 7's choice. `thisMacOnly` is the default because it is what is
     /// already true: nothing has to happen for this Mac to be signed in.
     public var doorPlan: DoorPlan = .thisMacOnly
+    /// Step 7's Add a Phone sheet (plan §2.22, X-77), while it is open — the
+    /// same model and view Settings ▸ Devices presents.
+    public private(set) var addPhone: AddPhoneModel?
+    /// The label the phone chose, once the sheet reached *Added*: the door is
+    /// open for it, which satisfies the step (wizard-model.swift).
+    public private(set) var phoneAdded: String?
+    /// Builds the sheet's model. `AppModel` points it at the console session so
+    /// *Added* can be seen; without one it is this install's CLI alone.
+    @ObservationIgnored public var makeAddPhone: @MainActor () -> AddPhoneModel = { AddPhoneModel(management: nil, session: nil) }
     /// Bridge names (doctor's own — `apple-fm`, `eventkit`) the user asked to
     /// enable. Enabling one means minting its token; see `plannedFollowUps`.
     public var bridgeSelection: Set<String> = []
@@ -270,13 +299,36 @@ public final class FirstRunModel {
         self.passkey = passkey
         self.compute = compute ?? ComputeStepModel(cli: cli)
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
+        self.remoteAccess = RemoteAccessFlowModel(management: cli.map { CLIManagementRunner(cli: $0) })
+        makeAddPhone = { [weak self] in AddPhoneModel(management: self?.cli.map { CLIManagementRunner(cli: $0) }, session: nil) }
+        // step 6's Add a Phone… is step 7's sheet: one way in, drawn once
+        remoteAccess.onAddPhone = { [weak self] in self?.beginAddPhone() }
         reset()
+    }
+
+    // MARK: - Step 7: Add a Phone…
+
+    /// The sheet opens and starts Checking at once (`metistry enroll --json`).
+    public func beginAddPhone() {
+        guard addPhone == nil else { return }
+        let model = makeAddPhone()
+        model.onAdded = { [weak self] label in self?.phoneAdded = label }
+        addPhone = model
+        Task { await model.open() }
+    }
+
+    /// Done, Esc, or the sheet dismissed: a live code is cancelled.
+    public func closeAddPhone() {
+        guard let model = addPhone else { return }
+        addPhone = nil
+        Task { await model.close() }
     }
 
     public func adopt(cli: MetistryCLI?, resolution: RuntimeResolution) {
         self.cli = cli
         self.resolution = resolution
         compute.adopt(cli: cli)
+        remoteAccess.adopt(management: cli.map { CLIManagementRunner(cli: $0) })
         // Step 1's verdict changes with the runtime; the rest keep whatever
         // they achieved — re-pointing the app at another checkout does not
         // un-create an instance repo.
@@ -322,7 +374,7 @@ public final class FirstRunModel {
             guard repoPlan == .now, repoAuth.runnableFromTheApp else { return false }
             return instanceDirectory != nil && !remoteURL.trimmingCharacters(in: .whitespaces).isEmpty
         case .secrets, .services: return true
-        case .door, .compute: return false
+        case .remoteAccess, .door, .compute: return false
         }
     }
 
@@ -362,7 +414,7 @@ public final class FirstRunModel {
 
     private func verb(for step: FirstRunStep) -> [String]? {
         switch step {
-        case .door, .compute:
+        case .remoteAccess, .door, .compute:
             return nil
         case .runtime:
             // `metistry runtime install --from <bundle> --to <writable dir>`.

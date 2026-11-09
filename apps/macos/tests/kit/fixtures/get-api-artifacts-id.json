@@ -4,27 +4,27 @@
   "ticket": null,
   "request": {
     "method": "GET",
-    "path": "/api/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1",
+    "path": "/api/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW",
     "body": null,
     "idempotency_key": null
   },
   "status": 200,
   "body": {
     "artifact": {
-      "id": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
+      "id": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
       "project": "metistry",
       "slug": "store-interface",
       "kind": "markdown",
-      "current_version": "ver_01M3FYT8NB0W22G5J1H3A71PTY",
+      "current_version": "ver_01M3RABJAKM99M4CHEYREJKCBT",
       "visibility": "project",
       "created_by": "user",
-      "created_at": "2026-09-26T22:54:15.208Z",
-      "updated_at": "2026-09-26T22:54:15.211Z"
+      "created_at": "2026-09-30T04:49:51.952Z",
+      "updated_at": "2026-09-30T04:49:51.955Z"
     },
     "current": {
-      "id": "ver_01M3FYT8NB0W22G5J1H3A71PTY",
-      "artifact_id": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
-      "commit": "99e6312e47291e6ffd290464ebab06105b7c647b",
+      "id": "ver_01M3RABJAKM99M4CHEYREJKCBT",
+      "artifact_id": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
+      "commit": "635f0aed735d82703b755d1579b016da0a1222cf",
       "path_prefix": "Artifacts/metistry/store-interface",
       "manifest": {
         "notes.md": {
@@ -35,14 +35,14 @@
       },
       "author_principal": "user",
       "author_kind": "user",
-      "message": "second cut (ver_01M3FYT8NB0W22G5J1H3A71PTY)",
+      "message": "second cut (ver_01M3RABJAKM99M4CHEYREJKCBT)",
       "idempotency_key": "fixture-store-interface-2",
-      "created_at": "2026-09-26T22:54:15.211Z"
+      "created_at": "2026-09-30T04:49:51.955Z"
     },
     "links": {
-      "artifact": "http://127.0.0.1:8080/#/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1",
-      "version": "http://127.0.0.1:8080/#/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1/ver_01M3FYT8NB0W22G5J1H3A71PTY",
-      "review": "http://127.0.0.1:8080/#/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1/ver_01M3FYT8NB0W22G5J1H3A71PTY/review"
+      "artifact": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW",
+      "version": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/ver_01M3RABJAKM99M4CHEYREJKCBT",
+      "review": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/ver_01M3RABJAKM99M4CHEYREJKCBT/review"
     }
   }
 }

@@ -2,7 +2,7 @@
 // screen-15-settings.md). The window is settings-view.swift; each pane is a
 // file under settings-panes/.
 //
-// Twelve sections in a grouped sidebar (screen-15 §1), and each one is a
+// Fourteen sections in a grouped sidebar (screen-15 §1), and each one is a
 // window onto something else — never a copy of it (app-preferences.swift holds
 // the rule and the pointers this app does persist):
 //
@@ -19,14 +19,43 @@
 //                the login item, the background item, and keep-awake through
 //                `metistry deployment set-keep-awake` (M4) — the lid dialog
 //                runs nothing
-//   Compute      compute-model.swift (T6-12's pane)
+//   Compute      compute-model.swift (T6-12): `GET /api/compute` and its
+//                catalogue; limits and the model through the API (§2.3),
+//                providers and local models through M16/M17, confirmed
 //   Updates      Sparkle's own preferences; the runtime through `metistry
 //                version --json`, `metistry update` and `--rollback` (M2)
 //   Account      the console sign-in and the instance repository — the old
 //                *Connections* (screen-15 §1)
-//   Connections, Secrets, Variables, Live Capture, Sessions
-//                their own tickets' panes; until each lands, the pane says what
-//                it will hold and which verb does it today
+//   Remote Access remote-access-model.swift (X-107, plan §2.23): the record,
+//                the origin and doctor's `remote` rows from `metistry remote
+//                status --json` (M20); Test is `remote test`; Turn Off is
+//                `remote off --yes` after a confirm naming what the provider's
+//                revoke undoes; Change… is the guided flow
+//                (remote-access-flow.swift) over `remote set <provider>`
+//   Devices      devices-model.swift (X-77, plan §2.22): the passkeys from
+//                `GET /api/devices`, Remove and Sign Out Everywhere through
+//                `POST /api/devices/:id/revoke` (scope device | sessions),
+//                confirmed naming the device; Add a Phone… is the sheet
+//                (add-phone-model.swift) running `metistry enroll` (M19)
+//   Connections  connections-model.swift (T6-13a's pane): the list and one
+//                connection from `GET /api/connections(/:name)` and
+//                `GET /api/secrets`; tool modes, the offer switch and Test are
+//                `metistry connections` (M13), a secret's hosts and grant
+//                `metistry secrets` (M7)
+//   Secrets      secrets-model.swift (T6-14's pane): `GET /api/secrets`, and
+//                `metistry secrets set|replace|remove|hosts|grant` (M7)
+//   Variables    variables-model.swift (T6-14's pane): `GET /api/variables`,
+//                and `metistry variables set|unset` (M14)
+//   Live Capture  live-capture-model.swift (T6-15): the bar's switch and
+//                placement (device-local, `CaptureBarPreferences`), whether
+//                there is a recorder and its grants through the bar's own
+//                `LiveCaptureClient`, the retention rulings, and the
+//                recordings from `GET /api/knowledge/pages` +
+//                `GET /api/recordings/:id`; Purge Now through the bridge's
+//                `POST /recording/purge`, confirmed first
+//   Sessions     sessions-model.swift (T6-15): `session-fold`'s pause and
+//                `session-purge`'s retention from the Scheduled doors, and
+//                Purge Now — `POST /api/sessions/purge`, preview then confirm
 //   Keyboard     the any-app shortcuts (T6-16 registers them) and Show All ⌘/
 //   Advanced     the resolved runtime, the developer override, versions, logs,
 //                the passkey diagnostic
@@ -64,6 +93,8 @@ public final class SettingsModel {
         case compute
         case updates
         case account
+        case remoteAccess
+        case devices
         case connections
         case secrets
         case variables
@@ -82,6 +113,8 @@ public final class SettingsModel {
             case .compute: return "Compute"
             case .updates: return "Updates"
             case .account: return "Account"
+            case .remoteAccess: return RemoteAccessWords.title
+            case .devices: return "Devices"
             case .connections: return "Connections"
             case .secrets: return "Secrets"
             case .variables: return "Variables"
@@ -99,6 +132,8 @@ public final class SettingsModel {
             case .compute: return "cpu"
             case .updates: return "arrow.down.circle"
             case .account: return "person.crop.circle"
+            case .remoteAccess: return "antenna.radiowaves.left.and.right"
+            case .devices: return "iphone"
             case .connections: return "link"
             case .secrets: return "key"
             case .variables: return "textformat.abc"
@@ -111,21 +146,6 @@ public final class SettingsModel {
 
         public var group: SectionGroup {
             SectionGroup.allCases.first { $0.sections.contains(self) } ?? .general
-        }
-
-        /// A pane whose own ticket has not landed yet: it says what it will
-        /// hold and which verb does it today, rather than a dead end (C138).
-        public var pendingNote: String? {
-            switch self {
-            case .variables:
-                return "Variables — the text your agents read — get their own pane here. Until then they are `metistry variables set <name> <value>` and `metistry variables unset <name>` in Terminal (.metistry/variables.yaml, a protected path)."
-            case .liveCapture:
-                return "The capture bar's switch, its placement, the permissions macOS has granted and how long recordings are kept get their own pane here."
-            case .sessions:
-                return "Recorded sessions, what each one produced, and Purge Now get their own pane here."
-            default:
-                return nil
-            }
         }
     }
 
@@ -150,7 +170,7 @@ public final class SettingsModel {
         public var sections: [Section] {
             switch self {
             case .general: return [.instance, .services, .compute, .updates]
-            case .access: return [.account, .connections, .secrets, .variables]
+            case .access: return [.account, .remoteAccess, .devices, .connections, .secrets, .variables]
             case .capture: return [.liveCapture, .sessions]
             case .tail: return [.keyboard, .advanced]
             }
@@ -159,7 +179,7 @@ public final class SettingsModel {
 
     public var section: Section = .instance
 
-    /// The shared doctor report. Services and Connections render it; they never
+    /// The shared doctor report. Services and Account render it; they never
     /// run their own probes (invariant 3 — one read path).
     public let status: StatusModel
     /// Who the console takes this Mac to be. The app's one sign-in model, shared
@@ -170,6 +190,22 @@ public final class SettingsModel {
     /// read-only summary the Connections pane has always shown, and both come
     /// from the same `compute show --json`.
     public let computePane: ComputeModel
+    /// The Remote Access pane (X-107, plan §2.23): `metistry remote` over the
+    /// management runner — status, Test, Turn Off, and Change… (the guided flow).
+    public let remoteAccessPane: RemoteAccessModel
+    /// The Devices pane (X-77): the passkeys over the API, Remove and Sign Out
+    /// Everywhere through the one door, and the Add a Phone sheet (M19).
+    public let devicesPane: DevicesModel
+    /// The Connections pane: read over the API, changed through M13 and M7.
+    public let connectionsPane: ConnectionsModel
+    /// The Secrets pane (T6-14): the owner's named secrets, never a value.
+    public let secretsPane = SecretsModel()
+    /// The Variables pane (T6-14).
+    public let variablesPane = VariablesModel()
+    /// The Live Capture pane (T6-15): the recorder's grants from doctor, the recordings over the API.
+    public let liveCapturePane: LiveCaptureModel
+    /// The Sessions pane (T6-15): the archive's routines, and Purge Now.
+    public let sessionsPane: SessionsModel
     public private(set) var cli: MetistryCLI?
     public private(set) var instanceDir: URL?
 
@@ -234,7 +270,13 @@ public final class SettingsModel {
         self.cli = cli
         self.instanceDir = instanceDir
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
-        self.computePane = computePane ?? ComputeModel(status: status, cli: cli)
+        self.computePane = computePane ?? ComputeModel(status: status, cli: cli, session: session, management: management)
+        let remoteAccessPane = RemoteAccessModel(management: { nil })
+        self.remoteAccessPane = remoteAccessPane
+        self.devicesPane = DevicesModel(session: session)
+        self.connectionsPane = ConnectionsModel(session: session)
+        self.liveCapturePane = LiveCaptureModel(session: session)
+        self.sessionsPane = SessionsModel(session: session)
         self.session = session
         self.managementOverride = management
         // `release.available` names the version and nothing else; Settings ▸
@@ -243,6 +285,21 @@ public final class SettingsModel {
             guard let self else { return false }
             if case .releaseAvailable(let version) = event.change { self.runtimeAvailable = version }
             return true
+        }
+        // The sheet's Copy Link is this pane's pasteboard, which the platform hands in.
+        devicesPane.copyText = { [weak self] text in self?.copyText(text) }
+        // Remote Access runs `metistry remote` through §2.2's runner — the
+        // session's, which follows every instance switch — and its Change…
+        // flow's Add a Phone… is Devices' sheet (one way in, drawn once).
+        remoteAccessPane.management = { [weak self] in self?.management }
+        remoteAccessPane.onAddPhone = { [weak self] in self?.devicesPane.beginAddPhone() }
+        // Devices marks a passkey whose host is no longer a configured origin
+        // (plan §2.23, "How the origin flows"): the hosts come from the same
+        // `remote status --json` read, never from a second parse of anything.
+        devicesPane.readConfiguredHosts = { [weak remoteAccessPane] in
+            guard let remoteAccessPane else { return nil }
+            if remoteAccessPane.status == nil { await remoteAccessPane.refresh() }
+            return remoteAccessPane.configuredHosts
         }
     }
 
@@ -277,6 +334,13 @@ public final class SettingsModel {
         linkOrigin = nil
         outcome = nil
         computePane.adopt(cli: cli)
+        remoteAccessPane.reset()
+        devicesPane.reset()
+        connectionsPane.adopt()
+        secretsPane.reset()
+        variablesPane.reset()
+        liveCapturePane.reset()
+        sessionsPane.reset()
     }
 
     // MARK: - Instance
@@ -365,18 +429,18 @@ public final class SettingsModel {
 
     // MARK: - Compute
 
-    // ONE read of `compute show --json` for the whole window. The Compute pane
-    // owns it (compute-model.swift); Connections shows the summary through
-    // these three, so the two panes cannot disagree about which model answers a
-    // turn and neither runs the verb the other already ran.
+    // ONE read of `GET /api/compute` for the whole window. The Compute pane
+    // owns it (compute-model.swift, T6-12); other panes read the report through
+    // these, so no two panes can disagree about which model answers a turn and
+    // none makes the read another already made.
 
     public var compute: ComputeFacts? { computePane.report }
     public var computePhase: ReadPhase { computePane.phase }
-    public var computeCommand: String? { computePane.showCommand }
+    public var computeCommand: String? { ComputeModel.readRoute }
 
-    /// `metistry compute show --json` — which provider and model each tier runs
-    /// on, and whether the key each provider NAMES is present. No value of any
-    /// key crosses this boundary, because the verb cannot print one.
+    /// `GET /api/compute` — which provider and model each tier runs on, and
+    /// whether the key each provider NAMES is present. No value of any key
+    /// crosses this boundary, because the route cannot serve one.
     public func refreshCompute() async {
         await computePane.refresh()
     }
@@ -632,8 +696,6 @@ public final class SettingsModel {
         return secrets.filter { named.contains($0.name) }
     }
 
-    public var bridges: [DoctorRow] { status.report?.bridges ?? [] }
-
     /// What the Connections pane says about the console's door, under the
     /// sign-in state itself. The decision, in one paragraph, because "why does
     /// this Mac not need a passkey?" is the question the row provokes.
@@ -815,6 +877,9 @@ public final class SettingsModel {
         case .identity: await refreshIdentity()
         case .linked: await refreshLinked()
         case .versions: await refreshVersions()
+        case .connections: await connectionsPane.refresh()
+        case .secrets: await secretsWriteFinished(command)
+        case .variables: await refreshVariablesPane()
         }
     }
 
@@ -835,7 +900,7 @@ public final class SettingsModel {
 public struct SettingsConfirmation: Identifiable, Equatable, Sendable {
     /// Which read the verb changes, re-done after it.
     public enum After: Sendable, Equatable {
-        case doctor, deployment, identity, linked, versions
+        case doctor, deployment, identity, linked, versions, connections, secrets, variables
     }
 
     public let id = UUID()
@@ -971,37 +1036,6 @@ public struct LinkedInstance: Identifiable, Equatable, Sendable {
         guard days >= 1 else { return nil }
         return days == 1 ? "Not seen for 1 day" : "Not seen for \(days) days"
     }
-}
-
-/// Settings ▸ Keyboard's five: the any-app shortcuts (components-02 §2, C120).
-/// Registering them is T6-16's; until it lands the switch is off and dimmed
-/// with its reason, and nothing is registered (§2.18.2).
-public enum AnyAppShortcut: String, CaseIterable, Sendable {
-    case ask, note, todo, startRecording, stopRecording
-
-    public var command: ShellCommand {
-        switch self {
-        case .ask: return .ask
-        case .note: return .note
-        case .todo: return .todo
-        case .startRecording: return .startRecording
-        case .stopRecording: return .stopRecording
-        }
-    }
-
-    /// components-02 §2's suggestion.
-    public var suggested: String {
-        switch self {
-        case .ask: return "⌃⌥⌘A"
-        case .note: return "⌃⌥⌘N"
-        case .todo: return "⌃⌥⌘T"
-        case .startRecording: return "⌃⌥⌘R"
-        case .stopRecording: return "⌃⌥⌘S"
-        }
-    }
-
-    /// Why the switch is dimmed today.
-    public static let notYet = "Not in this build yet: the recorder that checks each shortcut with macOS comes first, and nothing is registered until every row is clear."
 }
 
 /// Lines a verb prints as it runs, gathered off the main actor.

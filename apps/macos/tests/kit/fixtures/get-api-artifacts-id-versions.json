@@ -4,7 +4,7 @@
   "ticket": null,
   "request": {
     "method": "GET",
-    "path": "/api/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1/versions",
+    "path": "/api/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/versions",
     "body": null,
     "idempotency_key": null
   },
@@ -12,9 +12,9 @@
   "body": {
     "versions": [
       {
-        "id": "ver_01M3FYT8NB0W22G5J1H3A71PTY",
-        "artifact_id": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
-        "commit": "99e6312e47291e6ffd290464ebab06105b7c647b",
+        "id": "ver_01M3RABJAKM99M4CHEYREJKCBT",
+        "artifact_id": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
+        "commit": "635f0aed735d82703b755d1579b016da0a1222cf",
         "path_prefix": "Artifacts/metistry/store-interface",
         "manifest": {
           "notes.md": {
@@ -25,14 +25,14 @@
         },
         "author_principal": "user",
         "author_kind": "user",
-        "message": "second cut (ver_01M3FYT8NB0W22G5J1H3A71PTY)",
+        "message": "second cut (ver_01M3RABJAKM99M4CHEYREJKCBT)",
         "idempotency_key": "fixture-store-interface-2",
-        "created_at": "2026-09-26T22:54:15.211Z"
+        "created_at": "2026-09-30T04:49:51.955Z"
       },
       {
-        "id": "ver_01M3FYT8N761CDC5HKE1J3H2NZ",
-        "artifact_id": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
-        "commit": "c06a751059a69e78c54bd1f4590661f9a27a377f",
+        "id": "ver_01M3RABJAG8C88BM1VZE7SY3XA",
+        "artifact_id": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
+        "commit": "e0299523d7dc4328a3402fcccfabd96fa99e10f6",
         "path_prefix": "Artifacts/metistry/store-interface",
         "manifest": {
           "notes.md": {
@@ -43,9 +43,9 @@
         },
         "author_principal": "user",
         "author_kind": "user",
-        "message": "first cut (ver_01M3FYT8N761CDC5HKE1J3H2NZ)",
+        "message": "first cut (ver_01M3RABJAG8C88BM1VZE7SY3XA)",
         "idempotency_key": "fixture-store-interface-1",
-        "created_at": "2026-09-26T22:54:15.208Z"
+        "created_at": "2026-09-30T04:49:51.952Z"
       }
     ]
   }

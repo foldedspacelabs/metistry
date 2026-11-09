@@ -45,8 +45,11 @@ the token it returns once. Captures then carry the agent's id as
 *which* agent said what, revoke or rotate that one credential without
 touching anything else, and grant it project membership or a knowledge
 read tier later. The same token also mounts the instance's `mcp-brain`
-surface in Claude Code (`claude mcp add --transport http metistry
-https://<origin>/mcp --header "Authorization: Bearer <token>"`), which
+surface in Claude Code. `metistry connect claude-code` registers it (and
+mints the token); by hand it is `claude mcp add --scope user --transport http
+metistry https://<origin>/mcp --header 'Authorization: Bearer
+${METISTRY_AGENT_TOKEN_CLAUDE_CODE}'` — single-quoted, so Claude Code expands
+the variable when it starts and the token is never written to a file. It
 adds `report`, the shared task list, and scoped knowledge search to the
 session — see `packages/mcp-brain/README.md`.
 
@@ -90,6 +93,22 @@ captured_at: "2026-09-06T…Z"
 ---
 ```
 
+### Session-start briefing
+
+`hooks/hooks.json` also registers a `SessionStart` hook (`startup` and `clear`)
+that runs `scripts/session-start.mjs`: it asks the instance's
+`GET /api/briefing?repo=…&remote=…` once, with the agent bearer
+(`METISTRY_AGENT_TOKEN_CLAUDE_CODE`, else `METISTRY_OWNER_TOKEN`), and injects
+the answer as session context — the project page, open tasks and recent
+sessions for the checkout, as handles plus your own text, under the agent's
+read grant. **On by default; opt out per agent** with
+`metistry connect claude-code --briefing off` (stored on the console with the
+agent's grants, so an opted-out agent is simply served nothing).
+`METISTRY_BRIEFING=off` silences it for one profile. It runs once per session,
+**exits 0 on every path**, and injects nothing when the instance is
+unreachable, refuses, or has nothing to say. `docs/ops/claude-code-plugin.md`
+§5 has the details.
+
 ### Session-end hook
 
 `hooks/hooks.json` registers a `SessionEnd` hook that runs
@@ -109,13 +128,12 @@ short budget; the hook's own network timeout is 8 s.
 
 Each Metistry instance is its own private repo with its own URL and its
 own tokens (plan §4.16). The plugin has no notion of "which vault"; it
-posts to whatever `METISTRY_URL` says. So a **work** Claude Code
-configuration pointed at the second instance's URL and token can only land
-work context in the work vault, and the personal configuration can only
-land personal context in the personal vault. The boundary is the
-environment the session inherits, not a setting inside the plugin —
-keep the two profiles' variables apart (separate shells, separate
-`settings.json` env blocks) and the IP boundary is mechanical.
+posts to whatever `METISTRY_URL` says. So a Claude Code configuration
+pointed at the second instance's URL and token can only land context in the
+second instance's vault, and one pointed at the first instance can only land
+it in the first. The boundary is the environment the session inherits, not a
+setting inside the plugin — keep the two profiles' variables apart (separate
+shells, separate `settings.json` env blocks) and the separation is mechanical.
 
 ## Test
 

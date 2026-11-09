@@ -14,6 +14,8 @@
 // `embeddings.dim`) so the choice stays reversible: changing the model is a
 // full re-embed, not a data loss. PoC-5 measured that at ~125 chunks/sec.
 
+import { hostBoundFetch } from "./egress.js";
+
 /** One chunk of a note, ready to embed. `index` is stable for identical input. */
 export interface Chunk {
   index: number;
@@ -251,7 +253,12 @@ export class EmbedClient {
     this.dim = opts.dim ?? EMBED_DEFAULT_DIM;
     this.batch = Math.max(1, opts.batch ?? EMBED_DEFAULT_BATCH);
     this.timeoutMs = opts.timeoutMs ?? 60_000;
-    this.fetchImpl = opts.fetchImpl ?? ((input, init) => fetch(input, init as RequestInit) as unknown as ReturnType<FetchLike>);
+    // Through the egress door's host rule (ruling 2, X-7): an embedding call
+    // goes to the configured server and nowhere else. It carries no
+    // credential, so the host rule is the whole of the door here; a refusal
+    // surfaces as EmbedUnavailableError, and callers degrade as for a server
+    // that is down.
+    this.fetchImpl = hostBoundFetch(this.url, "the embedder", opts.fetchImpl ?? ((input, init) => fetch(input, init as RequestInit) as unknown as ReturnType<FetchLike>));
   }
 
   /** Embed many texts, `batch` per request. Order is preserved. */

@@ -75,8 +75,23 @@ import Testing
 
 // MARK: - The recorded stream, dropped and resumed
 
+// THE TIME LIMITS. Each test below takes well under 0.1 s alone; the limit is
+// there to turn a stream that never says what the test waits for into a
+// failure instead of a run that never ends. It is two minutes, not one,
+// because the clock starts when the test is dispatched, and `swift test`
+// dispatches every test at once: some 480 of them are main-actor tests, and
+// every `await` here that comes back to the main actor — a frame delivered,
+// a section's read returning through the gate, an `until` poll — waits its
+// turn behind all of their work (hosted windows, accessibility snapshots).
+// On CI's three-core runner that put these at 45–51 s in a run where
+// everything passed and the whole suite took 65 s; on a 16-core Mac, 22–26 s
+// in a 42 s suite. Nothing in the tests sleeps on wall time, and no injected
+// clock changes what they wait on. Shortening these is a change to how the
+// kit hops (every nonisolated async call leaves the main actor and queues to
+// come back) or to how the suite is run, not to the tests.
+
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func aRecordedStreamReachesExactlyTheWatchersEachEventNamesAcrossADrop() async throws {
     let frames = try #require(try ConsoleFixture.load("get-api-events").stream)
     #expect(frames.count > 10)
@@ -126,7 +141,7 @@ func aRecordedStreamReachesExactlyTheWatchersEachEventNamesAcrossADrop() async t
 // MARK: - Sections
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func anEventInvalidatesExactlyItsSection() async throws {
     let console = try FixtureConsole.recorded()
     let scripted = ScriptedStream()
@@ -171,7 +186,7 @@ func anEventInvalidatesExactlyItsSection() async throws {
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func aDroppedStreamFallsBackToPollingAndRecovers() async throws {
     let console = try FixtureConsole.recorded()
     let scripted = ScriptedStream()
@@ -226,7 +241,7 @@ func aDroppedStreamFallsBackToPollingAndRecovers() async throws {
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func aQuietResumedStreamIsLiveOnceItHasStayedOpen() async throws {
     let scripted = ScriptedStream()
     let timing = LiveEvents.Timing(openGrace: .milliseconds(20)) { _ in .milliseconds(5) }
@@ -251,7 +266,7 @@ func aQuietResumedStreamIsLiveOnceItHasStayedOpen() async throws {
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func withNoStreamTheAppPollsAndNothingRetries() async throws {
     let session = ConsoleSession(transport: CallOnlyTransport(), management: nil, eventTiming: .fast)
     session.events.start()
@@ -262,7 +277,7 @@ func withNoStreamTheAppPollsAndNothingRetries() async throws {
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func anInstanceSwitchForgetsTheCursorAndReopensAgainstTheNewConsole() async throws {
     let old = ScriptedStream()
     let new = ScriptedStream()
@@ -292,7 +307,7 @@ func anInstanceSwitchForgetsTheCursorAndReopensAgainstTheNewConsole() async thro
 // MARK: - The shell: the row, the badge, the Dock
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func theBadgeTakesTheCountFromTheStreamAndAnnouncesAChangeOnce() async throws {
     let console = try FixtureConsole.recorded()
     let scripted = ScriptedStream()
@@ -341,7 +356,7 @@ func theBadgeTakesTheCountFromTheStreamAndAnnouncesAChangeOnce() async throws {
 // MARK: - Through the session child (the F-12 frames, T2-18's cursor)
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func theSessionChildsCursorIsWhatAReopenResumesFrom() async throws {
     let child = CursorChild()
     let transport = SessionConsoleCallTransport { child }

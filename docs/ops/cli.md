@@ -2,7 +2,7 @@
 
 `packages/cli` (`@foldedspacelabs/metistry-cli`, plan §4.16: `init | doctor
 | up | update`, plus the install verbs the Mac app drives — `connect-repo`,
-`secrets`, `identity`, `version` and `deployment`,
+`secrets`, `identity`, `version`, `deployment` and `remote`,
 `docs/product/desktop-app-plan.md` — and the per-service verbs its menu bar
 drives: `restart | stop | start | logs`, below) is the operator's front door.
 All of them are real.
@@ -11,12 +11,13 @@ All of them are real.
 | --- | --- |
 | `init <dir>` | create a private instance repo, asking once whether to keep this Mac awake (`--keep-awake <value>` answers it without a terminal) |
 | `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
-| `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
-| `secrets set\|replace\|remove\|hosts\|grant <name>` | owner-named secrets, per instance: the value on stdin into the Keychain, the policy into `.metistry/secrets.yaml` |
+| `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env`; bare `mint` makes the recorder's three tokens |
+| `secrets set\|replace\|remove\|hosts\|grant <name>` | owner-named secrets, per instance: the value on stdin — piped, or typed hidden at a prompt when run in a terminal — into the Keychain, the policy into `.metistry/secrets.yaml` |
 | `secrets list --named [--json]` | the owner-named secrets: names, hosts, grants, presence — never a value |
 | `secrets retire-legacy-env [--yes]` | move what only the product checkout's `.env` still has into the instance's, then delete it |
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
+| `connect --remove <tool> [--json]` | undo `connect`: revoke the row, delete the Keychain item, put the tool's config back exactly as it was |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
 | `console call <METHOD> <path> [--body @file\|-] [--idempotency-key <key>] [--json]` | one authenticated request against the console, as `whoami`'s same principal — the scripting seam |
 | `console session --stdio` | `console call`, held open: one long-lived child answering JSON request lines on stdin — the Mac app's transport |
@@ -26,13 +27,18 @@ All of them are real.
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
 | `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
 | `deployment set-keep-awake [<never\|allow_sleep_on_battery\|always\|always_lid_closed>] [--enabled\|--sleep-on-battery\|--sleep-lid-closed true\|false]` | whether this install holds the Mac awake, on which power, and whether a closed lid should stay awake (macOS); the same protected write; the lid setting is stored and never applied — only an administrator's `pmset` delivers it |
+| `remote [status] [--json]` | how your phone reaches this Mac (plan §2.23, M20): the `remote:` record of `.metistry/deployment.yaml`, the origins it renders into `METISTRY_ORIGIN`, the chooser, and doctor's `remote` rows — `docs/ops/remote-access.md` |
+| `remote set <none\|tailscale\|relay\|cloudflare\|zrok\|ngrok\|port-forward> [provider flags] [--yes] [--timeout <s>]` | choose a provider: preview without `--yes`; with it, configure the new one, wait for its origin to answer from this Mac, write the record (the same protected write), then revoke the old — a failed set-up writes nothing; a token comes on stdin (`--token`), never as an argument |
+| `remote authorize <tailscale\|cloudflare> [--no-browser] [--timeout 300]` | a provider's own browser sign-in, where it has one |
+| `remote test [--json]` | the provider's state and `GET <origin>/health` from this Mac naming this instance (step 6 of the guided flow) |
+| `remote off [--yes]` | back to None, running the old provider's revoke |
 | `vault settings [--push <after_commit\|manual\|<n>m\|<n>h>] [--pull <n>m\|<n>h] [--yes] [--json]` | the vault's git sync policy (M18): when the reconciler pushes and pulls; the same protected write |
 | `vault rollback <commit> \| --to <date> \| --file <path> [--to <date>] [--include-config] \| --request <id>` | roll the vault back (M18): a Needs You request with the preview; Approve makes one new commit as `user`; configuration only with `--include-config` |
 | `migrate-layout [--dry-run] [--json] [--allow-dirty]` | carry an instance from the legacy layout to the flat one: the directory becomes the vault, the machinery moves under `.metistry/`, stored paths lose `Knowledge/` |
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
 | `templates check [<file>]` | does the vault's `Templates/` read — every directive, with the line number Obsidian shows — before the next run reads it (a template change takes effect at the next run) |
-| `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
+| `doctor [--check \| --fix [--yes]] [--json]` | validate every manifest and probe every bridge, service, container, launchd job — then **repair** what it finds: in a terminal a bare `doctor` applies every fixable row's fix and re-checks once; `--check` is read-only; `--fix` repairs without a terminal (`--yes` for a fix that moves files or restarts a running service) |
 | `up` | bring an install to running: containers/host jobs, then doctor — and exit |
 | `down` | stop every host job and container for this instance, then confirm nothing is left running |
 | `update` | move an install forward: pull/build, migrate, restart what changed, pin, doctor |
@@ -41,6 +47,13 @@ All of them are real.
 | `start [<service>…]` | `launchctl bootstrap` + `kickstart -k`, or `docker compose start`, per service |
 | `logs <service>` | tail the job's (or supervisor child's) log file, or `docker compose logs` |
 | `import-sessions` | summarise and post this machine's Claude Code sessions |
+
+The table is the install and day-to-day verbs. The rest each have a section
+below: `compute` (*Choosing compute*), `agents` (*Who is registered*, *A crew's
+definition*, *How much room an agent has*), `connections`, `variables`,
+`extensions`, `instances`, `enroll` (*Adding a phone*), `runs export`,
+and `runtime install` (*Seeding a product directory from an app bundle*).
+`metistry --help` lists every verb the installed CLI has.
 
 ```sh
 # from anywhere, no checkout needed for init
@@ -115,7 +128,7 @@ Five small, read-mostly verbs exist so the Mac app stops parsing
 `.metistry/identity.yaml`, `package.json` and the `secrets list` table itself
 (`apps/macos/sources/kit/instance-files.swift`,
 `apps/macos/sources/kit/secret-listing.swift`) — the same "a behaviour the
-app needs is a CLI change first" rule as `doctor --json` and the
+app needs is a CLI change first" rule as `doctor --check --json` and the
 `restart|stop|start|logs` verbs above.
 
 `metistry identity [--json] [--instance <dir>]` prints `.metistry/identity.yaml` as the
@@ -142,7 +155,7 @@ run, so the change shows in Activity (`activity_feed`) whichever door made it.
   read back before it is sent — what was asked for landed, and `voice` and
   `instance_id` did not move.
 - **The mention follows the name** when it was the one `init` derived from the
-  old name (`Metis` → `@metis`); a mention set on its own stays until
+  old name (`Athena` → `@athena`); a mention set on its own stays until
   `--mention` moves it. A name that yields no mention (`李`) needs `--mention`.
 - Only the lines that change are rewritten; comments and `voice: >` keep every
   byte. Setting what the file already says writes nothing.
@@ -305,7 +318,9 @@ and the row itself (`docs/ops/console-api.md`'s `conflictBody`) survive the
 trip rather than being dropped with the envelope; plain mode is unchanged,
 the body stays off stdout on a failure. A body comes from a file
 (`--body @request.json`) or stdin (`--body -`, so a value never sits in
-shell history); GET needs neither. It refuses a non-loopback
+shell history; in a terminal with nothing piped in it first says, on
+stderr, that the input ends with Ctrl-D, and what you type is shown — a
+body is not a secret); GET needs neither. It refuses a non-loopback
 `METISTRY_CONSOLE_URL`/`METISTRY_URL` outright — the local owner token is
 minted for this machine only, and this verb will not carry it anywhere
 else. `docs/ops/console-api.md` is the routes it can call; the app and
@@ -570,9 +585,9 @@ like — `metistry connect-repo <url>`, the next section; the reconciler
 pushes on the vault sync policy (`metistry vault settings`, below) and never blocks on it. Point Obsidian
 at `<dir>` itself — the instance directory is the vault root.
 
-`init` finds `seed/` in the checkout it runs from (`--product-dir`,
-`METISTRY_PRODUCT_DIR`, the workspace it is installed in, or the current
-directory's enclosing checkout — in that order) and otherwise uses the copy
+`init` finds `seed/` in the product it runs from (`--product-dir`,
+`METISTRY_PRODUCT_DIR`, the release install it runs from, the workspace it is
+installed in, or the current directory's enclosing checkout — in that order) and otherwise uses the copy
 bundled in the npm package, so a stranger's `npx … init` works without a
 checkout.
 
@@ -614,7 +629,10 @@ The instance repo comes from `--instance`, else `METISTRY_INSTANCE_DIR`
      `METISTRY_GITHUB_OAUTH_CLIENT_ID` — see below.
    - `--auth token` reads a PAT (scope `repo`) from **stdin**, so it is
      never in argv, never in shell history:
-     `pbpaste | metistry connect-repo <url> --auth token`.
+     `pbpaste | metistry connect-repo <url> --auth token`. Run in a
+     terminal with nothing piped in, it prompts on stderr and reads one
+     line with the echo off — `secrets set`'s reader, so a typed token is
+     never shown; piped, it is read to EOF as before.
    - `--auth ssh` writes no credential; `ls-remote` in step 3 is the
      check that your key or agent works.
 3. **`ls-remote origin`** — reachability, proven rather than assumed.
@@ -816,11 +834,13 @@ a token and running one command, and dropping one is revoking its row.
 metistry connect cursor                     # ~/.cursor/mcp.json + the Keychain
 metistry connect opencode                   # ~/.config/opencode/opencode.json + the Keychain
 metistry connect devin                      # prints the fields to paste (no API to write them)
-metistry connect claude-code                # mints the plugin's token, prints its env lines
+metistry connect claude-code                # registers /mcp with Claude Code (reads) + prints the plugin's env lines (capture)
 metistry connect cursor --rotate            # a replacement bearer; the old one dies at once
 metistry connect cursor --areas Areas/Engineering --project second-instance
+metistry connect claude-code --briefing off # opt this agent out of the session-start briefing (on, the default, is --briefing on)
 metistry connect devin --remote             # enrols PENDING: its token works once you let it in
 metistry connect --list [--json]
+metistry connect --remove cursor            # the way back: revoke, delete the Keychain item, restore ~/.cursor/mcp.json
 ```
 
 The verb is idempotent because the agent id **is** the tool name: a re-run
@@ -835,8 +855,139 @@ One delivery per tool, chosen by what the tool can read:
 | --- | --- | --- |
 | `cursor` | `~/.cursor/mcp.json` → `mcpServers.metistry` (`url` + `headers`, 0600, other servers preserved) | the login Keychain; the file names it as `Bearer ${env:METISTRY_AGENT_TOKEN_CURSOR}` |
 | `opencode` | `~/.config/opencode/opencode.json` → `mcp.metistry` (`type: "remote"` + `headers`, 0600, other servers preserved; an existing `opencode.jsonc` is the file written, since OpenCode loads it last) | the login Keychain; the file names it as `Bearer {env:METISTRY_AGENT_TOKEN_OPENCODE}` |
-| `claude-code` | nothing — the plugin reads its environment | the login Keychain, with the `export` lines printed |
+| `claude-code` | the user-scope server `metistry` in Claude Code's own file (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`) — added by Claude Code's own `claude mcp add --scope user --transport http`, never by rewriting the file — and, for the plugin's capture, nothing: it reads its environment | the login Keychain; the entry names it as `Bearer ${METISTRY_AGENT_TOKEN_CLAUDE_CODE}`, which Claude Code expands when it starts, and the `export` lines are printed |
 | `devin` | nothing — MCP servers are registered in a web form | printed once, for pasting |
+
+**Claude Code has two halves, and `connect claude-code` does both** (X-133,
+HS-1). The *read* half is the console's `/mcp`: `claude mcp add --scope user
+--transport http metistry <console>/mcp --header 'Authorization: Bearer
+${METISTRY_AGENT_TOKEN_CLAUDE_CODE}'`. Claude Code expands `${VAR}` in a
+user-scope MCP header (the live test `connect.claude-code.live.test.ts` asks the
+real tool on any machine that has one, so a release that stops doing so fails
+a build), so the bearer reaches neither the file nor `ps`. The *write* half is
+the plugin's capture, which reads `METISTRY_URL` and `METISTRY_OWNER_TOKEN`
+from the environment; the printed `export` lines set both from the one Keychain
+item. The file is Claude Code's — every session rewrites it — so `connect` asks
+the tool rather than editing it, takes no backup of it, and reads it only to
+see what is there. An entry named `metistry` that is not the one `connect`
+writes (an older hand-made one with a literal bearer) is replaced; a re-run
+with the right entry already there runs nothing. If `claude` is not on the
+PATH (nor `~/.local/bin/claude`) or refuses, the run still succeeds — the
+token is minted and stored — and prints the add line for you to run
+(`config_state: "manual"` in `--json`). `connect --list` shows both halves
+(`mcp: <file> → mcpServers.metistry; capture: environment …`).
+
+**The harness registry.** Every tool is one entry in `HARNESSES`
+(`packages/cli/src/connect.ts`): how its config is written, read back for
+`--list` and taken away for `--remove`. `connect`, `--list` and `--remove` hold
+no per-tool branches for a config, so adding a harness is one entry, and the
+registry's conformance test (`connect.test.ts`, "the harness registry") holds
+every entry to the same rules: no file `connect` writes, and no argv it runs,
+contains a bearer's value; a second write changes nothing; `--list` reads the
+entry back; `--remove` takes away that entry and nothing else. Each entry also
+declares how the session-start briefing reaches its agent (`briefing`, below),
+and one that delivers it must name a plugin that ships `scripts/briefing.mjs`.
+
+### The session-start briefing: on by default, `--briefing off` to opt out (X-129)
+
+A new session in a coding tool starts out knowing the project it was opened
+in: the project page for the checkout, its open tasks, the owner's recent
+sessions there and the evening folds that name it, as handles plus the owner's
+own text, assembled by the console under the agent's grant
+(`GET /api/briefing`, `docs/ops/client-api.md`). **It is on for every agent
+with a read grant** (the owner's ruling of 2026-10-04: getting the right
+knowledge to the right place is the core feature), and the opt-out is the
+owner's, per agent:
+
+```sh
+metistry connect claude-code --briefing off   # this agent is served the empty briefing
+metistry connect claude-code --briefing on    # take the opt-out back
+```
+
+`--briefing` takes `on` or `off` (anything else is exit 2, nothing sent) and is
+refused with `--remove`. The opt-out is one field, `briefing: false`, in the
+agent's **grants** on the console, so it goes where a revoke goes: revoking
+and connecting again brings the agent back at the default, on. It is enforced
+at the console — an opted-out agent is answered the empty briefing and the
+`runs` row says `opted_out` — not by the plugin, so a stale or edited plugin
+cannot read what the owner withheld. Two behaviours worth knowing:
+
+- **A grants write carries the whole envelope.** `PUT …/grants` replaces it, so
+  `connect` sends the tier, areas, `queries`, `connections` and `briefing` the
+  row already holds with whatever you changed. `--areas` after `--briefing off`
+  therefore leaves the opt-out in place (and no longer drops `queries` or
+  `connections` — it used to).
+- **No read grant, no briefing.** A new row is default-deny (`tier: none`), so
+  an agent is served nothing until `--areas` widens it; `connect` says so.
+
+What carries the briefing into the session is the harness's `briefing` entry in
+`HARNESSES`, and `connect` prints it:
+
+| tool | delivery | plugin |
+| --- | --- | --- |
+| `claude-code` | the plugin's `SessionStart` hook, once, on `startup` and `clear` | `plugins/claude-code` |
+| `opencode` | `experimental.chat.system.transform`: asked once per session, the same text added to every turn | `plugins/opencode` |
+| `cursor` | not delivered — Cursor's session-start hook is not verified | — |
+| `devin` | not delivered — Devin is a cloud agent with no plugin `connect` can reach | — |
+
+For a tool that does not deliver it the setting is still stored, so an opt-out
+holds the day delivery exists. `connect --list` has a `briefing` column: `on`,
+`off`, or `n/a` (no live row, or nothing in that tool delivers it).
+
+### `--remove`: the way back, and coming back (HS-7)
+
+`metistry connect --remove <tool>` undoes what `connect` wrote, and is safe to
+run twice (the second run says there is nothing left). In this order:
+
+1. **the row is revoked** — the bearer is dead before anything local changes.
+   If the console cannot be reached the run stops here and touches nothing
+   else (a Keychain item deleted while its token still authenticates would
+   leave a live bearer nobody holds); start the console and run it again. A
+   tool that was never registered, or is already revoked, passes this step;
+2. **the config is put back** — for `cursor` and `opencode`. (`claude-code`'s
+   entry is taken out with `claude mcp remove --scope user`, and only if its
+   header is the one `connect` wrote; Claude Code's file is not copied or
+   restored, since it changes under you all day. Without `claude` on the PATH
+   that is a `PROBLEM` line with the command to run.) The first time
+   `connect` writes a tool's config it copies the file as it was (bytes and
+   mode) to `<file>.<key>.bak` beside it (`mcp.json.metistry.bak`; a namespaced
+   instance's key keeps its own), and never replaces that copy. Removal takes
+   the entry out and, if the result is the backed-up document, writes the
+   backup's own bytes back — formatting, key order, mode and all. If you have
+   edited the file since, only the entry (and the empty `mcpServers` / `mcp`
+   block and OpenCode `$schema` line `connect` added) goes, and your edits
+   stay. A file `connect` created is deleted again. The backup is removed
+   with the entry. Another server in the file, and another instance's entry,
+   are never touched; a file that is not JSON is left alone and named. An
+   entry under `connect`'s own key whose Authorization header is not the one
+   `connect` writes (a hand-made server that happens to be called `metistry`,
+   with its own bearer) is yours, for every tool: it is left alone and
+   reported as a `PROBLEM` line, the header is never echoed, and the Keychain
+   item still goes;
+3. **the Keychain item is deleted** — this instance's
+   `METISTRY_AGENT_TOKEN_<TOOL>` under this instance's account, and nothing
+   else. A host with no Keychain never held one.
+
+The `export` lines in your profile, and Devin's server at Customize → MCPs,
+are yours to delete — the output says so — and `devin` has neither file nor
+Keychain item.
+Steps 2 and 3 are independent: one failing is reported as a `PROBLEM` line and
+exits 1, the other still runs, and re-running finishes the job. `--remove`
+refuses `--rotate`, `--remote`, `--areas`, `--project` and `--briefing` (exit 2), and
+`--json` prints the result.
+
+**A revoked tool can be connected again.** `metistry connect <tool>` on a
+revoked row registers it again — the **same id**, so old proposals keep their
+provenance — with a **new** token (stored and written exactly as a first
+connect does). What the row held does **not** come back: grants are
+default-deny, projects and autonomy are empty, and areas the owner approved
+from Needs You are gone. `--areas` / `--project` widen it again; `--remote`
+makes it a fresh enrolment (pending until approved). This is how an
+accidental revoke is recovered without a new install. Only an `external` row
+comes back this way — the assistant's row and a crew's are revived by their
+configuration, never by this door. `POST /api/agents` is the same door
+(`docs/ops/client-api.md`); a console from before this answers it `409`, and
+`connect` says to run `metistry update`.
 
 Because a bearer that cannot be stored would have to be rotated to be
 recovered, `connect cursor`, `connect opencode` and `connect claude-code`
@@ -1019,7 +1170,8 @@ alone**. The assistant can never write it (A4), and the console only reads it
 definition editor is a client of it.
 
 - It edits what the editor edits: `--prompt-file` (the operating prompt; `-`
-  reads stdin), `--model` and `--effort` (one dropdown, C128), and
+  reads stdin — in a terminal it says on stderr that the input ends with
+  Ctrl-D, and keeps the echo), `--model` and `--effort` (one dropdown, C128), and
   `--description`. **Every other line of the file is kept as it was**, comments
   included — `uses`, `scope`, `projects` and `autonomy` are what the crew may
   reach, and widening an actor is an edit to the file by hand, never a flag.
@@ -1127,12 +1279,18 @@ reconciler as the `user` principal, and an edit whose RESULT would not
 validate is refused rather than written. `providers add` reads the API key
 from stdin into **one of this instance's secrets** — the login Keychain under
 the instance's own account, its name recorded in `secrets.yaml` sent only to
-the provider's host (`secrets set`'s own code) — and writes
+the provider's host (`secrets set`'s own code) and **granted to the provider**,
+`provider:<name>: on` — and writes
 `auth.secret: "{{ secret.<name> }}"`, a reference; it never takes the key as an
 argument (`--secret <name>` picks which secret; an UPPER_SNAKE name is refused
 with the name it became). `secrets sync --to env` then delivers it to the
 engine as `METISTRY_SECRET_<NAME>` — the engine reads its environment, never the
-Keychain. Budgets are enforced in the engine, before the call — see
+Keychain — and every compute call goes through core's egress door
+(`computeFetch`), which attaches the key only for the provider's own host and
+only while that grant is On (ruling 2 of the W2 checkpoint, X-7).
+`providers set <name> --secret <secret>` writes the same grant for the secret
+it points the provider at. A grant already there — On, Ask or Off — is yours
+and is left alone. Budgets are enforced in the engine, before the call — see
 `docs/ops/compute.md`, which is the whole story including what is missing.
 
 `providers set` is the provider's gear (M16 — the Mac's and the CLI's, never a
@@ -1203,20 +1361,45 @@ chosen beside what the rules served. Until a `policy:` block exists that
 section says every consultation was `absent`; `--json` carries it as
 `policy`. Details in `docs/ops/compute.md`.
 
-## Secrets: the Keychain is the store, `.env` is generated
+## Secrets: the Keychain is the store, `.env` is derived
 
 `metistry secrets` makes the macOS login Keychain the canonical home of
 every secret this install holds, under the service name
-`metistry:<VAR>`; `.env` becomes a file generated from it rather than one
-edited by hand (`docs/product/desktop-app-plan.md`, first-run step 4).
+`metistry:<VAR>`; `.metistry/state/.env` is a file **derived** from it and
+from `.metistry/*.yaml` by `metistry up`, never edited by hand (X-124; the
+owner's 2026-10-04 ruling, `docs/product/decisions-log.md` "M7 reversed";
+`docs/product/desktop-app-plan.md`, first-run step 4).
 
 ```sh
 metistry secrets sync --to keychain               # import .env's secret lines into the Keychain
-metistry secrets sync --to env                    # regenerate .env's secret lines from the Keychain
+metistry secrets sync --to env                    # derive .env again — the same render `metistry up` runs
 metistry secrets mint METISTRY_ASSISTANT_TOKEN    # a new random token, into both
+metistry secrets mint                             # the recorder's three tokens (METISTRY_LIVE_CAPTURE_URL set): the ones missing, kept if present
 metistry secrets list                             # names, scopes and where each lives — never a value
 metistry secrets purge --instance <dir> [--yes]   # delete one instance's Keychain items
 ```
+
+**The recorder's three tokens** (X-80). With `METISTRY_LIVE_CAPTURE_URL` set,
+`metistry up` — and bare `metistry secrets mint` — make
+`METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` (the bar's key: the Keychain item the
+Mac app reads, account = the instance's id), `METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE`
+(what the router presents to the bridge) and `METISTRY_LIVE_CAPTURE_INBOX_TOKEN`
+(a capture owner token labelled `live-capture`, the one the bridge posts
+transcripts with) wherever none exists, before any job is rendered, so the
+bridge is started with them. Nothing is replaced: a Keychain item stands and
+fills `.env`; a value only `.env` holds (an owner-pasted bridge token) is
+adopted into the Keychain; a rerun changes nothing. The inbox token's hash is
+also recorded in the console's `owner_tokens` once the database answers —
+`up` does it again every run, so a rebuilt database is repaired without
+rotating the token; a row the owner revoked is reported, never revived
+(`metistry secrets mint METISTRY_LIVE_CAPTURE_INBOX_TOKEN` makes a fresh one).
+A database that is down or not yet migrated is a note and the next `up`
+records it. Naming one of the three (`secrets mint <VAR>`) replaces it on
+purpose, followed by `metistry restart live-capture`. Without
+`METISTRY_LIVE_CAPTURE_URL` none of the three is made — bare `mint` says so
+and exits 2, and `sync --to env` leaves them alone too. All three are in
+`GENERATED_SECRETS`: their values mean nothing outside this install and
+nothing was started with them before they were made.
 
 `--from` says the same thing from the other end (`--from env` ==
 `--to keychain`); one of them is required, because guessing the direction
@@ -1231,13 +1414,76 @@ and `METISTRY_AWS_ACCESS_KEY_ID` is not. The names themselves come from
 your `.env` plus `.env.example`, including the commented-out
 declarations — that is where a not-yet-set variable is documented.
 
-**`--to env` rewrites in place.** Only the lines that assign a secret
-variable change; every comment, blank line, ordering and non-secret
-assignment survives byte-for-byte (a test asserts exactly that), because
-`.env` also carries hand-written configuration this command must not own.
-A commented declaration (`# METISTRY_GITHUB_TOKEN=`) is uncommented in
-place; a secret the file never named is appended under one marker
-comment. The file is written `0600`.
+**`.env` is derived (X-124).** `metistry up` writes the whole of
+`.metistry/state/.env` — once per run, after every mint and before compose
+or a launchd job reads it — and `sync --to env` is the same render without
+the restart. The file opens with a fixed header and one line,
+`# metistry-env-sha256: <hash of everything below it>`, and its body is
+three sections in a fixed order, each sorted by name, so two renders from
+the same yaml and Keychain are byte-identical (a test asserts exactly that):
+
+- **derived from `.metistry/*.yaml`** — what the instance's yaml decides for
+  the environment. A value the file had that the yaml now decides otherwise
+  is **superseded**: rendered from the yaml, named in `up`'s plan and in
+  doctor's `env` row, and kept in `.env.pre-render` (below). The first key:
+  `METISTRY_ORIGIN`, from the remote-access record (`deployment.yaml`
+  `remote:`, X-105; `docs/ops/remote-access.md`) — the provider's origin
+  first, the loopback origin second, or with `none` the loopback origin
+  alone. A remote origin written into the file by hand is superseded, named,
+  and kept in `.env.pre-render` — and `up`'s plan and doctor's `env` row say
+  what that costs, in the remote rows' own words: the console no longer
+  answers for that origin and **passkeys added at it no longer sign in**; a
+  tunnel to the console's main port is not honoured, the dropped line is kept
+  in `.env.pre-render`, and `metistry remote set tailscale` (or another
+  provider; `docs/ops/remote-access.md`) is how a remote origin is
+  configured.
+- **from the login Keychain** — every secret-shaped variable this install
+  knows (your `.env`, `.env.example`, the last render), from this
+  instance's account; a `GENERATED_SECRETS` one minted when no store has it;
+  the named secrets a service reads delivered as `METISTRY_SECRET_<NAME>`
+  (below). **Adopt before mint:** a secret-shaped line the file holds and
+  the Keychain lacks is copied *into* the Keychain first, so the value a
+  running service was started with is what is rendered. A delivery nothing
+  names any more is dropped, and said; when the sources could not be read
+  this run it is carried instead.
+- **carried from the previous `.env`** — every other assignment, with the
+  right-hand side it had: ports, URLs, knobs, anything nothing in
+  `.metistry/*.yaml` decides yet. Where these go is the self-managing
+  design note's open question 3; until the owner rules they stay here, by
+  name, and `up` lists them. On a host without a Keychain the secret lines
+  are carried too: the file is the store there.
+
+The first render of a hand-written file loses nothing: its secrets are
+adopted, its configuration carried, and the file as it was is kept beside
+the render as `.metistry/state/.env.pre-render` (0600). That first copy is
+never overwritten — it is the only copy of a value the render stopped
+honouring — and a later hand-edited file is kept as `.env.pre-render.1`,
+`.2`, …; nothing in the product deletes any of them (delete them yourself
+once the install is proven). The rendered file itself is written whole, via
+a temporary file and a rename, so a crash mid-write never loses the carried
+section's only copy. Beside the file `up` writes
+`.metistry/state/env-render.json`: every rendered name, the section it was
+written in and a sha256 of its `NAME=value` line — names and hashes, never
+a value.
+
+**A hand edit is a code path, not a warning.** Doctor's **`env`** row
+(kind `instance`) recomputes the body's hash: `ok` when it matches the
+header; `degraded` **pre-render** when the file has no header (written by
+hand, or by a release before this one — `metistry up` derives it);
+`degraded` **hand-edited** when it does not match, naming the changed,
+added and removed lines from the record (`action: run_verb metistry up`).
+The next `up` honours each edit before it overwrites the file, and says
+what it did: an edited secret goes **into** the Keychain (`metistry secrets
+mint <VAR>` or `secrets replace <name>` is the verb for next time), an
+edited carried line keeps its new value, a line removed by hand that a store
+still holds comes back, one in no store stays gone. An in-place CLI write —
+`secrets mint`, the recorder's tokens, the owner bearer,
+`retire-legacy-env --yes`, `migrate-layout` — re-stamps a rendered file, so
+only a hand reaches `hand-edited`. A product checkout's `.env` (an install
+with no instance directory) is not derived: it is the deprecated
+environment `secrets retire-legacy-env` retires. A Keychain value that needs
+quoting is quoted the way the parser reads it back; one with a single quote
+or a newline is refused, not mangled. The file is written `0600`.
 
 **Values never travel in argv.** Every Keychain write is `security -i`
 (its interactive mode) with the one command line — value included — on the
@@ -1311,23 +1557,29 @@ engine without the engine touching the Keychain. For one release the engine
 also reads the older `METISTRY_<NAME>` line T4-3 filled from the same secret,
 so `migrate-scope`'s rewrite never cuts off a running engine.
 
-It delivers the same way **every secret a sync-read connection lists** (T4-24)
-— a connection whose type's provider is product code a sync reads, like
-Linear's `linear_api_key` — so the console's sync can use it. Delivering it is
-not sending it: the sync never puts the value on a request itself; core's
-egress door fills `{{ secret.<name> }}` for a host on the secret's *Sent only
-to* list, when the owner granted it to `connection:<name>`, or refuses
-(`docs/ops/connections.md`, *A sync reading its connection*). An MCP
-connection's secrets are never delivered: the pool fills them in the process
-that dials. Run `sync --to env` again after adding such a connection, then
-restart the console.
+It delivers the same way **every secret a connection the console fills
+lists** (T4-24, T4-10; packages/connections `consoleSecretNames`): a
+sync-read connection's — Linear's `linear_api_key` — and, because the console
+holds the pool the `/mcp` proxy dials through, every `ok` MCP, API, feed or
+files connection's: a header's, a command's environment, an OAuth sign-in's
+refresh token and your own client id. Delivering it is not sending it:
+nothing puts the value on a request itself; core's egress door fills
+`{{ secret.<name> }}` for a host on the secret's *Sent only to* list, when the
+owner granted it to `connection:<name>`, or refuses
+(`docs/ops/connections.md`). A secret no such connection lists stays in the
+Keychain. Run `sync --to env` again after adding a connection or signing one
+in, then restart the console.
 
 And it delivers **`github_write`** (T2-13) when `secrets.yaml` names it — the
 owner's own fine-grained token with pull-request write, which the console's
 pull request doors post reviews with (`docs/ops/client-api.md`, *Pull
-requests*). It is nobody else's: no connection or agent is granted it, the
-GitHub sync reads with its own read-only token, and the doors send it only to
-`api.github.com`, and only while the secret's *Sent only to* list says so:
+requests*). It is nobody else's: an owner-door secret like `github_write` is
+refused a `connection:`, `agent:` or `provider:` grant at the tool (X-41) — by
+`metistry secrets grant`, by `secrets.yaml`'s own schema, and by `secretGrant`
+itself, so no delivery path can hand it to one even from a file written
+before this check. The GitHub sync reads with its own read-only token, and
+the doors send it only to `api.github.com`, and only while the secret's
+*Sent only to* list says so:
 
 ```sh
 printf %s "$TOKEN" | metistry secrets set github_write --hosts api.github.com
@@ -1342,7 +1594,9 @@ whose value means nothing outside this install, so minting one can never be
 the wrong guess and nobody has to paste it anywhere. `metistry up`'s
 generated `METISTRY_DB_PASSWORD` is the precedent; `METISTRY_LOCAL_OWNER_TOKEN`
 (the console's) and `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` (the
-reconciler's owner bearer) are the current list (`docs/ops/auth.md`).
+reconciler's owner bearer) are the first two of the current list
+(`docs/ops/auth.md`); the recorder's three follow, minted only while
+`METISTRY_LIVE_CAPTURE_URL` is set.
 
 **It adopts before it mints.** When one of them is missing from the
 Keychain but `.env` already has a value, that value is the one the running
@@ -1472,12 +1726,21 @@ printf %s "$NEW"   | metistry secrets replace github_write [--expires <date>]
 metistry secrets hosts github_write                        # show *Sent only to*
 metistry secrets hosts github_write api.github.com uploads.github.com   # replace the list
 metistry secrets hosts github_write --clear                # sent nowhere
-metistry secrets grant github_write connection:github on   # On · Ask · Off; unlisted = Off
-metistry secrets grant github_write agent:devin ask
+metistry secrets grant linear_api_key connection:linear on  # On · Ask · Off; unlisted = Off
+metistry secrets grant linear_api_key agent:devin ask
+metistry secrets grant openrouter_api_key provider:openrouter off   # a provider key's grantee (X-7): Off = the engine never sends it
+metistry secrets grant github_write connection:github on   # refused — an owner-door secret (X-41):
+                                                             # no connection, agent or provider is ever granted it
 metistry secrets remove github_write                       # preview: what references it
 metistry secrets remove github_write --yes
 metistry secrets list --named [--json]
 ```
+
+`set` and `replace` read the value from stdin either way — piped, as above,
+or typed hidden at a prompt when the command is run directly in a terminal
+with nothing piped in. A shell's own masked read works too, if you would
+rather not type into the CLI's prompt: `read -rs TOKEN && printf %s "$TOKEN" |
+metistry secrets set github_write --hosts api.github.com`.
 
 Every verb takes `--instance <dir>` (default: the resolved instance).
 
@@ -1498,6 +1761,18 @@ a value the Keychain did not keep whole is removed and refused. Empty values
 and values with a newline are refused. It is never printed, never written to
 `secrets.yaml`, never in a result (`--json` prints names).
 
+Piped stdin is read whole, to EOF, exactly as every other verb above reads
+it. (Every other terminal read follows the same rule: `connect-repo --auth
+token` takes this hidden line; `console call --body -` and `agents define
+--prompt-file -` are text, not secrets, so they keep the echo and say on
+stderr that Ctrl-D ends them.) Run directly in a terminal with nothing piped in, stdin never reaches
+EOF on its own — so `set`/`replace` instead prompt on stderr (`Paste the
+value for <name> and press Enter (input is hidden):`) and read one line with
+the terminal's echo off, the same way a password prompt does: backspace
+edits it, Ctrl-C restores the terminal and exits (130, "cancelled"), and
+Ctrl-D on an empty line is an empty value. Nothing typed is ever echoed, to
+the screen or anywhere else.
+
 **The policy** goes into `.metistry/secrets.yaml`, a §4.7 protected path,
 through the reconciler as you (the same protected write `metistry compute`
 uses), edited as a YAML document so your comments survive, and the result
@@ -1507,16 +1782,22 @@ is validated before anything is written:
 secrets:
   github_write:
     hosts: [ api.github.com ]        # *Sent only to* — host or host:port, no scheme, no wildcard
-    grants: { connection:github: on, agent:devin: ask }   # *Who may use it*
-    expires: 2026-12-31              # where the service reports one
+    expires: 2026-12-31              # where the service reports one — no `grants:`: an owner-door
+                                      # secret has no *Who may use it* line to write (X-41)
+  linear_api_key:
+    hosts: [ api.linear.app ]
+    grants: { connection:linear: on, agent:devin: ask }   # *Who may use it*
 ```
 
 The schema is strict: a file carrying anything else — a `value:` field, a
-string where a policy belongs — does not load, anywhere.
+string where a policy belongs, or a `connection:`/`agent:` grant on an
+owner-door secret like `github_write` — does not load, anywhere.
 
 - `set` refuses a name the file already has (`replace` swaps the value);
   without `--hosts` the secret is filled in for no server until `hosts`
-  names one (a local agent you grant it still gets it as `GITHUB_WRITE`).
+  names one (a local agent granted `linear_api_key` still gets it as
+  `LINEAR_API_KEY` — an owner-door secret like `github_write` is never
+  granted to one, X-41).
 - `replace` keeps the policy and clears an expiry recorded for the old
   value, unless `--expires` gives the new one.
 - `remove` is preview-then-confirm: it names every file under `.metistry/`
@@ -1578,7 +1859,12 @@ metistry secrets purge-shared [--yes] [--instance <dir>] [--json]
    finish it. A reference to a secret the instance does not hold is never
    rewritten. A rewritten `{{ secret.openrouter_api_key }}` still counts its
    original (`METISTRY_OPENROUTER_API_KEY`) as this instance's, so a rerun
-   keeps it and `purge-shared` can find it.
+   keeps it and `purge-shared` can find it. A provider whose `auth.secret`
+   is now `{{ secret.<name> }}` has its key **granted to it**
+   (`provider:<name>: on`, and the provider's host added to *Sent only to*)
+   when the secret names no grant for that provider yet — the engine attaches
+   a provider key only on that grant (X-7). A grant already written is left
+   alone, so a rerun writes nothing.
 3. **Stop reading the per-user account** — `sync`, above.
 4. **Leave the originals.** The migration has no code path that deletes a
    Keychain item (a test hands it a Keychain whose `delete` throws). It
@@ -1591,6 +1877,7 @@ copied METISTRY_DEVIN_API_KEY → devin_api_key (metistry:secret:devin_api_key, 
 copied METISTRY_OPENROUTER_API_KEY → openrouter_api_key (metistry:secret:openrouter_api_key, account 11111111-…). The value is not printed.
 recording in secrets.yaml: devin_api_key, openrouter_api_key — sent to no host and granted to no one until you say (`metistry secrets hosts <name> <host>`, `metistry secrets grant`)
 rewrote .metistry/compute.yaml providers.openrouter.auth.secret: METISTRY_OPENROUTER_API_KEY → {{ secret.openrouter_api_key }}
+granted openrouter_api_key to provider:openrouter: on, and sent only to openrouter.ai as well — the provider's key now reaches its provider (`metistry secrets grant openrouter_api_key provider:openrouter off` revokes it)
 left in the shared scope — this migration deletes nothing: METISTRY_DEVIN_API_KEY, METISTRY_OPENROUTER_API_KEY. `metistry secrets purge-shared` removes an original once every instance on this Mac has its copy.
 shared scope: copied for ~/instances/second.
 ```
@@ -1700,10 +1987,14 @@ leaving `{{ secret.x }}` for the egress fill.
 
 ## Connections: `metistry connections`
 
-M13 (plan §2.2, §2.6): servers Metistry reaches for you, one file each in
+M13 (plan §2.2, §2.6): what Metistry reaches for you, one file each in
 `.metistry/connections/<name>.yaml` (`docs/ops/connections.md` is the whole
-contract). This release dials **MCP servers**, by URL or by command; a
-calendar or tracker connection is read by its sync (`--no-discover`).
+contract). An **MCP server** is dialled by URL or by command; an **API**, a
+**feed** or **files** is reached through the tools Metistry generates for it
+(T4-10); a calendar or tracker connection is read by its sync
+(`--no-discover`), a mailbox is reached over IMAP (`--imap`, T4-15), and an
+**agent** connection is a target a task is dispatched to (`--no-discover`,
+T4-11). `--config KEY=VALUE` sets one of the connection type's fields.
 
 ```sh
 metistry connections add github --type mcp \
@@ -1714,20 +2005,81 @@ metistry connections add linear --type mcp --url https://mcp.linear.app/mcp \
 metistry connections add icloud --type calendar --provider icloud-calendar \
     --url https://caldav.icloud.com/ --auth basic --username you@icloud.com \
     --secret icloud_app_password --no-discover             # CalDAV: an app password, by name
-metistry connections list [--json]                        # every connection: status, reach, tools, used by
-metistry connections show github [--json]                 # one, in full
+metistry connections add gmail --type mail --provider gmail-mail \
+    --imap imap.gmail.com:993 --username you@gmail.com \
+    --secret gmail_app_password                            # IMAP: an app password, by name; nothing is dialled
+metistry connections add devin --type agent --provider devin --url https://api.devin.ai \
+    --auth bearer --secret devin_api_key --config org=org-abc --no-discover   # a dispatch target (T4-11)
+metistry connections add github --type tracker --provider github --url https://api.github.com \
+    --auth bearer --secret github_token --config repos=owner/a,owner/b --no-discover   # read by github-state
+metistry connections add changelog --type feed --url https://example.com/feed.xml   # generated: list_items, get_item, search_items
+metistry connections add costs --type api --url https://api.example.com/v1 \
+    --auth bearer --secret costs_key                       # generated: get (Reads), request (Changes things)
+metistry connections add notes --type files --path ~/Documents/Notes \
+    --include '*.md' --skip 'drafts/**'                    # generated: list_files, read_file, search_files
+metistry connections add tracker --type mcp --url https://mcp.example.com/mcp --auth oauth \
+    --authorize-url https://auth.example.com/authorize --token-url https://auth.example.com/token \
+    --scope read --scope offline_access --client-id-secret tracker_client   # a custom OAuth client (C118)
+metistry connections add work --type tracker --provider acme-tracker --url https://mcp.acme.example/mcp \
+    --config workspace=platform --config region=eu --config api_key=acme_key --no-discover   # a known service's fields, judged against its manifest
+metistry connections authorize tracker [--no-browser] [--timeout 300]       # sign in: the browser, one callback on 127.0.0.1
+metistry connections add google --type calendar --provider google-calendar \
+    --url https://www.googleapis.com/calendar/v3/ --auth oauth \
+    [--client-id-secret google_client_id]                  # Google Calendar (T4-14): Metistry's client, or your own
+metistry connections authorize google                     # sign in with Google
+metistry connections list [--json]                        # every connection: status, reach, tools, used by, last checked
+metistry connections show github [--json]                 # one, in full (each header with its secret names)
 metistry connections policy github                        # the tool table, by group
 metistry connections policy github search_issues allow --group reads
 metistry connections policy github delete_issue never
 metistry connections policy github --offer on             # offer it to agents through Metistry
+metistry connections policy github --fold off             # hand agents its answers whole, however large (on by default: a large answer is folded and paged — docs/ops/connections.md)
 metistry connections set github --env 'LOG_LEVEL=warn' [--unset-env K] [--header K=V] [--unset-header K] [--url …] [-- <command…>]
+metistry connections set work --config region=us              # one field of a known service; the rest keep what the file holds
+metistry connections set calendar --client-id-secret my_client_id [--client-secret-secret my_client_secret]   # bring your own OAuth client
+metistry connections set devin --config org=org-new [--unset-config repos]   # a connection type's fields
 metistry connections test github [--json]                 # dial it: does it answer, and does it still offer every listed tool?
 metistry connections remove github [--dry-run]
 ```
 
 Every verb takes `--instance <dir>` (default: the resolved instance); the
-writing ones take `--dry-run`. `--env` and `--header` repeat. The command and
-its arguments go after `--`.
+writing ones take `--dry-run`. `--env`, `--header`, `--include`, `--skip`,
+`--scope`, `--config` and `--unset-config` repeat. The command and its arguments go after `--`.
+
+**`--config KEY=VALUE` — a known service's fields (T6-13b).** A connection
+type's manifest declares config `fields`, each of a closed kind (`text` ·
+`secret` · `variable` · `url` · `choice` · `oauth`; `docs/ops/extensions.md`),
+and `GET /api/connections` lists them under `types` — what the Mac's Add
+Connection renders. `--config` fills one, on `add` and on `set`, and **each
+value is judged against the manifest before anything is written**; a refusal
+is a **usage error (exit 2)** with one line naming the field, never the value:
+
+- a key the type does not declare, or one given twice (`config.colour: … has
+  no field "colour" — its fields: …`);
+- a value of the wrong kind: a `url` that is not an http(s) URL (or a
+  `{{ variable.<name> }}` holding one), or that carries a secret; a `choice`
+  outside its options; a `text` that looks like a key;
+- a **`secret` field given anything but the NAME of a secret** — bare
+  (`--config api_key=acme_key`) or as `{{ secret.acme_key }}`; the file gets the
+  reference and the name joins `secrets:`. A value on a command line is in
+  every process's argv and the shell's history, so it is refused pointing at
+  `metistry secrets set <name>` (the value on stdin) and is not echoed;
+- a `variable` field given anything but a variable's name (bare or as
+  `{{ variable.<name> }}`);
+- an **`oauth` field** at all — it is signed in, not typed: `--auth oauth`
+  writes it and `authorize` signs in;
+- `--config` on a **custom** connection (it has no fields; its settings are its
+  reach), or naming a provider no installed type provides;
+- a **required** field with no default left out — on `add`, and on `set` once
+  merged with what the file holds (a field left out of `set` keeps its value;
+  `--unset-config KEY` removes one, and removing a required one is refused when
+  the file is judged).
+
+`connections list --json` prints the same `types` the route serves. Its rows
+carry `last_checked` (the stamp `connections test` and `doctor` leave under
+`.metistry/state/`, or `null`) and `header_secrets` like the route's; its
+`used_by` lists syncs only, because agent grants live in the console's registry,
+which the CLI does not read (`GET /api/connections` lists the agents too).
 
 **Names, never values.** A secret is written as `{{ secret.<name> }}` and a
 variable as `{{ variable.<name> }}`; the file lists every name it uses under
@@ -1740,23 +2092,53 @@ before anything is written and without repeating the value:
 - a `{{ secret.x }}` in a **URL** or its query (a URL lands in logs), on a
   **command line** or in a working directory (every process on the Mac can read
   another's argv) — a secret goes in a header or in `env:`;
-- `--auth oauth` (it arrives with T4-10); this release sends none, a bearer
-  (`--auth bearer --secret <name>`), an API-key header (`--auth api_key
-  --auth-header <Header> --secret <name>`) or Basic sign-in with an app password
-  (`--auth basic --username <user> --secret <name>` — the username is written,
-  the password is the secret, filled at the egress door; a username with a colon
-  is refused). `--auth basic` is accepted only by a connection type that
+- a secret's **value** where its name belongs (`--client-id-secret`,
+  `--client-secret-secret` and `--token-secret` take the NAME of a secret).
+  The auth shortcuts: none, a bearer (`--auth bearer --secret <name>`), an
+  API-key header (`--auth api_key --auth-header <Header> --secret <name>`),
+  Basic sign-in with an app password (`--auth basic --username <user> --secret
+  <name>` — the username is written, the password is the secret, filled at the
+  egress door; a username with a colon is refused) and **OAuth** (`--auth
+  oauth`, T4-10). `--auth basic` is accepted only by a connection type that
   declares it (`auth: [basic]` — the CalDAV calendars, T4-13); any other type,
-  or a custom connection, is refused;
+  or a custom connection, is refused. `--auth oauth` on a known service takes
+  its client from the connection type (Metistry's shipped client id, or your
+  own with `--client-id-secret`); on a **custom** connection it needs
+  `--authorize-url`, `--token-url` (https), at least one `--scope` and your own
+  `--client-id-secret` — nothing supplies one (C118) — or it is refused naming
+  what is missing. The sign-in is kept in `--token-secret` (default
+  `<name>_oauth_token`);
 - a Google address for a CalDAV calendar — *Google needs sign-in with Google*
   (its CalDAV takes OAuth only), and a known service (`icloud-calendar`,
   `fastmail-calendar`) pointed anywhere but its own server;
+- a Google Calendar connection (`google-calendar`, T4-14) anywhere but
+  `https://www.googleapis.com/calendar/v3/`, signed in any way but `--auth
+  oauth`, or with headers of its own;
+- for a mailbox (`--imap host[:port]`, T4-15 — port 993 and TLS unless given):
+  no `--username` or `--secret` (the secret holds the app password); an
+  `--auth` other than `basic`; a scheme or path in `--imap`; a mail submission
+  port (25, 465, 587, 2525 — nothing sends mail); `--plain` for any host but
+  this Mac's; Gmail (`gmail-mail`) anywhere but `imap.gmail.com:993`; a
+  connection type that is not reached by imap. `--imap` goes with exactly one
+  way of reaching it — not beside `--url` or a command — and `--plain` only
+  with `--imap`;
 - a name already taken; a provider (`--provider`) that no connection type
   installed provides.
 
 **`add` dials once** — `initialize` and `tools/list`, through the same pool and
 egress door the console uses, calling no tool — and writes nothing if the
-server does not answer (`--no-discover` writes it without dialling). A secret
+server does not answer (`--no-discover` writes it without dialling). A
+mailbox (`--imap`) is not an MCP server, so `add` dials nothing for it and
+says to `test` it; the line it prints names the `host:port` its secret must
+list (`metistry secrets hosts <name> imap.gmail.com:993`). An API, feed or files connection is reached once the same way (a GET, the feed read,
+the folder listed) and written with **the tools Metistry generates for it,
+every one at Ask First** — the default for a proxied tool (CLAUDE.md); `policy`
+moves one to Allow. An OAuth connection is not dialled: it is written, and
+`authorize` signs it in. And when the provider is read by a sync (Linear, the
+calendars) and `scheduled.yaml` names no connection for that sync yet, `add`
+writes **the sync's first `connection:`** there (ruled 2026-09-27) — an entry
+that already names one is left as it is; the Scheduled pane changes a sync's
+interval and rules, never its connection. A secret
 the dial needs must already be granted to `connection:<name>` — `metistry
 secrets grant <secret> connection:<name> on` first, or add it with
 `--no-discover`, grant, then `test`. The owner's defaults (Q15, 2026-09-26): a tool the connection type declares keeps
@@ -1781,9 +2163,35 @@ on this Mac, a secret has no item, a variable is unset, its connection type is
 not installed), `failed` (the credential is refused at the door — not granted
 to `connection:<name>`, or its host is not on the secret's *Sent only to* list —
 or the server cannot be reached). It lists what the server offers that is not
-listed, and what it marks read-only. `metistry doctor` runs the same check for
+listed, and what it marks read-only. For a mailbox, `test` signs in with the
+app password from this instance's Keychain (through the IMAP host guard: the
+exact `host:port` listed, TLS, granted), lists its folders, finds Drafts and
+examines INBOX — reading no message — then logs out: `meta` is `{ mailboxes,
+drafts, inbox_messages }`, `degraded` when there is no Drafts mailbox, `failed`
+on a refused sign-in (*sign in with an app password*). `metistry doctor` runs the same check for
 every connection (never `failed` there: a connection is someone else's
 server, so its outage does not fail the install).
+
+**`authorize`** signs an OAuth connection in, and nothing else does (T4-10):
+it opens a listener on **127.0.0.1 only**, on a port the system picks, for
+**exactly one callback** (then it closes — or at `--timeout`, default 300 s);
+opens the browser at the provider with a PKCE challenge and a random `state`
+(`--no-browser` prints the address instead; it carries the client id, as
+OAuth does); refuses a callback whose `state` is not the one it sent, before
+any code is exchanged; exchanges the code with its verifier through the egress
+door; and keeps the **refresh token** in this instance's Keychain as the
+connection's token secret — never printed. The first sign-in also writes that
+secret's policy: sent only to the token endpoint's host and the service's,
+granted `on` to the connection alone (an existing line is left as it is). A
+bring-your-own client id must be on its secret's *Sent only to* list for the
+authorize and token hosts, and granted to the connection, before the browser
+opens. When the connection type ships a client and says something about
+it — Google Calendar's *Google hasn't verified this app* (T4-14) — that line
+is printed **before the browser opens** (`before you sign in: …`), and only
+for the shipped client: your own client is yours to know. The broker
+redirect (`redirect: broker`) is refused: designed, not built (plan §5). Then `metistry secrets sync --to env` so the console can
+reach it. The assistant cannot start a flow: it has no shell (invariant 9),
+and nothing it reaches imports one (`docs/ops/connections.md`, *OAuth*).
 
 **`remove`** deletes the file. What referred to it — a sync in
 `scheduled.yaml`, a secret's grant to `connection:<name>` — is named and left
@@ -1799,6 +2207,177 @@ the `user` principal, edited as a YAML document so your comments survive, and
 judged exactly as the reader will before anything is written. `list --json`
 prints the rows `GET /api/connections` serves; `show --json` the body of `GET
 /api/connections/:name` (`docs/ops/client-api.md`).
+
+## Reaching this Mac from outside: `metistry remote`
+
+```
+metistry remote [status] [--json] [--instance <dir>]
+metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags] [--yes] [--dry-run] [--timeout <seconds>] [--json]
+  tailscale [--mode funnel|tailnet] [--use-app|--bundled] [--no-browser]
+metistry remote authorize <tailscale|cloudflare> [--no-browser] [--timeout 300] [--json]
+metistry remote test [--json]
+metistry remote off [--yes] [--json]
+```
+
+How the owner's phone reaches this Mac (plan §2.23, M20; the whole story is
+`docs/ops/remote-access.md`). Every install starts at **None**: nothing is
+exposed, `METISTRY_ORIGIN` is the loopback origin alone, and `metistry enroll`
+refuses naming Settings ▸ Remote Access. The record is the `remote:` block of
+the instance's `.metistry/deployment.yaml` — `provider`, `mode`, the `origin`
+it yields and non-secret `settings` (where it forwards to, a node name, a
+tunnel id); **no credential is in it**. It is a §4.7 protected path, written
+through the reconciler as `user` with preview-then-confirm, exactly as
+`deployment set-keep-awake` and `vault settings` write theirs.
+
+`metistry up` **derives** `METISTRY_ORIGIN` from the record: the provider's
+origin first, the loopback origin second — or, with None, the loopback origin
+alone. A remote origin hand-written into `.env` beside `remote: none` is not
+carried, and `up` says so: a tunnel at the console's **main** port is the
+configuration X-103 found unsafe, so the record is the one way a remote origin
+is configured.
+
+**`set`** previews without `--yes` (what `detect` found, what would change,
+which phones the change strands, what the old provider's revoke would undo and
+leave for you). With `--yes`, in this order: configure the new provider (a
+throw writes nothing); wait up to `--timeout` (default 120 s) for the new
+origin to answer from this Mac (never: nothing written, nothing revoked);
+write the record; revoke the old provider. So the phone is never left with
+nothing mid-change. **`off`** is `set none` with the old provider's revoke.
+A provider this version has no adapter for is refused by name, with the
+choices that exist — this release ships None and Tailscale (Funnel by
+default, `docs/ops/remote-access.md`, "Tailscale"); the others arrive with
+their own tickets.
+
+**A token never arrives in argv.** `--token` is a switch meaning *read it
+from stdin* (piped, or typed hidden at a prompt in a terminal — the
+`secrets set` reader). `--token abc`, `--token=abc`, or a value pasted after
+the provider's name is refused with exit 2 and is not echoed.
+
+**The provider's tool arrives with `set`, not with the install.** A provider
+that bundles a tool (Tailscale, Cloudflare Tunnel, zrok) fetches its **pack**
+inside `configure`: one release asset per tool, verified against
+`checksums.txt` and its own manifest, unpacked to
+`<product>/runtime/remote/<tool>/` only once both held — a mismatch fails
+`set`, writes nothing and leaves `runtime/remote/` as it was. Nothing is
+fetched for a provider you did not pick, nothing is in the DMG, and `metistry
+update` moves a fetched pack forward with the release. `METISTRY_RUNTIME_DEPS=0`
+keeps `set` off the network and the refusal names the tool's manual install
+instead (`docs/ops/bundled-runtime.md`, "Provider tool packs").
+
+**`remote --json`** is one document: `provider`, `mode`, `origin`,
+`settings`, `from` (which file the record came from), `origins` (the rendered
+`METISTRY_ORIGIN` list), `dropped_origins`, `available` (the ids this release
+can run), `choices` (the chooser's rows, in the plan's order, each with
+`available`), `rows` (doctor's `remote` rows) and `ok`. Exit 1 when a row is
+`failed`. `remote set --json` prints `{from, provider, origin, applied,
+detail, revoked?, detection, stranding?}` — `revoked` is what the old
+provider's revoke undid and left for you, or in a preview what it **would**
+undo; `stranding` is the sentence about the phones a switch strands, present
+whenever the origin being left has one. **With `--json` the step notes go to
+stderr** — the provider's sign-in link, each approval page, *Waiting for
+<name> to appear on the internet*, the preview's `would:` line and its
+*preview only — pass --yes* — so stdout is exactly the one document and a
+driver (the Mac app's guided flow, X-107) can show the owner where the flow
+is while it waits for the result.
+
+**Doctor's `remote` kind.** None is one `ok` row — *"Remote access: none.
+Your phone can't reach this Mac. Choose a way in Settings ▸ Remote Access."*
+Every provider gets *tool present*, *proxy listener* — **`failed` when its
+recorded upstream is the console's main port**: *"<provider> is forwarding to
+the console's main port, which accepts this Mac's owner token. Run `metistry
+remote set <provider>`."* — and *answers from this Mac*, then its own rows.
+
+## Adding a phone: `metistry enroll`
+
+```
+metistry enroll [--json] [--instance <dir>] [--env-file <path>]
+metistry enroll --cancel <code_id> [--json] [--instance <dir>] [--env-file <path>]
+metistry enroll --status <code_id> [--json] [--instance <dir>] [--env-file <path>]
+```
+
+A phone gets its own passkey by opening a one-time **enrolment code** (plan
+§2.22, M19; `docs/ops/auth.md`, "Adding a phone"). `metistry enroll` mints one
+on this Mac — single use, ten minutes, stored hashed in
+`auth_enrollment_codes` — and prints the URL to open on the phone:
+
+```
+$ metistry enroll
+Open this on the phone — it works once, for 10 minutes (until 14:52):
+  https://assistant.example/#enroll=Qm9…
+Your phone must be able to open assistant.example.
+Code 42 — `metistry enroll --cancel 42` ends it early.
+```
+
+The URL is `<first METISTRY_ORIGIN entry>/#enroll=<code>` — the canonical
+origin passkeys bind to. **No HTTP route mints a code**, not an
+unauthenticated one and not a `local` one: shell access to this Mac is the
+root of trust for a first credential (plan §4.2), and a test holds the route
+table to it. The Mac app's *Add a Phone…* sheet runs this verb (X-77) and
+draws the QR itself; the CLI prints the URL only (a terminal QR needs an
+encoder nobody has asked for — open question 1 in §2.22). The mint is core's
+`mintEnrollmentCode`, the function the console spends a code with, so the two
+cannot disagree; `apps/console/scripts/enroll.mjs` (the compose shape, and
+`--owner-token`) calls the same one.
+
+**It refuses before it mints** when the phone cannot possibly complete the
+ceremony against that origin. The first `METISTRY_ORIGIN` entry is checked,
+in this order, and a refusal writes no row and exits 1:
+
+| when | the refusal |
+| --- | --- |
+| the host is loopback — `127.0.0.0/8`, `::1`, `localhost`; **every install's default** (`init` writes `http://127.0.0.1:<port>`) | *Your phone can't reach this Mac yet: Metistry only answers on this Mac. Choose how your phone reaches it in Settings ▸ Remote Access (`metistry remote set`).* |
+| the scheme is `http:` | *A passkey needs HTTPS. METISTRY_ORIGIN is `<origin>`; set it to the https:// address your phone will open.* |
+| the host is an IP literal | *A passkey needs a name, not an IP address. METISTRY_ORIGIN is `<origin>`; set it to a hostname your phone can open.* |
+| `GET <origin>/health` does not answer from this Mac within 5 s, or `GET <origin>/api/identity` names another instance's `instance_id` | *`<origin>` doesn't answer from this Mac, so your phone won't reach it either. Settings ▸ Remote Access shows what `<provider>` reports.* — the provider `deployment.yaml`'s `remote.provider` records (§2.23), "your remote-access provider" until one is chosen; the failing probe is printed under it |
+
+An unset or unparsable `METISTRY_ORIGIN` is refused by name as well. Every
+refusal names `METISTRY_ORIGIN` and ends with the same pointer: Settings ▸
+Remote Access on the Mac, `metistry remote` in a terminal. The checks are
+necessary, not sufficient — a name that resolves only on this Mac still
+passes, which is what *"Your phone must be able to open `<host>`"* is for.
+
+**`--json`** writes exactly one document. On a mint:
+
+```json
+{"url":"https://assistant.example/#enroll=Qm9…","code_id":42,"origin":"https://assistant.example","expires_at":"2026-10-18T14:52:10.123Z"}
+```
+
+`code_id` is the row's id, never the code. On a refusal, exit 1 and one
+document on stdout — `{"refused":{"case":"loopback","message":"…","origin":"http://127.0.0.1:8080","fix":"…"}}`
+(`case` is one of `origin_unset`, `origin_invalid`, `loopback`, `http`,
+`ip_literal`, `unreachable`, `other_instance`; `detail` carries the failing
+probe when there is one) — so the Mac's sheet shows the refusal's own words.
+
+**`--cancel <code_id>`** expires an unused code at once, so a QR left on
+screen or in a screenshot is dead the moment the owner is done with it; the
+Mac's sheet runs it when it closes and before *Make a New Code*. It takes the
+id, never the code. A code already used or expired is reported, exit 0
+(`already_used`, `already_expired`); an id nothing has is exit 1
+(`not_found`). `--json`: `{"code_id":42,"outcome":"cancelled","cancelled":true}`.
+
+**`--status <code_id>`** (X-114, §2.23 step 7) is read-only: whether the
+phone's `POST /auth/enroll/start` has reached the console with this code, and
+through which listener — what the Mac's sheet polls to turn to **Opened on
+your phone**. It takes the id, never the code, and writes nothing (no `runs`
+row). `--json`:
+
+```json
+{"code_id":42,"state":"live","expires_at":"2026-10-18T14:52:10.123Z","opened_at":"2026-10-18T14:44:02.511Z","opened_via":"proxy","provider":"tailscale"}
+```
+
+`state` is `live`, `used` or `expired` (a cancelled code is `expired`);
+`opened_at` / `opened_via` are `null` until a start has arrived; `provider` is
+`remote.provider` from `deployment.yaml`, `null` with none. **Only `proxy` is
+the proof** — the start came through the listener a provider is pointed at.
+`main` means it arrived over loopback (the owner opened the link on this
+Mac), is recorded, and is never shown as the phone arriving. An id nothing has
+is exit 1.
+
+The mint and the cancel land in `runs` (`auth` / `enroll`, `enroll_cancel`)
+with the id, never the code. The database comes from `METISTRY_DB_*` in the install's
+environment (`--instance <dir>` picks up `<instance>/.metistry/state/.env`);
+without `METISTRY_DB_PASSWORD` the verb exits 2 and says so — it never
+guesses a database.
 
 ## Importing Claude Code sessions
 
@@ -1888,27 +2467,43 @@ fail the run.
 
 ## Reading a doctor report
 
+The first line names the product doctor read, so a bare `metistry doctor`
+never leaves you guessing which one that was:
+
+- `release 0.5.0 (read from /…/product/current)` — a release install. A bare
+  `metistry doctor` (no `--product-dir`, no `METISTRY_PRODUCT_DIR`) run from an
+  installed CLI resolves the **install it runs from** — the product dir
+  holding `releases/` and `current` — and reads `current`, even when the
+  current directory is inside a development checkout or the install sits
+  inside one (X-101). Given the install's root (what `--product-dir`,
+  `METISTRY_PRODUCT_DIR` and the shim all name), doctor reads its `current`
+  the same way; given `releases/<version>` or `current` itself, it reads that.
+- `checkout` — anything else: a workspace install, or a checkout passed with
+  `--product-dir`.
+
+`doctor --json` carries the same as `product`: `{ kind: "release" | "checkout",
+version?, install_dir? (a release's product dir), read_dir }`. `product_dir` is
+still the directory doctor was given.
+
 ```
-/Users/you/src/metistry — shape launchd, 2026-09-19T09:14:02.118Z
+/Users/you/src/metistry — checkout, shape launchd, 2026-09-19T09:14:02.118Z
 
 bridge
   ✓ apple-fm  ok       920ms
-  ✗ eventkit  failed     4ms
-      → eventkit rejected the token (HTTP 401) — the METISTRY_BRIDGE_TOKEN_* in
-        .env differs from the one the bridge was started with
-
 service
   ✓ reconciler  ok        53ms
   ✓ console     ok         6ms
 
 cli
-  ○ cli on PATH  absent     0ms
+  ○ cli on PATH  absent     0ms  your hand
       → `ln -s /Users/you/instance/.metistry/state/cli/metistry
         ~/.local/bin/metistry` (or add its directory to PATH)
 
 db
   ✓ db          ok        16ms
-  ✓ migrations  ok         3ms
+  ! migrations  degraded   3ms  fixable
+      → 1 migration(s) not applied (0042_example.sql) — `metistry doctor`
+        applies them (the runner `metistry update` uses)
 
 launchd
   ✓ launchd:com.foldedspacelabs.metistry.reconciler  ok         4ms
@@ -1916,8 +2511,14 @@ launchd
 container
   ✓ compose:console  ok         0ms
 
-9 checks: 7 ok, 0 degraded, 1 failed, 1 absent — ✗ FAILED
+8 checks: 6 ok, 1 degraded, 0 failed, 1 absent — ✓ healthy
+1 fixable, 1 needs your hand — `metistry doctor` in a terminal applies the fixes, or `metistry doctor --fix`
 ```
+
+The marker at the end of a row says who puts it right (*Doctor repairs*,
+below): `fixable` — doctor does it, and after a repair run `fixed` or `still
+failing`; `your hand` — the remediation under the row is the step; nothing for
+a fact or an `ok` row. The last line appears only when something is fixable.
 
 One block per `kind`, the remediation — the reason a red row is read at all
 — wrapped directly under its row rather than in a column that runs off the
@@ -1927,7 +2528,8 @@ terminal's locale is not UTF-8, come from `docs/ops/cli-style.md`;
 
 One row per thing that can be wrong; every row is a `core` `CheckResult`
 (`name`, `status`, `latency_ms`, `probe`, `remediation`, `meta`) plus a
-`kind`, and — additively, T4-21 — an optional `action`. Statuses mean what
+`kind`, and — additively, T4-21 — an optional `action`; since X-123 every row
+also carries `fix` and `fixed` (*Doctor repairs*, below). Statuses mean what
 they mean everywhere else in the product:
 
 | status | meaning | exit code |
@@ -1941,6 +2543,140 @@ they mean everywhere else in the product:
 how optional bridges are designed to behave (a Linux box has no apple-fm).
 Something you rely on that shows `absent` is still a finding — read the
 column, not just the exit code.
+
+### Doctor repairs
+
+> "Regardless of the problems found, the user only needs to run `metistry
+> doctor` to fix it and get the instance working correctly." — the owner,
+> 2026-10-04
+
+Doctor's purpose is repair, not a status pane (X-123). **Every row is
+classified**, in code, per finding — never by reading its own sentence:
+
+| `fix` | meaning | the table shows |
+| --- | --- | --- |
+| `fixable` | doctor does it: the row carries a `repair` — an id from a closed table, what it acts on, and whether it asks first | `fixable`, then `fixed` or `still failing` after a repair run |
+| `hand` | the owner does it, and the remediation says the exact step: a TCC grant (System Settings), a credential another service issues, a download, `sudo`, choosing the instance directory, a password nothing holds | `your hand` |
+| `info` | a fact, not a fault: a feature that is off, a server nobody runs, a schedule that has never run, a row that follows another's finding | nothing |
+
+**Modes.** Which one runs is decided by the flags, and for a bare `doctor` by
+whether there is a person to ask:
+
+- **`metistry doctor`** in a terminal checks, then **applies every fixable
+  row's fix**, asking once (`y/N`) per fix that moves files or restarts a
+  running service, then **re-checks once** — never a loop — and prints the
+  fixes as `up` prints its steps (`$ argv`), then **before → after** for each
+  row a fix was for, then the re-check's tally. Exit 0 when nothing is
+  `failed`, no fix failed, and none is waiting for a `--yes`.
+- **`--check`** is read-only — exactly the report, as before. It is what
+  `up`'s and `update`'s closing doctor, CI, the wave checkpoint and the Mac
+  app's refresh run (the app's M6 door is exactly `doctor --check --json`, and
+  Fix All's is exactly `doctor --fix --yes --json` — the app sends no other
+  `doctor` argv).
+- **`--fix [--yes]`** repairs without a terminal. A destructive fix runs only
+  with `--yes`; without it, it is previewed, left, and the run exits non-zero.
+- **A bare `doctor` with nobody to ask** — a pipe, a script, an agent, the Mac
+  app, or `--json` (the question would land in the document) — is `--check`,
+  and ends with one line — *N fixable — `metistry doctor` in a terminal applies
+  the fixes, or `metistry doctor --fix`*. So every script and agent that
+  runs `metistry doctor` today stays read-only, and the only way to repair
+  without a terminal is to say `--fix`.
+
+**The closed table** (`RepairId`, `packages/cli/src/doctor.ts`; the fixes,
+`doctor-fix.ts`). Each is an existing audited service, run through the same
+`StepRunner` as `up`'s and `update`'s steps — no new shell-out, no raw git,
+nothing a row's prose could add (invariants 9 and 10):
+
+| id | what runs | for | asks first |
+| --- | --- | --- | --- |
+| `restart <service>` | `metistry restart <service>` (service-control.ts: the supervisor's socket for a child, `launchctl kickstart -k` for an agent, `docker compose restart` for a container) | the console down; a bridge unreachable or answering without a `check()` body; the db unreachable; a supervisor child crash-looping or exited; a launchd job bootstrapped and not running; a container not running | no — nothing running is interrupted. **Yes** when the service answers and is bounced for a newer `.env` value: the console refusing `METISTRY_LOCAL_OWNER_TOKEN`, a bridge refusing its token (never a re-mint), the reconciler predating `/vault/status`; and for the supervisor itself (every child restarts) |
+| `migrate` | the migration runner under `pg_advisory_lock`, one transaction per file — `update`'s step alone, never the rest of `update`, and never `pnpm db:migrate`, which a release install does not have | `migrations` pending, or no `schema_migrations` table (a fresh launchd install whose `up` never migrated crash-loops its console until this runs) | no |
+| `render` | `up`, inside doctor exactly as `update` runs it inside itself — one renderer | a launchd job not bootstrapped; no `supervisor.json`; `launchd env` drift or never rendered; `supervisor.json` without the assistant child; a child spawned from an older render; nothing spawned under a Seatbelt profile (`spawned.profile === null`, X-48); keep-awake with no state file or released when the supervisor stopped; a compose service with no container | **yes** — it restarts the supervisor and every child |
+| `cli_shim` | write this install's cli shim (`up`'s step) | `cli on PATH` with no shim yet | no |
+| `seed_templates` | re-seed the templates the vault lacks (`update`'s step; a file you have is never touched) | a schedule row skipped `template_missing` | no |
+| `vault_case` | rename product files to the seed's spelling through the reconciler (`update`'s step) | `vault case` | no |
+| `migrate_scope` | `secrets migrate-scope` — copies, deletes nothing (`update`'s step) | `shared scope` with credentials still only in the retired scope | no |
+| `migrate_layout` | `metistry migrate-layout` | `instance layout` legacy | **yes** — a `git mv` storm |
+| `migrate_inbox` | `metistry migrate-inbox` | `inbox` pre-#156 | **yes** — files move |
+
+What stays the owner's hand, with the exact step on the row: a TCC grant; a
+credential another service issues (a provider key, a connection's secret); a
+download (the app behind the lock, Docker); `sudo pmset`; choosing the
+instance directory; linking the shim onto `PATH` (invariant 2); a database
+password nothing holds (never minted over a data dir); removing the shared
+originals (`secrets purge-shared`, its own preview); a schedule the runner
+stopped or blocked; a conflict in the vault; `Me/profile.md`'s working days;
+the keep-awake setting (`seed/deployment.yaml` says the product may not
+decide it). Informational: a feature that is off (turning it on is yours), a
+local server nobody runs, a child **you stopped** (`metistry stop` — doctor
+never starts it; `metistry start` is yours, rule 6), rows that follow
+another's finding (the brain while the console is down; migrations and
+schedules while the db is unreachable).
+
+**Rules a repairing tool is held to**, each a code path with a test:
+
+- **No fix on a false reading.** X-122's grace and X-48's "read what the
+  supervisor spawned" land first; a row whose age nothing can tell is not
+  fixed on a guess.
+- **One pass, never a loop.** Each fix runs at most once per invocation, the
+  re-check fixes nothing, and a fix that ran without clearing its row reads
+  `tried X; still failing`. A **restart-class fix** (`restart`, `render`) is
+  not repeated for the same target within `METISTRY_DOCTOR_RESTART_WINDOW_MIN`
+  (default 30) across invocations — the fix log is the evidence — and the row
+  becomes yours, with when doctor tried and the log to read. A repair run
+  pressed repeatedly cannot restart-storm a crash loop.
+- **Dependency order, and a dependent row waits.** The db, then its schema,
+  then the render, then the supervisor, then what it runs, then the files. A
+  `render` restarts everything, so no restart runs beside it; the
+  supervisor's restart takes its children's with it. Rows those would have
+  fixed are re-evaluated by the re-check, not fixed separately.
+- **Never a declaration.** Doctor never turns a feature on or off, never
+  mints or rotates a credential, never changes `keep_awake`, a sandbox switch
+  or a host list, and never starts what you stopped.
+- **Audited.** The `$ argv` lines a terminal shows are the runner's, as
+  `up`'s are; and every fix — what, for which rows, its steps, its outcome,
+  an error — is appended to `<instance>/.metistry/state/doctor-fixes.jsonl`
+  (derived state, `0600`; names and argv, never a value).
+
+**`--json`** adds, additively: `mode` (`check` | `fix`); on every row `fix`
+(`fixable` | `hand` | `info`) and `fixed` (`true` when a repair run cleared
+the row, `false` when a fix ran — or failed — and it is still a finding,
+`null` when no fix was for it), and `repair` (`{ id, target?, confirm, does }`)
+on a fixable row; and in fix mode `fixes[]` — one per fix that was planned,
+in the order it ran: `id`, `target`, `rows`, `does`, `confirm`, `outcome`
+(`fixed` | `applied` | `failed` | `declined` | `needs_confirm`), `steps`
+(the runner's ledger), `error`, `before` and `after` (status per row). The
+rows of a fix-mode document are the **re-check's**. `action` is unchanged
+beside all this — the Status window's **Fix All** (X-125) reads `fix`,
+`fixed` and `fixes[]`.
+
+**A collector's row is the collector's own `check()`** (X-87). Every
+collector exports `check()` (CLAUDE.md; one CI test holds it — no allowlist),
+and doctor asks each one: it loads `collectors/dist/<name>/run.js` from the
+checkout or the release pack, calls `check()` with what the console would hand
+`run()` plus a short timeout, and lays the verdict over that collector's one
+`collector` row (the probe reads `…/manifest.yaml validates; check(): …`; there
+is no second row kind, and the `schedule` row — last run, overdue, failure
+streak — is unchanged). A `check()` is cheap and local-first: configuration and
+credential presence, the connection it reads opened through the same opener the
+console uses (host pinned, secret delivered), then — where the shared connection
+check dials that kind of connection — that check, once per run, shared with the
+`connection` rows. It never syncs, and AWS Cost Explorer is never called (it
+bills per request).
+
+| a collector reports | when |
+| --- | --- |
+| `ok` | it holds what it needs (and its connection answered, where that is dialled) |
+| `absent` | nothing to read yet: no instance, connection, key or bridge — it degrades absent and the remediation names the command |
+| `degraded` | its connection did not answer within the timeout, or answered worse than ok (a connection is someone else's server — the same rule as the `connection` rows) |
+| `failed` | the connection file cannot be used (the words the run would throw), its bridge refused the token, or the check itself broke: a module that will not load, a `check()` that throws, hangs past twice the timeout, or answers something that is not the `check()` shape |
+| `degraded`, "not built" | `collectors/dist/<name>/run.js` is missing: `pnpm -r build` in a checkout, `metistry update` for a pack |
+
+A `check()` that breaks costs its own row and nothing else: the rest of the
+report still runs. Calendar and tracker connections are read by their
+provider's sync and the shared connection check does not dial them (it refuses
+them `not_built`, carried as `meta.refused`), so for those the collector row is
+`ok` with `meta.dialled: false` — what could be verified locally.
 
 **`action`** (T4-21, `packages/cli/src/doctor.ts`). The Mac app's Services
 pane reads `doctor --json` and wants a button beside a red row, not a
@@ -1975,6 +2711,35 @@ child's `uptimeMs` (already tracked, `apps/watchdog/src/supervisor.ts`)
 divided down to match. Best-effort throughout, like every add-on fact in
 this report: an unparseable `Status` or a `ps` that fails reports no
 `uptime_sec` rather than failing the row.
+
+**A job that has just started is given time (X-122).** A check that depends on
+something kickstarted moments ago is asked again, or read as *pending*, before
+it is allowed to fail. Two runs failed a healthy install on 2026-10-04 by racing
+exactly this: after `metistry update`, sixteen schedule rows said the console's
+runner was not running them, because the console had come up seconds earlier
+and its scheduler had not ticked; and at `up`, the recorder helper's socket was
+not there one second after bootstrap.
+
+- **A bridge, the console or the brain** whose probe fails while its job (or,
+  for `live-capture`, its recorder helper, or the supervisor that restarted it)
+  started less than the start grace ago is probed again every second until it
+  answers or the grace is spent; then the row is whatever the last probe said.
+  The grace is `METISTRY_DOCTOR_START_GRACE_SEC` (default `30`; `0` turns the
+  waiting off), and it is also the most one doctor run waits on any row.
+- **A schedule row** whose only fault is "overdue" reads **pending** (status
+  `degraded`, so the run still exits 0; `meta.pending: true`, with the runner's
+  uptime) while the console's runner has been up for less than its first tick
+  plus the start grace — `METISTRY_RUNNER_TICK_MS` (the console's own setting,
+  default 60 s) + `METISTRY_DOCTOR_START_GRACE_SEC`. Past that it fails as it
+  always did. A failure the runner itself recorded (a stopped streak, a blocked
+  config) is never graced: only the clock reading waits on a tick.
+- **What counts as "started" is evidence**, never a guess: the supervisor's
+  uptime for a child, `ps -o etimes=` for a launchd job, `docker compose ps`
+  for a container, and the start times `up` and `update` hand over for the jobs
+  they have just bootstrapped or kickstarted (in-process, or to `update`'s child
+  doctor in `METISTRY_DOCTOR_STARTED=label=epochMs,…`). A job whose age nothing
+  can tell is **not** graced, and neither is one that started before the grace:
+  it is reported failed on the first answer, with no second probe.
 
 **`instance layout`** is its own row, reported as `flat` or `legacy`:
 `flat` when the vault root holds the vault and `.metistry/` holds
@@ -2023,8 +2788,10 @@ set; before that the bridge's row is `absent`, "not configured"). The
 is the bridge's own `check()`: the three grants as macOS lets a helper know
 them, the on-device transcriber, and the transcript delivery — `degraded`
 while `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` is unset (transcripts stay on the
-Mac) or while a recording is still owed to the inbox, with the console's
-own reason. Its restart hint is `metistry restart live-capture`.
+Mac — `metistry up` makes the token, so this means a bridge started before
+it did: `metistry restart live-capture`) or while a recording is still owed to
+the inbox, with the console's own reason. Its restart hint is `metistry
+restart live-capture`.
 
 **The `registries` row** (plan §2.7). One row across every registry kind —
 collectors, routines, targets, provider templates, connection types — loaded
@@ -2035,7 +2802,23 @@ older `.metistry/targets/`). `meta` carries the units per kind, every overlay
 its reason. A skip is `degraded`, never `failed`: the product runs without the
 unit, and the remediation names the file and what is wrong with it (most often
 a manifest without `schema: 1`). `metistry extensions list` is the same facts
-for the extensions directory alone.
+for the extensions directory alone. Since 0.17.0 (X-85) the console loads one
+`targets/` manifest only — the crews' `local-crew` — so the row also lists, as
+skipped, every other `targets/` manifest (the product's, the older
+`.metistry/targets/`, an extension's), each naming `metistry connections add`:
+GitHub Issues and Devin are agent connections now.
+
+**The `target keys` row** (X-85, only when it has something to say). T4-11
+kept `METISTRY_GITHUB_TOKEN` and `METISTRY_DEVIN_API_KEY` working for one
+release, for dispatch and the GitHub and Devin syncs; 0.16.0 was that release,
+and the console no longer reads either. When one is still set in this install's
+environment the row is `degraded`, names which, says it is ignored, and names
+the verb that replaces it — `metistry connections add <name> --type agent
+--provider devin|github-issues …` (`docs/ops/connections.md`, *Agent
+connections*) — then to drop the line from `.env`. Names, never values; never
+`failed`, since nothing is broken until the connection is wanted. (`metistry
+update` still reads `METISTRY_GITHUB_TOKEN` for the Releases API, which the
+row says.)
 
 **The `vault sync` row** (plan §2.21). The reconciler's `GET /vault/status`
 with its bearer: ahead and behind the remote, the last push, any conflict and
@@ -2165,11 +2948,14 @@ half-installed.
 ## Bringing an install up
 
 `metistry up [--no-compose] [--no-launchd] [--namespace] [--dry-run] [--instance <dir>]`
-takes a product checkout plus an instance with a filled-in
-`.metistry/state/.env` to *running*. It prints which dotenv file that is, renders it
-into the plists as `__ENV_FILE__`, and hands it to `docker compose` as
+takes a product checkout plus an instance to *running*. It derives the
+instance's `.metistry/state/.env` from `.metistry/*.yaml` and the login
+Keychain (the `env` section; "Secrets" above, X-124), renders that file into
+the plists as `__ENV_FILE__`, and hands it to `docker compose` as
 `--env-file` (compose interpolates from its own `./.env` otherwise, which
-is no longer the install's environment).
+is no longer the install's environment). A dry run plans the derive and
+writes nothing; an install with no instance directory keeps its checkout's
+`.env` as it is.
 
 **What it starts is the same in every deployment shape; where depends on
 `.metistry/deployment.yaml`** (`docs/ops/deployment-shapes.md`). The default is
@@ -2240,7 +3026,9 @@ return the instance to the fixed labels and ports.
    `live-capture` bridge beside the other bridges (a supervisor child under
    the launchd shape). Without the variable neither exists, so an install
    that never asked for a microphone never grows a job that could ask for
-   one. A release carries no built bundle; `up` pins the job at the signed
+   one. `up` also makes the recorder's three tokens (control, bridge, inbox)
+   where they are missing, before the jobs are rendered — see *Secrets* above.
+   A release carries no built bundle; `up` pins the job at the signed
    one in the install root the way it pins the calendar's, and a missing one
    is a note naming `packages/mcp-live-capture/scripts/build-helper.sh`.
 
@@ -2441,7 +3229,7 @@ install forward, in this order:
 
 | step | git mode (the product is a checkout) | release mode (`.metistry/metistry.lock`: `source: release`, or `--channel release`) |
 | --- | --- | --- |
-| product | `git fetch` + `git pull --ff-only` — a diverged checkout stops the update (exit code git's) | resolve the release, download its runtime pack + `checksums.txt`, **verify the sha256**, unpack to `releases/<version>/`, point `current` at it (`docs/ops/releases.md`) |
+| product | `git fetch` + `git pull --ff-only` — a diverged checkout stops the update (exit code git's) | resolve the release, download its runtime pack + `checksums.txt`, **verify the sha256**, unpack to `releases/<version>/`, point `current` at it (`docs/ops/releases.md`); then the deps pack to `runtime/`, and **every provider tool pack already under `runtime/remote/`** to the same release — a tool whose provider was never chosen is not fetched (`docs/ops/bundled-runtime.md`, "Provider tool packs") |
 | app | — (a checkout's app is Sparkle's or a local build's) | **macOS, launchd shape:** `Metistry-<version>.dmg` from the same release, sha256-verified the same way, swapped into `/Applications/Metistry.app` with the old one kept as `Metistry.app.previous` (below) |
 | build | `pnpm install --frozen-lockfile` + `pnpm -r build` (`--skip-build` to reuse `dist/`) | no build — the pack is compiled output |
 | migrations | `db/migrations/*.sql` not yet in `schema_migrations`, in filename order, one transaction each, under `pg_advisory_lock` (below); `--skip-migrate` leaves them to doctor to report | same, read from `current` |
@@ -2670,8 +3458,9 @@ the new release's manifests with the old manifest schema — and an update
 that changed the schema would end "updated, and doctor is not happy" (exit 1)
 while a standalone `metistry doctor` is clean. So the closing doctor runs as
 a child of the updated product's own CLI: `node
-<run-dir>/packages/cli/dist/main.js doctor --json --product-dir <run-dir>`
-(`<run-dir>` is the checkout, or `current` in release mode; `node` is the
+<run-dir>/packages/cli/dist/main.js doctor --check --json --product-dir <run-dir>`
+(`--check`: the closing doctor reports and never repairs — repair is your own
+`metistry doctor` afterwards; `<run-dir>` is the checkout, or `current` in release mode; `node` is the
 bundled runtime's when there is one, as for the `metistry` shim), and its
 report is the verdict — exit 0 when it is ok, 1 when not, exactly as
 before. When there is no built CLI there, it cannot be spawned, or it
@@ -2934,30 +3723,28 @@ operator-facing parts of it happen:
 
 ## Not yet
 
-`metistry enroll` (§4.2 passkey enrollment from the host) and `metistry
-create <bridge|collector|…>` (§5 extension scaffolds) are not started.
+`metistry create <bridge|collector|…>` (§5 extension scaffolds) is not
+started.
 `connect-repo --auth device` has been exercised only against an injected
 fetch: the live GitHub round trip waits on the OAuth App being
 registered.
-Release mode is complete end to end (`docs/ops/releases.md`) but has not
-yet consumed a real published release — the first `v*` tag is its first
-live run. The CLI ships no `manifest.yaml`: `core`'s schema has no type
+Release mode is complete end to end (`docs/ops/releases.md`) and runs against
+real published GitHub releases. The CLI ships no `manifest.yaml`: `core`'s schema has no type
 for a command-line tool and inventing one is worse than the gap.
 
 **These verbs have a second caller now.** The Mac app (`apps/macos`,
 `docs/ops/mac-app.md`) drives `init`, `connect-repo --auth device`,
-`secrets sync`, `up` and `doctor --json` as its first-run flow and its
-Status panel, and is expected to move onto `secrets list --json`,
+`secrets sync`, `up`, `doctor --check --json` and `doctor --fix --yes --json`
+as its first-run flow and its Status window, and reads `secrets list --json`,
 `identity --json`, `version --json`, `deployment --json` and
-`deployment set-shape` for the Settings pane and wizard code that today
-parses `.metistry/identity.yaml`/`package.json`/the `secrets list` table itself
-(`apps/macos/sources/kit/instance-files.swift`,
-`apps/macos/sources/kit/secret-listing.swift`) — the same commands, with
-`--product-dir` always passed
-explicitly because a GUI process has no useful working directory. It is a
+`deployment set-shape` for the Settings pane and the wizard — the same
+commands, with `--product-dir` always passed explicitly because a GUI process
+has no useful working directory. The management verbs it may run are a closed
+table (`ManagementRow`, `apps/macos/sources/kit/stores/management-runner.swift`;
+plan §2.2). It is a
 front end, never a second implementation: a behaviour the app needs is a
 CLI change first. Two things that matter when editing them: `doctor --json`
-is a wire contract the app decodes (a renamed field breaks a panel, and
+(the app runs `--check --json`) is a wire contract the app decodes (a renamed field breaks a panel, and
 `apps/macos/tests/kit/doctor-report-tests.swift` is the misuse test that
 says so), and `connect-repo --auth device` prints its device code as
 `Open <uri> and enter this code:   <code>` — the app parses that line to

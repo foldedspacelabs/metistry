@@ -105,6 +105,8 @@ describe.skipIf(!hasDb)("Send to Linear: the tracker door and the Link door", ()
   const agentId = `itest-send-${suffix}`;
   const passkeyIds: string[] = [];
   let n = 0;
+  /** Every task key this file seeds or sends, so its cleanup deletes those rows and no other suite's (`mt-s…` is shared with `mt-st…`, stale-requests). */
+  const touched = new Set<string>();
 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
@@ -139,8 +141,8 @@ describe.skipIf(!hasDb)("Send to Linear: the tracker door and the Link door", ()
   });
 
   afterAll(async () => {
-    await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1 OR path LIKE '.metistry/itest-send-%'`, [`${DIR}/%`]);
-    await pool.query(`DELETE FROM runs WHERE (kind = 'vault_task' OR kind = 'tracker') AND meta->>'task_key' LIKE 'mt-s%'`).catch(() => undefined);
+    await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1 OR path = $2`, [`${DIR}/%`, `.metistry/itest-send-${suffix}.md`]);
+    await pool.query(`DELETE FROM runs WHERE (kind = 'vault_task' OR kind = 'tracker') AND meta->>'task_key' = ANY($1::text[])`, [[...touched]]).catch(() => undefined);
     await pool.query(`DELETE FROM agents WHERE id = $1`, [agentId]);
     await pool.query(`DELETE FROM owner_tokens WHERE label = $1`, [MARK]).catch(() => undefined);
     await pool.query(`DELETE FROM auth_sessions WHERE passkey_id = ANY($1)`, [passkeyIds]).catch(() => undefined);
@@ -158,6 +160,7 @@ describe.skipIf(!hasDb)("Send to Linear: the tracker door and the Link door", ()
 
   /** A note in the vault and the walk's row for one line of it. */
   async function seed(lines: string[], lineNo: number, taskKey: string, text: string, path = `${DIR}/${++n}.md`): Promise<{ path: string; content: string }> {
+    touched.add(taskKey);
     const content = `${lines.join("\n")}\n`;
     await vault.write(path, Buffer.from(content), { principal: "user", message: "seed" });
     await pool.query(
@@ -172,6 +175,10 @@ describe.skipIf(!hasDb)("Send to Linear: the tracker door and the Link door", ()
   const owner = { authorization: `Bearer ${localOwnerToken}` };
 
   async function post(path: string, body: Record<string, unknown>, headers: Record<string, string> = owner) {
+    // the keys the doors are asked about, whether or not a row was seeded for them
+    if (typeof body.task_key === "string") touched.add(body.task_key);
+    const linked = /^\/api\/vault-tasks\/([^/]+)\/link$/.exec(path);
+    if (linked) touched.add(decodeURIComponent(linked[1]!));
     const r = await fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
     return { status: r.status, body: (await r.json()) as Record<string, any>, replayed: r.headers.get("idempotency-replayed") };
   }

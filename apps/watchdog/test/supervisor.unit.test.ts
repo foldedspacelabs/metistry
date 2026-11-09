@@ -338,3 +338,29 @@ describe("a child's environment", () => {
     }
   });
 });
+
+// X-48. `sandbox-exec` execs into its target, so a running child's own argv
+// never names the profile; the supervisor, which handed the argv to spawn(),
+// is the only party that can say what a child was launched under.
+describe("status reports what each child was spawned under", () => {
+  const SB = "/usr/bin/sandbox-exec";
+  it("a child spawned under a profile reports it, the off-switch profile is reported as such, and a bare child reports none", async () => {
+    const { sup } = make([
+      child("reconciler", { argv: [SB, "-f", "/p/ops/sandbox/reconciler.sb", "-D", "X=1", "/n/node", "r.js"] }),
+      child("assistant", { argv: [SB, "-f", "/p/ops/sandbox/unconfined.sb", "/n/node", "a.js"] }),
+      child("console", { argv: ["/n/node", "c.js"] }),
+    ]);
+    await sup.start();
+    const by = Object.fromEntries(sup.status().map((s) => [s.name, s.spawned]));
+    expect(by.reconciler).toEqual({ argv: [SB, "-f", "/p/ops/sandbox/reconciler.sb", "-D", "X=1", "/n/node", "r.js"], profile: "/p/ops/sandbox/reconciler.sb" });
+    expect(by.assistant?.profile).toBe("/p/ops/sandbox/unconfined.sb");
+    expect(by.console).toEqual({ argv: ["/n/node", "c.js"], profile: null });
+    await sup.shutdown();
+  });
+
+  it("a child that has not been spawned reports no `spawned` — absence is 'not known', never 'unconfined'", () => {
+    const { sup } = make([child("reconciler", { argv: [SB, "-f", "/p/r.sb", "/n/node", "r.js"] })]);
+    expect(sup.status()[0]!.state).toBe("pending");
+    expect(sup.status()[0]).not.toHaveProperty("spawned");
+  });
+});

@@ -18,11 +18,11 @@
         "value": false,
         "origin": "default"
       },
-      "next_run": "2026-09-28T11:00:00.000Z",
+      "next_run": "2026-09-30T11:00:00.000Z",
       "next_refused": null,
       "last_run": {
-        "run_id": "77",
-        "at": "2026-09-27T19:30:29.157Z",
+        "run_id": "86",
+        "at": "2026-09-30T04:49:52.137Z",
         "ok": true,
         "outcome": "acted",
         "cost_usd": null,
@@ -67,6 +67,6 @@
       }
     },
     "reset": true,
-    "as_of": "2026-09-27T19:30:29.163Z"
+    "as_of": "2026-09-30T04:49:52.142Z"
   }
 }

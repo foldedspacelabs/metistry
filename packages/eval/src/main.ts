@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // `metistry-eval` — validate | tools | run | report (PoC-18, §3.6),
 // `intents` (PoC-20 phase 1, docs/poc/poc20-intent-tier/README.md), and
-// `complexity` (T9-3, the router's confirmatory eval — docs/ops/dynamic-router.md §7.2).
+// `complexity` (T9-3, the router's confirmatory eval — docs/ops/dynamic-router.md §7.2)
+// and `generate-complexity` (X-121, its fixture generator — two non-Claude
+// models, the rubric never in a prompt, every row `source: generated`).
 //
 // Hand-rolled argument parsing, matching `packages/cli`: a handful of
 // subcommands does not justify a dependency this project would maintain for
@@ -13,6 +15,7 @@
 // stage-0 script is ten lines rather than a fork of this file: the engine is
 // the assistant's, the scoring is here, and neither imports the other.
 
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -32,9 +35,11 @@ import {
   replayFetch,
   runComplexityEval,
   servedScorer,
+  sourceOf,
   type ComplexityFixture,
   type EvalRules,
 } from "./complexity.js";
+import { GENERATE_DEFAULTS, GeneratorModelError, RubricLeakError, generateComplexityFixtures, generatorFromEnv, renderGenerateReport, serialiseFixtures, type RecordingRef } from "./generate.js";
 import { axisCounts, loadFixturesFromText, type Axis, type Fixture, AXES } from "./fixtures.js";
 import { buildIntentReport, liveScorer, loadIntentFixtures, renderIntentReport, runIntentEval, type IntentFixture } from "./intents.js";
 import { judgeFromEnv, JudgeFamilyError, JudgeNotConfiguredError } from "./judge.js";
@@ -51,7 +56,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry-eval run --json fixtures.jsonl` keeps its file. */
-export const BOOLEAN_FLAGS = new Set(["json", "help", "include-examples", "dry-run", "strict", "fit", "phrasings", "no-warm-up"]);
+export const BOOLEAN_FLAGS = new Set(["json", "help", "include-examples", "dry-run", "strict", "fit", "phrasings", "no-warm-up", "force"]);
 /** Flags that may appear more than once. */
 export const REPEATED_FLAGS = new Set(["axis"]);
 
@@ -89,6 +94,7 @@ const USAGE = `metistry-eval — the PoC-18 bake-off harness
   report <runs...> [--bar <name>] pass rate per axis, agreement with the bar, and the promotion line
   intents <file...>               score YOUR labelled messages through the intent tier, and FIT the threshold
   complexity [<file...>]          the router's confirmatory eval: YOUR labelled messages through the planner as served, against the pre-registered bar
+  generate-complexity             write complexity fixtures with two non-Claude models (a writer, a blind relabeller); every row source: generated
 
 run flags
   --engine <module>      a JS/TS module exporting createEngine(ctx) => EngineFactory   (required)
@@ -124,7 +130,8 @@ intents flags  (PoC-20 phase 1 — docs/poc/poc20-intent-tier/README.md)
   --out <file>           write the report instead of printing it
 
 complexity flags  (T9-3 — docs/ops/dynamic-router.md §7.2; exit 0 only on PASS)
-  --instance <dir>       read .metistry/eval/complexity.jsonl, .metistry/compute.yaml and .metistry/rules.yaml from it
+  --instance <dir>       read .metistry/eval/complexity.jsonl and complexity.generated.jsonl (whichever exist), .metistry/compute.yaml and .metistry/rules.yaml from it
+                         owner-written and generated rows (source: generated) are held to the bar SEPARATELY
   --compute <file>       compute.yaml — the planner is its assignments.intent, called exactly as the router calls it
   --rules <file>         rules.yaml — policy.timeout_ms, policy.tiers, policy.complexity.min_confidence
   --fit                  sweep complexity.min_confidence and evaluate at the fitted value (an OUTPUT, never an input)
@@ -135,6 +142,20 @@ complexity flags  (T9-3 — docs/ops/dynamic-router.md §7.2; exit 0 only on PAS
   --record <file>        write every server response, so the run can be replayed offline
   --replay <file>        answer from a recording instead of the server — no network at all
   --no-warm-up / --json / --out <file>
+
+generate-complexity flags  (X-121 — docs/ops/dynamic-router.md §7.2 "generating fixtures"; exit 0 when the set needs only your adjudication)
+  environment            ${"METISTRY_EVAL_GEN_BASE_URL"} (an OpenAI-compatible root, e.g. https://openrouter.ai/api/v1), ${"METISTRY_EVAL_GEN_API_KEY"} (never an argument),
+                         ${"METISTRY_EVAL_GEN_MODEL"} (the writer) and ${"METISTRY_EVAL_GEN_RELABEL_MODEL"} (the blind relabeller) — two non-Claude models from two families
+  --instance <dir>       write .metistry/eval/complexity.generated.jsonl and .metistry/eval/adjudicate.jsonl under it
+  --fixtures <file>      the generated fixture file instead (default: the instance's)
+  --adjudicate <file>    the pile the owner labels instead (default: beside the fixtures)
+  --per-class <n>        items asked of the writer per class (default ${GENERATE_DEFAULTS.perClass}); --d08 <n> D08-class items on top (default ${GENERATE_DEFAULTS.d08}), all of which go to the pile
+  --max-adjudicate <n>   the pile's ceiling (default ${GENERATE_DEFAULTS.maxAdjudicate}); disagreements past it are dropped, never kept
+  --seed <n>             the shuffle before relabelling (default ${GENERATE_DEFAULTS.seed})
+  --record <file>        write every model response, so the run can be replayed offline
+  --replay <file>        answer from a recording instead of the models — no network at all
+  --force                overwrite an existing generated file (it is refused otherwise: you may have adjudicated into it)
+  --json / --out <file>  the stats report
 `;
 
 function str(flags: Record<string, string | true>, name: string): string | undefined {
@@ -424,8 +445,17 @@ async function cmdIntents(args: ParsedArgs): Promise<number> {
 async function cmdComplexity(args: ParsedArgs): Promise<number> {
   const instance = str(args.flags, "instance");
   const inInstance = (rel: string): string | undefined => (instance ? join(resolve(instance), ".metistry", rel) : undefined);
-  const fixturePaths = args.positional.length > 0 ? args.positional : [inInstance(join("eval", "complexity.jsonl"))].filter((p): p is string => p !== undefined);
-  if (fixturePaths.length === 0) throw new Error("complexity needs your fixture file (or --instance <dir>) — one labelled message per line, docs/ops/dynamic-router.md §7.2");
+  // Under --instance both files are read when present — the owner's own and
+  // the generated one — and the report holds them to the bar separately.
+  const instanceFiles = [OWNER_FIXTURES, GENERATED_FIXTURES].map((name) => inInstance(join("eval", name))).filter((p): p is string => p !== undefined);
+  const fixturePaths = args.positional.length > 0 ? args.positional : instanceFiles.filter((p) => existsSync(p));
+  if (fixturePaths.length === 0) {
+    throw new Error(
+      instance
+        ? `no fixture file under ${instance}/.metistry/eval — neither ${OWNER_FIXTURES} (yours) nor ${GENERATED_FIXTURES} (metistry-eval generate-complexity) exists; docs/ops/dynamic-router.md §7.2`
+        : "complexity needs your fixture file (or --instance <dir>) — one labelled message per line, docs/ops/dynamic-router.md §7.2",
+    );
+  }
 
   const fixtures: ComplexityFixture[] = [];
   const issues: string[] = [];
@@ -433,6 +463,12 @@ async function cmdComplexity(args: ParsedArgs): Promise<number> {
     const loaded = loadComplexityFixtures(readFileSync(resolve(path), "utf8"), path);
     fixtures.push(...loaded.fixtures);
     for (const i of loaded.issues) issues.push(`${i.source}:${i.line}: ${i.message}`);
+  }
+  const ids = new Set<string>();
+  for (const f of fixtures) {
+    if (f.id === undefined) continue;
+    if (ids.has(f.id)) issues.push(`${fixturePaths.join(", ")}: duplicate id across files: ${f.id}`);
+    ids.add(f.id);
   }
   for (const issue of issues) process.stderr.write(`${issue}\n`);
   if (issues.length > 0) throw new Error(`${issues.length} unreadable fixture line(s) — fix them before measuring anything`);
@@ -496,7 +532,7 @@ async function cmdComplexity(args: ParsedArgs): Promise<number> {
     onAnswer: (f, a, pass) => {
       const what = a.outcome === "scored" ? `${a.class} conf=${(a.confidence ?? 0).toFixed(3)}` : `${a.outcome}${a.reason ? ` (${a.reason})` : ""}`;
       const mark = a.outcome !== "scored" ? "----" : a.class !== undefined && isCorrect(f, a.class) ? " ok " : "MISS";
-      process.stdout.write(`${String(Math.round(a.latency_ms ?? 0)).padStart(6)} ms  run ${pass}  ${mark}  ${f.label.padEnd(9)} → ${what}${f.id ? `  ${f.id}` : ""}\n`);
+      process.stdout.write(`${String(Math.round(a.latency_ms ?? 0)).padStart(6)} ms  run ${pass}  ${mark}  ${sourceOf(f) === "generated" ? "gen " : "own "}${f.label.padEnd(9)} → ${what}${f.id ? `  ${f.id}` : ""}\n`);
     },
   });
   if (replay && replay.unused() > 0) process.stderr.write(`the recording has ${replay.unused()} response(s) this run never asked for — it was recorded against different fixtures or flags\n`);
@@ -542,6 +578,97 @@ async function cmdComplexity(args: ParsedArgs): Promise<number> {
   return report.verdict.pass ? 0 : 1;
 }
 
+/** The two fixture files under `<instance>/.metistry/eval/`. The owner's is §7.2's; the generated one is X-121's, apart from it. */
+export const OWNER_FIXTURES = "complexity.jsonl";
+export const GENERATED_FIXTURES = "complexity.generated.jsonl";
+export const ADJUDICATE_FILE = "adjudicate.jsonl";
+
+function intFlag(flags: Record<string, string | true>, name: string, fallback: number, min: number): number {
+  const v = str(flags, name);
+  if (v === undefined) return fallback;
+  const n = Number.parseInt(v, 10);
+  if (!Number.isInteger(n) || n < min) throw new Error(`--${name} must be an integer ≥ ${min}`);
+  return n;
+}
+
+/**
+ * `metistry-eval generate-complexity` — the fixture generator (X-121;
+ * docs/ops/dynamic-router.md §7.2 "generating fixtures"). The owner runs it,
+ * with their own key in the environment; no agent runs it against the live
+ * instance.
+ *
+ * Every refusal that can be made before a model is dialled is made first: a
+ * Claude model in either role, one family in both, no base URL, an existing
+ * generated file (the owner may have adjudicated into it). The rubric guard
+ * runs on every request after that, and a leak aborts the run.
+ */
+async function cmdGenerateComplexity(args: ParsedArgs): Promise<number> {
+  const instance = str(args.flags, "instance");
+  const evalDir = instance ? join(resolve(instance), ".metistry", "eval") : undefined;
+  const fixturesPath = str(args.flags, "fixtures") ?? (evalDir ? join(evalDir, GENERATED_FIXTURES) : undefined);
+  if (!fixturesPath) throw new Error("generate-complexity needs --instance <dir> (writes .metistry/eval/complexity.generated.jsonl) or --fixtures <file>");
+  const pilePath = str(args.flags, "adjudicate") ?? join(dirname(resolve(fixturesPath)), ADJUDICATE_FILE);
+  if (resolve(pilePath) === resolve(fixturesPath)) throw new Error("--adjudicate and --fixtures name the same file; the pile is labelled by you and must stay apart");
+  if (existsSync(resolve(fixturesPath)) && args.flags.force !== true) {
+    throw new Error(`${fixturesPath} exists — it may hold rows you adjudicated into it. Move it aside, or pass --force to overwrite it`);
+  }
+
+  const replayPath = str(args.flags, "replay");
+  const recordPath = str(args.flags, "record");
+  if (replayPath && recordPath) throw new Error("--record and --replay are two different runs; pass one");
+  const config = generatorFromEnv(process.env, { replay: replayPath !== undefined });
+  const replay = replayPath ? replayFetch(parseRecording(readFileSync(resolve(replayPath), "utf8"), replayPath)) : undefined;
+  let fetchFn: typeof fetch | undefined = replay?.fetchFn;
+  if (recordPath) {
+    mkdirSync(dirname(resolve(recordPath)), { recursive: true });
+    writeFileSync(resolve(recordPath), "");
+    fetchFn = recordingFetch(fetch, (call) => appendFileSync(resolve(recordPath), `${JSON.stringify(call)}\n`));
+  }
+
+  const result = await generateComplexityFixtures({
+    config: replay ? { ...config, baseUrl: config.baseUrl ?? "replay://recording/v1" } : config,
+    ...(fetchFn ? { fetchFn } : {}),
+    perClass: intFlag(args.flags, "per-class", GENERATE_DEFAULTS.perClass, 1),
+    d08: intFlag(args.flags, "d08", GENERATE_DEFAULTS.d08, 0),
+    maxAdjudicate: intFlag(args.flags, "max-adjudicate", GENERATE_DEFAULTS.maxAdjudicate, 0),
+    seed: intFlag(args.flags, "seed", GENERATE_DEFAULTS.seed, 0),
+    onProgress: (line) => process.stdout.write(`${line}\n`),
+  });
+  if (replay && replay.unused() > 0) process.stderr.write(`the recording has ${replay.unused()} response(s) this run never asked for — it was recorded with different flags\n`);
+
+  mkdirSync(dirname(resolve(fixturesPath)), { recursive: true });
+  writeFileSync(
+    resolve(fixturesPath),
+    serialiseFixtures(
+      result.kept,
+      `GENERATED by metistry-eval generate-complexity — writer ${config.writer}, blind relabeller ${config.relabeller}; every row source: generated. Yours to spot-check and edit; held to the bar apart from ${OWNER_FIXTURES}.`,
+    ),
+  );
+  mkdirSync(dirname(resolve(pilePath)), { recursive: true });
+  writeFileSync(
+    resolve(pilePath),
+    serialiseFixtures(result.pile, `ADJUDICATE — ${result.pile.length} row(s) for you to label from the class names alone: replace "?" and append each to ${GENERATED_FIXTURES}. A row left "?" is refused by the eval.`),
+  );
+
+  // The recording's hash goes on the report: with --force the owner can
+  // regenerate under other seeds and models until a set passes, and the hash
+  // is what makes the set they keep traceable to one run.
+  const recordingPath = replayPath ?? recordPath;
+  const recording: RecordingRef | null = recordingPath ? { path: recordingPath, sha256: createHash("sha256").update(readFileSync(resolve(recordingPath))).digest("hex") } : null;
+  const at = new Date();
+  const body =
+    args.flags.json === true
+      ? `${JSON.stringify({ at: at.toISOString(), replay: replay !== undefined, fixtures: fixturesPath, adjudicate: pilePath, recording, stats: result.stats }, null, 2)}\n`
+      : `\n${renderGenerateReport(result, { at, replay: replay !== undefined, fixturesPath, pilePath, recording })}\n`;
+  const out = str(args.flags, "out");
+  if (out) {
+    mkdirSync(dirname(resolve(out)), { recursive: true });
+    writeFileSync(resolve(out), body);
+    process.stdout.write(`${result.kept.length} fixture(s) → ${fixturesPath}; ${result.pile.length} to adjudicate → ${pilePath}\nreport → ${out}\n`);
+  } else process.stdout.write(body);
+  return result.stats.ok ? 0 : 1;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv);
   if (args.flags.help === true || args.command === undefined || args.command === "help") {
@@ -562,12 +689,14 @@ export async function main(argv: readonly string[]): Promise<number> {
         return await cmdIntents(args);
       case "complexity":
         return await cmdComplexity(args);
+      case "generate-complexity":
+        return await cmdGenerateComplexity(args);
       default:
         process.stderr.write(`unknown command: ${args.command}\n\n${USAGE}`);
         return 2;
     }
   } catch (err) {
-    if (err instanceof JudgeNotConfiguredError || err instanceof JudgeFamilyError) {
+    if (err instanceof JudgeNotConfiguredError || err instanceof JudgeFamilyError || err instanceof GeneratorModelError || err instanceof RubricLeakError) {
       process.stderr.write(`${err.code}: ${err.message}\n`);
       return 3;
     }

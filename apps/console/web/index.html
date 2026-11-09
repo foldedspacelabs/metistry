@@ -108,8 +108,10 @@
       <button type="button" data-view="artifacts">Artifacts</button>
     </div>
     <!-- The wall (screen 18 §0, §7.4): sign in with a passkey, or — opened from
-         a one-time link (#enroll=) — name this device and enrol it. Every
-         refusal is the line under the buttons, never a browser alert. -->
+         a one-time link (#enroll=, which app.js takes out of the URL once read;
+         §2.22) — name this device and enrol it. The installed app opens here
+         to sign in with that passkey, never to enrol. Every refusal is the line
+         under the buttons, never a browser alert. -->
     <section id="auth" hidden>
       <h2 id="auth-msg">Sign In</h2>
       <div id="enroll-form" class="field" hidden>
@@ -247,22 +249,21 @@
       </div>
     </section>
 
-    <!-- Status and Devices are Settings (More ▸ Settings; the sidebar's foot at
-         900px) until Settings is §2.3's grouped list. -->
-    <section id="status" hidden>
+    <!-- Settings (More ▸ Settings; the sidebar's foot at 900px): design-build-plan
+         §2.3's table as a grouped list, drawn by settings.js — the Mac's panes in
+         its order. A row §2.3 keeps on the Mac is its reason and never a control:
+         the `local` routes behind them refuse a passkey session (F-13). The
+         Notifications block is this device's, and notify.js's. -->
+    <section id="settings" hidden>
+      <div id="settings-head"></div>
+      <h3>Notifications</h3>
+      <ul class="group settings-group" aria-label="Notifications">
+        <li class="kv push"><span class="k">This Device<span id="push-status" class="sub" role="status" aria-live="polite"></span></span>
+          <span class="v"><button id="push-enable" type="button">Turn On Notifications</button><button id="push-test" type="button" class="secondary" hidden>Send a Test</button></span></li>
+      </ul>
+      <div id="settings-rest"></div>
       <h3>Reviews Waiting on You</h3>
       <ul id="reviews" class="reviews"><li class="muted">none</li></ul>
-      <h3>Components</h3>
-      <ul id="checks"></ul>
-      <h3>Notifications</h3>
-      <p id="push-status" class="receipt" role="status" aria-live="polite"></p>
-      <button id="push-enable" type="button">Turn On Notifications</button>
-      <button id="push-test" type="button" class="secondary" hidden>Send a Test</button>
-    </section>
-
-    <section id="devices" hidden>
-      <h3>Devices</h3>
-      <ul id="device-list"></ul>
     </section>
 
     <!-- More ▸ Agents (screen 18 §5; more.js): Yours and Connected, each a
@@ -415,13 +416,16 @@
     </section>
 
     <!-- Install on iPhone (screen 18 §6): Safari has no install prompt, and
-         push needs the installed app, so the sheet says the three steps. -->
+         push needs the installed app, so the sheet says the three steps. It
+         follows the enrolment wall by itself in Safari (§2.22, X-78), and its
+         last line says when notifications are asked — in context, never during
+         setup — so the question later is no surprise. -->
     <section id="install" hidden>
       <p>Safari has no install button, and notifications need the app on your Home Screen.</p>
       <ol class="install-steps">
         <li>Tap <b>Share</b> <svg class="glyph" role="img" aria-label="(the square with an arrow)" focusable="false"><use href="#g-share"/></svg> in Safari's toolbar.</li>
         <li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li>
-        <li>Open <b>Metistry</b> from your Home Screen, and turn notifications on there.</li>
+        <li>Open <b>Metistry</b> from your Home Screen and sign in. You'll be asked about notifications the first time something needs you.</li>
       </ol>
     </section>
 

@@ -158,6 +158,11 @@ const authSchema = z.strictObject({
    * one of the three spellings `credentialOf` reads. Each is a shape a
    * pasted key cannot take: `sk-or-v1-…` is neither braces, nor `env:`,
    * nor UPPER_SNAKE.
+   *
+   * A `{{ secret.<name> }}` key is attached to a call only by the egress
+   * door (`egress.ts`'s `computeFetch`), only for this provider's own
+   * host, and only while `secrets.yaml` grants it to `provider:<this
+   * provider's name>` (ruling 2 of the W2 checkpoint, X-7).
    */
   secret: z.string().refine((s) => credentialOf(s) !== undefined, {
     message:

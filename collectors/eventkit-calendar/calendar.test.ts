@@ -105,7 +105,8 @@ describe("the eventkit sync's mapping (pure)", () => {
 
 describe.skipIf(!hasDb)("the eventkit sync (real db)", () => {
   let pool: pg.Pool;
-  const ctx = (events: unknown[]) => ({ ekUrl: "http://ek.test", ekToken: "t", fetchFn: bridge(events).fetchFn });
+  // invitations are collectors/test/invitations.integration.test.ts's: this suite is about the rows
+  const ctx = (events: unknown[]) => ({ ekUrl: "http://ek.test", ekToken: "t", fetchFn: bridge(events).fetchFn, raise: { invitation: false } });
   const rows = async () =>
     (await pool.query(`SELECT event_id, starts_at, title, organizer, attendees, self_status FROM calendar_events WHERE connection = $1 ORDER BY event_id COLLATE "C"`, [EVENTKIT_CONNECTION])).rows;
 

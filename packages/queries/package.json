@@ -1,6 +1,6 @@
 {
   "name": "@foldedspacelabs/metistry-queries",
-  "version": "0.15.1",
+  "version": "0.17.2",
   "description": "The one implementation of Metistry invariant 3: named queries from YAML, typed param validation, parameterized execution, TTL cache, {rows, as_of} envelope.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/foldedspacelabs/metistry.git", "directory": "packages/queries" },
@@ -28,14 +28,14 @@
   },
   "dependencies": {
     "yaml": "^2.9.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "pg": "^8.16.0"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.1.0"
   }
 }

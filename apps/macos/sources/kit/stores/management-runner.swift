@@ -1,5 +1,5 @@
 // What the Mac does OUTSIDE the client API, and only this (design-build-plan
-// §2.2, §2.16): the CLI verbs of §2.2's eighteen rows, each there because the
+// §2.2, §2.16): the CLI verbs of §2.2's nineteen rows, each there because the
 // console cannot or must not do it — credentials, the machine, code that
 // runs. Everything else goes through a store and the console's gate.
 //
@@ -16,13 +16,14 @@
 //
 // THE SET IS CLOSED AT THE TYPE. A `ManagementCommand` is built from a row and
 // an argument array, and it refuses — returns nil — unless the arguments
-// start with one of that row's verbs. A verb §2.2 does not list is not a
+// start with one of that row's verbs (and, for M20, fit one of the exact
+// shapes `RemoteAccessArgv` names). A verb §2.2 does not list is not a
 // management command, so no runner can be handed one. Adding a verb is a
 // change to this table and to §2.2, never a string someone passes in.
 
 import Foundation
 
-/// §2.2's rows, M1–M18: the action, its verbs, and why it is not a route.
+/// §2.2's rows, M1–M20: the action, its verbs, and why it is not a route.
 public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
     case install = "M1"
     case update = "M2"
@@ -42,6 +43,12 @@ public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
     case computeProviders = "M16"
     case localModels = "M17"
     case vaultGit = "M18"
+    /// Add a phone (§2.22): mint a passkey enrolment code on this Mac, or cancel one.
+    case enrollment = "M19"
+    /// Remote access (§2.23): the provider the phone reaches this Mac through —
+    /// `metistry remote status|set|authorize|test|off`, each an EXACT shape
+    /// (`RemoteAccessArgv`, remote-access-model.swift), never a prefix.
+    case remoteAccess = "M20"
 
     /// The verbs, as argument prefixes after `metistry` — §2.2's table, word for word.
     public var verbs: [[String]] {
@@ -51,6 +58,7 @@ public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
         case .deploymentShape: return [["deployment", "set-shape"]]
         case .keepAwake: return [["deployment", "set-keep-awake"]]
         case .services: return [["restart"], ["stop"], ["start"], ["logs"]]
+        // the prefix is the verb; `exactShapes` closes it to the two argvs the app runs
         case .doctor: return [["doctor"]]
         case .secrets: return ["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"].map { ["secrets", $0] }
         case .instanceRepository: return [["connect-repo"]]
@@ -58,13 +66,52 @@ public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
         case .identity: return [["identity", "set"]]
         case .linkedInstances: return ["add", "remove", "refresh"].map { ["instances", $0] }
         case .agentDefinitions: return [["agents", "define"]]
-        case .connections: return ["add", "set", "remove", "policy", "test"].map { ["connections", $0] }
+        // `authorize` is T4-10's sign-in door for an OAuth connection (docs/ops/cli.md), used by T6-13b's editor
+        case .connections: return ["add", "set", "remove", "policy", "test", "authorize"].map { ["connections", $0] }
         case .variables: return ["set", "unset"].map { ["variables", $0] }
         case .extensions: return ["add", "remove", "list"].map { ["extensions", $0] }
         case .computeProviders: return ["add", "remove", "set"].map { ["compute", "providers", $0] }
         case .localModels: return ["install", "load", "unload"].map { ["compute", "models", $0] }
         case .vaultGit: return [["vault", "settings"], ["vault", "rollback"]]
+        // `enroll [--json]` mints; `enroll --cancel <code_id>` kills an unused code (X-75, docs/ops/cli.md "Adding a phone")
+        case .enrollment: return [["enroll"]]
+        // the prefix alone is not enough here: `accepts` holds M20 to `RemoteAccessArgv`'s grammar
+        case .remoteAccess: return [["remote", "status"], ["remote", "set"], ["remote", "authorize"], ["remote", "test"], ["remote", "off"]]
         }
+    }
+
+    /// A row whose argument arrays are EXACT shapes, not a verb prefix: the
+    /// whole argv after `metistry` must equal one of these, so nothing can be
+    /// appended to it. M6 is one such row (ruled 2026-10-04): `doctor` has
+    /// a read and a repair, and the repair is a closed-set action
+    /// (invariant 10) — a prefix would let the app pass `doctor` anything the
+    /// CLI grows later. M20's shapes carry a provider and its flags, so they
+    /// are a grammar rather than a list (`RemoteAccessArgv`); see `accepts`.
+    /// `nil` for every other row, which stays prefix-checked.
+    public var exactShapes: [[String]]? {
+        switch self {
+        case .doctor: return [Self.doctorCheckArguments, Self.doctorFixArguments]
+        default: return nil
+        }
+    }
+
+    /// The read: `metistry doctor --check --json` — read-only by flag, not by
+    /// the CLI's guess about whether a terminal is attached.
+    public static let doctorCheckArguments = ["doctor", "--check", "--json"]
+    /// Fix All: `metistry doctor --fix --yes --json`. `--yes` is only ever sent
+    /// after the owner has confirmed a preview that named every fix that asks
+    /// (status-model.swift) — never as a default.
+    public static let doctorFixArguments = ["doctor", "--fix", "--yes", "--json"]
+
+    /// Whether this row runs these arguments: one of `exactShapes` where the
+    /// row has them; for M20, one of the exact shapes `RemoteAccessArgv`'s
+    /// grammar names (X-107), so no `remote` argument list outside it can be
+    /// built (invariant 10); for every other row, one of its verbs as a prefix.
+    public func accepts(_ arguments: [String]) -> Bool {
+        if let shapes = exactShapes { return shapes.contains(arguments) }
+        guard verbs.contains(where: { arguments.starts(with: $0) }) else { return false }
+        if self == .remoteAccess { return RemoteAccessArgv.accepts(arguments) }
+        return true
     }
 
     /// Why the console does not do it (§2.2's last column).
@@ -88,6 +135,8 @@ public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
         case .computeProviders: return "keys and base URLs — where prompts go"
         case .localModels: return "this Mac's disk and memory"
         case .vaultGit: return "the repository's history and its remote; a rollback still waits for Approve in Needs You"
+        case .enrollment: return "a first credential for a new device; shell access to this Mac is its root of trust (plan §4.2), so no HTTP route mints one"
+        case .remoteAccess: return "the provider's credentials live in the login Keychain, and it decides what is exposed to the internet"
         }
     }
 }
@@ -99,13 +148,25 @@ public struct ManagementCommand: Sendable, Equatable {
     public let row: ManagementRow
     public let arguments: [String]
     public let standardInput: String?
+    /// Whether cancelling the task that runs this command ends its process.
+    /// False for every command unless the caller says so with
+    /// `terminatingOnCancel()`: a download is cancellable, a read is not.
+    public private(set) var terminateOnCancel = false
 
-    /// Nil unless `arguments` begin with one of the row's verbs — and nil for
+    /// This command, ended with its process when its task is cancelled.
+    public func terminatingOnCancel() -> ManagementCommand {
+        var copy = self
+        copy.terminateOnCancel = true
+        return copy
+    }
+
+    /// Nil unless the row `accepts` the arguments — one of its verbs as a
+    /// prefix, or for a row with exact shapes ARE one of them — and nil for
     /// a `--product-dir` among them: which product runs a verb is the runtime
     /// locator's answer (runtime-locator.swift), appended by the runner, and a
     /// command that named its own would be a second answer to that question.
     public init?(_ row: ManagementRow, _ arguments: [String], standardInput: String? = nil) {
-        guard row.verbs.contains(where: { arguments.starts(with: $0) }) else { return nil }
+        guard row.accepts(arguments) else { return nil }
         guard !arguments.contains(where: { $0 == Self.productDirFlag || $0.hasPrefix(Self.productDirFlag + "=") }) else { return nil }
         self.row = row
         self.arguments = arguments
@@ -147,6 +208,6 @@ public struct CLIManagementRunner: ManagementRunner {
     /// in the CLI's own words (§3.16), and a CLI older than the verb is
     /// `CLIDegradation.isUnknownVerb(result)`, said once, in cli-facts.swift.
     public func run(_ command: ManagementCommand, onOutput: @escaping @Sendable (OutputLine) -> Void) async throws -> CommandResult {
-        try await cli.run(command.arguments, standardInput: command.standardInput, onOutput: onOutput)
+        try await cli.run(command.arguments, standardInput: command.standardInput, terminateOnCancel: command.terminateOnCancel, onOutput: onOutput)
     }
 }

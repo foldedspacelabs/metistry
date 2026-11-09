@@ -9,6 +9,7 @@
 //       secrets sync --to keychain   import `.env`'s secret lines into the Keychain
 //       secrets sync --to env        regenerate `.env`'s secret lines from the Keychain
 //       secrets mint <VAR>           mint a random token into both
+//       secrets mint                 the recorder's three tokens, when it is configured (keeps what exists)
 //       secrets list                 names and where each one lives — never a value
 //       secrets purge                one instance's items, preview-then-confirm
 //
@@ -25,26 +26,40 @@
 // Rules this module exists to enforce (they are code, not advice):
 //   * A value never reaches argv, only a child's stdin (keychain.ts).
 //   * A value is never printed, logged, or returned in a result object.
-//   * `--to env` rewrites `.env` IN PLACE: every non-secret line, comment,
-//     blank line and ordering survives byte-for-byte, because `.env` also
-//     carries hand-written configuration this command must not own.
+//   * `.env` is DERIVED (X-124; owner ruling 2026-10-04): `renderEnvFile`
+//     writes the whole file from `.metistry/*.yaml` and the Keychain, under
+//     a header carrying the hash of its body (env-render.ts), and `--to env`
+//     IS that render. A line the file held that nothing derives yet is
+//     carried by name, never silently dropped; a hand edit since the last
+//     render is named line by line and adopted into the store before the
+//     file is written again.
 
-import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { parseDocument } from "yaml";
+import { consoleSecretNames, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
 import {
+  GITHUB_WRITE_SECRET,
   InstanceSecrets,
+  SECRET_DELIVERY_PREFIX,
   SECRET_GRANT_MODES,
   SECRET_SERVICE_PREFIX,
   describeSecrets,
   instanceFile,
   instancePresence,
+  isOwnerDoorSecret,
+  loadCompute,
   mintToken,
   normalizeSecretHost,
+  SECRET_GRANTEE_FORMS,
+  egressDestination,
   parseCompute,
   parseSecretGrantee,
+  providerCredential,
+  providerGrantee,
+  providerSecretNames,
   parseSecretReference,
   parseSecretsFile,
   resolveInstanceLayout,
@@ -54,8 +69,8 @@ import {
   secretNameIssue,
   secretRefsIn,
   secretService,
-  secretValueIssue,
   validateManifest,
+  type Compute,
   type DeploymentShape,
   type KeychainBackend,
   type SecretGrantMode,
@@ -63,7 +78,24 @@ import {
   type SecretRow,
   type SecretsFile,
 } from "@foldedspacelabs/metistry-core";
-import { readStdin } from "./connect-repo.js";
+import { readSecretValue } from "./stdin-value.js";
+import { resolveSeedDir } from "./env.js";
+import {
+  composeEnvBody,
+  describeLineDiff,
+  diffAgainstRecord,
+  inspectEnvText,
+  lineHash,
+  parseRenderRecord,
+  preRenderSnapshotPath,
+  renderRecordPath,
+  restampIfRendered,
+  stampEnv,
+  PRE_RENDER_FILENAME,
+  type EnvFileState,
+  type EnvLineDiff,
+  type EnvRenderRecord,
+} from "./env-render.js";
 import { realExec, type Exec } from "./exec.js";
 import { envPaths, readInstanceId } from "./instance.js";
 import { Keychain, keychainAccount, securityKeychain, securityPresence, serviceFor } from "./keychain.js";
@@ -127,6 +159,32 @@ export const GENERATED_SECRETS: Readonly<Record<string, string>> = {
   // started with them; nothing has been started with this one.
   METISTRY_BRIDGE_TOKEN_RECONCILER_USER:
     "the vault bridge's OWNER bearer — the only credential that may write .metistry/ (docs/ops/auth.md); restart the reconciler once it is minted",
+  // The recorder's three (owner ruling 2026-10-04), on the same bar. Each is a
+  // value that means nothing outside this install and that nobody pastes
+  // anywhere: the bar's control key (the Keychain is where it is read), the
+  // bearer the router presents to the live-capture bridge, and the capture
+  // owner token the bridge posts transcripts with. Nothing was started with
+  // any of them before `metistry up` mints them — the bridge is only ever
+  // started WITH them — so minting can never lock a running service out. They
+  // are minted only while `METISTRY_LIVE_CAPTURE_URL` is set (GENERATED_WHEN):
+  // an install that never asked for a microphone gets none of the three.
+  METISTRY_LIVE_CAPTURE_CONTROL_TOKEN:
+    "the recorder's control key — the Mac app's capture bar reads it from the Keychain and presents it to the live-capture bridge; restart the live-capture bridge once it is minted",
+  METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE:
+    "the bearer the router presents to the live-capture bridge; restart the live-capture bridge once it is minted",
+  METISTRY_LIVE_CAPTURE_INBOX_TOKEN:
+    "the capture owner token the live-capture bridge posts transcripts with — a sync only mints the secret; `metistry up` (or `metistry secrets mint`) also records it in the console's owner tokens, labelled live-capture",
+};
+
+/**
+ * A generated secret that is minted only while another variable is set — the
+ * opt-in that makes it this install's business at all. Adopting one `.env`
+ * already holds is never gated; only creating one is.
+ */
+export const GENERATED_WHEN: Readonly<Record<string, string>> = {
+  METISTRY_LIVE_CAPTURE_CONTROL_TOKEN: "METISTRY_LIVE_CAPTURE_URL",
+  METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE: "METISTRY_LIVE_CAPTURE_URL",
+  METISTRY_LIVE_CAPTURE_INBOX_TOKEN: "METISTRY_LIVE_CAPTURE_URL",
 };
 
 /**
@@ -352,14 +410,31 @@ function liveValues(text: string): Map<string, string> {
   return out;
 }
 
+/** Live assignments with the right-hand side exactly as written (trimmed) — what a carried line keeps. */
+function rawAssignments(text: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    const m = ASSIGNMENT.exec(line);
+    if (!m || m[2] || !m[3]) continue;
+    out.set(m[3], (m[4] ?? "").trim());
+  }
+  return out;
+}
+
 /**
  * Write `.env` back, owner-read/write only — it is a secret-bearing file even
  * after this command generates it. The directory is created because the
  * target may be `<instance>/state/`, which nothing has needed until now.
+ *
+ * An in-place writer (`mint`, `adoptOrMintSecret`, `ensureSecret`) that
+ * touches a RENDERED file re-stamps it (env-render.ts), so the file stays
+ * verifiable and only a hand reaches doctor's `hand-edited`; a file that was
+ * never rendered is written as it is, for `up` to derive.
  */
 async function writeEnvFile(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, text, { mode: 0o600 });
+  const previous = existsSync(path) ? await readFile(path, "utf8") : "";
+  await writeFile(path, restampIfRendered(previous, text), { mode: 0o600 });
   await chmod(path, 0o600);
 }
 
@@ -419,77 +494,336 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
     return { direction, changed, skipped, unmigrated, named: notImported };
   }
 
-  // One account, no fallback: an item is this instance's or it is not in
-  // the Keychain. A shared-scope variable is filled from the owner-named
-  // secret it became, and its original under the per-user account is never
-  // read — only asked whether it exists, so the owner is told to migrate.
-  const values = new Map<string, string>();
-  const minted: string[] = [];
-  const adopted: string[] = [];
-  // what `.env` holds NOW — the values every running service was started with
-  const seed = await readText(opts.envFile);
-  const before = liveValues(seed);
-  for (const name of names) {
-    let v: string | undefined;
-    if (wasSharedScope(name)) {
-      const secret = sharedScopeSecretName(name);
-      v = named && secret ? await named.value(secret) : undefined;
-      if (v === undefined && accounts.instance && (await user.hasSecret(name))) unmigrated.push(name);
-    } else {
-      v = await own.getSecret(name);
-      if (v === undefined && GENERATED_SECRETS[name]) {
-        const inEnv = before.get(name);
-        if (inEnv) {
-          // Not in the Keychain, but `.env` has one — and the running console
-          // or reconciler was started with exactly that value. Adopt it: the
-          // Keychain gains it and nothing a service holds changes. Minting
-          // here would lock every running service out of its own install.
-          v = inEnv;
-          await own.setSecret(name, v);
-          adopted.push(name);
-        } else {
-          // Nowhere yet, and one of the few whose value only ever means "this
-          // install": mint it into the Keychain now, so an instance that
-          // predates the variable gains it on the next sync rather than
-          // needing a verb.
-          v = (opts.mint ?? mintToken)();
-          await own.setSecret(name, v);
-          minted.push(name);
-        }
-      }
-    }
-    if (v === undefined) skipped.push(name);
-    else values.set(name, v);
+  // `--to env` IS the render (X-124): the whole file from this instance's
+  // Keychain and whatever `.metistry/*.yaml` decides, every line the file
+  // held that nothing derives yet carried by name, a hand edit adopted first.
+  const r = await renderEnvFile(opts);
+  return { direction, changed: [...r.derived, ...r.keychain], skipped: r.skipped, unmigrated: r.unmigrated, minted: r.minted, adopted: [...r.adopted, ...r.adoptedEdits], rotated: r.rotated, restart: r.restart, wrote: r.wrote };
+}
+
+// ---- the render: `.env` derived from .metistry/*.yaml and the Keychain (X-124) ----
+//
+// Owner ruling 2026-10-04 (decisions-log, "M7 reversed — a self-managing
+// instance"): `.metistry/state/.env` is written only by `up`, `update` and the
+// app's actions, from `.metistry/*.yaml` and the login Keychain, and never
+// edited by hand. The file carries the hash it was written with (env-render.ts);
+// doctor's `env` row reads it; a hand edit is named line by line here and
+// adopted into the store before the file is written again.
+//
+// Three sections, in a fixed order, each sorted by name — so two renders from
+// the same yaml and Keychain are byte-identical:
+//
+//   derived    what `.metistry/*.yaml` decides (`opts.derived`): rendered over
+//              whatever the file said, and a differing previous value is NAMED
+//              as superseded — never silently replaced.
+//   keychain   every secret-shaped variable this install knows, from this
+//              instance's Keychain account; a GENERATED one minted when no
+//              store has it; the named secrets a service reads delivered as
+//              `METISTRY_SECRET_<NAME>`. Adopt before mint: a secret-shaped
+//              line the file holds and the Keychain lacks is copied INTO the
+//              Keychain first, so nothing a running service holds changes.
+//   carried    every other line the file held, with the right-hand side it
+//              had: configuration nothing in `.metistry/*.yaml` decides yet
+//              (ports, URLs, knobs — the design note's open question 3 is
+//              where these go; until the owner rules, they stay here by
+//              name). On a host without a Keychain the secret lines are
+//              carried too: the file is the store there.
+//
+// A hand edit of a rendered file is honoured before it is overwritten (design
+// §2.2): an edited secret goes into the Keychain, an edited configuration
+// line is carried with its new value, a removed line that a store still holds
+// comes back — and every one is named. The file as it was is kept beside the
+// render as `.env.pre-render` (0600) whenever the previous file was not a
+// clean render, so no hand-written value is lost even when it was superseded.
+
+/** A value `.metistry/*.yaml` decides for `.env`, and which key decided it (named when it supersedes what the file said). */
+export interface DerivedEnvValue {
+  value: string;
+  /** where it came from, for the report and the record — e.g. "deployment.yaml remote:" */
+  from: string;
+  /** what superseding the file's value costs, said with it when it does (e.g. the passkeys bound to a dropped origin) — recorded for doctor's row too */
+  note?: string | undefined;
+}
+
+export interface DeliveredSecrets {
+  /** the owner-named secrets a service reads, each written as `METISTRY_SECRET_<NAME>` */
+  names: string[];
+  /** false when a source could not be read this run — a delivery line the file already has is then carried rather than dropped */
+  complete: boolean;
+  /** what could not be read, one line each */
+  notes: string[];
+}
+
+/**
+ * Every owner-named secret this instance's services read — compute.yaml's
+ * providers (T4-18), every connection the console reaches (T4-10, T4-24),
+ * and `github_write` when secrets.yaml names it (T2-13). One answer for
+ * `secrets sync --to env` and for `up`'s render, so a provider key reaches
+ * the engine from either verb. A source that does not read is a note and
+ * `complete: false`, never a throw — the rest of the render is unaffected.
+ */
+export async function deliveredSecretNames(o: { instanceDir: string; productDir: string | undefined }): Promise<DeliveredSecrets> {
+  const names = new Set<string>();
+  const notes: string[] = [];
+  let complete = true;
+  try {
+    for (const n of providerSecretNames((await loadCompute(instanceFile(o.instanceDir, "compute"))).compute)) names.add(n);
+  } catch (e) {
+    complete = false;
+    notes.push(`compute.yaml does not validate, so no provider key is delivered this run (${e instanceof Error ? e.message : String(e)})`);
   }
-  // the named secrets a service reads (compute.yaml's providers): delivered
-  // under their own variable, from this instance's item and nowhere else
-  for (const name of opts.deliver ?? []) {
-    const line = secretDeliveryVar(name);
-    const v = named ? await named.value(name) : undefined;
-    if (v === undefined || v === "") skipped.push(line);
-    else values.set(line, v);
+  try {
+    for (const n of consoleSecretNames(await loadInstanceCatalog({ instanceDir: o.instanceDir, seedDir: resolveSeedDir(o.productDir) }))) names.add(n);
+  } catch (e) {
+    complete = false;
+    notes.push(`the connection types could not be read, so no sync's secret is delivered this run (${e instanceof Error ? e.message : String(e)})`);
+  }
+  const secretsPath = instanceFile(o.instanceDir, "secrets");
+  try {
+    if (existsSync(secretsPath) && Object.hasOwn(parseSecretsFile(await readFile(secretsPath, "utf8")).secrets, GITHUB_WRITE_SECRET)) names.add(GITHUB_WRITE_SECRET);
+  } catch (e) {
+    complete = false;
+    notes.push(`secrets.yaml does not validate, so ${GITHUB_WRITE_SECRET} is not delivered this run (${e instanceof Error ? e.message : String(e)})`);
+  }
+  return { names: [...names].sort(), complete, notes };
+}
+
+export interface RenderEnvOptions extends SecretsOptions {
+  /** what `.metistry/*.yaml` decides this run — rendered first; a differing value the file held is named as superseded */
+  derived?: Readonly<Record<string, DerivedEnvValue>> | undefined;
+  /** whether `deliver` is the whole answer; false (or `deliver` absent) carries a `METISTRY_SECRET_*` line the file already has rather than dropping it */
+  deliverComplete?: boolean | undefined;
+}
+
+export interface RenderEnvResult {
+  wrote: string;
+  sha256: string;
+  /** what the previous file was: absent, pre-render (hand-written), rendered, or hand-edited since */
+  before: EnvFileState;
+  /** every rendered assignment — for the caller that renders jobs from the same values. Never logged. */
+  values: Map<string, string>;
+  derived: string[];
+  keychain: string[];
+  carried: string[];
+  /** secret-shaped lines copied into the Keychain because it had none */
+  adopted: string[];
+  /** hand-edited secret lines whose edit went INTO the Keychain */
+  adoptedEdits: string[];
+  minted: string[];
+  /** secret-shaped names this install knows that no store holds — nothing rendered, nothing lost */
+  skipped: string[];
+  unmigrated: string[];
+  /** names whose previous value `.metistry/*.yaml` now overrides */
+  superseded: string[];
+  /** `METISTRY_SECRET_*` lines the file had that nothing reads any more */
+  dropped: string[];
+  handEdited?: EnvLineDiff | undefined;
+  preRenderKept?: string | undefined;
+  /** names whose rendered value differs from the previous file's — a service started earlier holds the old one */
+  rotated: string[];
+  restart: TokenService[];
+}
+
+export async function renderEnvFile(opts: RenderEnvOptions): Promise<RenderEnvResult> {
+  const platform = opts.platform ?? process.platform;
+  const darwin = platform === "darwin";
+  const target = opts.envTarget ?? opts.envFile;
+  const seedExists = existsSync(opts.envFile);
+  const seed = seedExists ? await readFile(opts.envFile, "utf8") : "";
+  const before = inspectEnvText(seedExists ? seed : undefined);
+  const prev = liveValues(seed);
+  const raw = rawAssignments(seed);
+  const stateDir = dirname(target);
+  const recordPath = renderRecordPath(stateDir);
+  const record = parseRenderRecord(existsSync(recordPath) ? await readFile(recordPath, "utf8") : undefined);
+  const handEdited = before.kind === "hand-edited" && record ? diffAgainstRecord(record, prev) : undefined;
+  const edited = new Set([...(handEdited?.changed ?? []), ...(handEdited?.added ?? [])]);
+  const derived = opts.derived ?? {};
+  const isDelivery = (n: string) => n.startsWith(SECRET_DELIVERY_PREFIX);
+  const deliverKnown = opts.deliver !== undefined && opts.deliverComplete !== false;
+
+  const values = new Map<string, string>();
+  const derivedNames: string[] = [];
+  const keychainNames: string[] = [];
+  const carried = new Set<string>();
+  const superseded: Record<string, string> = {};
+  const adopted: string[] = [];
+  const adoptedEdits: string[] = [];
+  const minted: string[] = [];
+  const skipped: string[] = [];
+  const unmigrated: string[] = [];
+  const dropped: string[] = [];
+  let account: string | undefined;
+
+  // 1. what .metistry/*.yaml decides
+  for (const name of Object.keys(derived).sort()) {
+    const d = derived[name]!;
+    values.set(name, d.value);
+    derivedNames.push(name);
+    if (prev.has(name) && prev.get(name) !== d.value) superseded[name] = d.note ? `${d.from} — ${d.note}` : d.from;
   }
 
-  // the move: an instance's `.env` belongs under its own state/, and the
-  // file being read may still be the product checkout's
-  const target = opts.envTarget ?? opts.envFile;
-  if (target !== opts.envFile) {
-    opts.out(`moving the environment: ${opts.envFile} → ${target} (every line is carried over; the old file is LEFT IN PLACE, so a running install keeps working — delete it yourself once ${target} is proven)`);
+  // 2. the Keychain (or, without one, the file as the store)
+  if (darwin) {
+    const { own, user, named, accounts } = keychains(opts);
+    account = own.account;
+    // adopt: every secret-shaped line the file holds that this instance's
+    // Keychain does not — the value a running service was started with. A
+    // hand edit of a rendered file wins outright: into the store, named.
+    for (const [name, v] of prev) {
+      if (!isSecretVar(name) || v === "" || wasSharedScope(name) || isDelivery(name) || name in derived) continue;
+      if (edited.has(name)) {
+        if ((await own.getSecret(name)) !== v) {
+          await own.setSecret(name, v);
+          adoptedEdits.push(name);
+        }
+      } else if (!(await own.hasSecret(name))) {
+        await own.setSecret(name, v);
+        adopted.push(name);
+      }
+    }
+    const known = new Set<string>([...(await knownSecretNames(opts)), ...(record?.sections.keychain ?? [])]);
+    for (const name of [...known].sort()) {
+      if (name in derived || isDelivery(name) || values.has(name)) continue;
+      let v: string | undefined;
+      if (wasSharedScope(name)) {
+        // filled from the owner-named secret it became; the original under
+        // the per-user account is never read, only asked whether it exists
+        const secret = sharedScopeSecretName(name);
+        v = named && secret ? await named.value(secret) : undefined;
+        if (v === undefined && accounts.instance && (await user.hasSecret(name))) unmigrated.push(name);
+      } else {
+        v = (await own.getSecret(name)) || undefined; // an empty item is no value
+        if (v === undefined && GENERATED_SECRETS[name]) {
+          const candidate = prev.get(name) || opts.env?.[name] || undefined;
+          if (candidate) {
+            // adopt before mint: minting here would lock a running service
+            // out of its own install (the 0.12.0 lesson, docs/ops/cli.md)
+            await own.setSecret(name, candidate);
+            v = candidate;
+            if (!adopted.includes(name) && !adoptedEdits.includes(name)) adopted.push(name);
+          } else if (!(GENERATED_WHEN[name] && !(prev.get(GENERATED_WHEN[name]!) || opts.env?.[GENERATED_WHEN[name]!]))) {
+            v = (opts.mint ?? mintToken)();
+            await own.setSecret(name, v);
+            minted.push(name);
+          }
+        }
+      }
+      if (v === undefined) {
+        // nothing rendered for it — and a line the file holds is carried, never lost
+        if ((prev.get(name) ?? "") !== "") carried.add(name);
+        else skipped.push(name);
+      } else {
+        values.set(name, v);
+        keychainNames.push(name);
+      }
+    }
+    // the named secrets a service reads, under their own variable, from this
+    // instance's item and nowhere else (T4-18)
+    for (const name of opts.deliver ?? []) {
+      const line = secretDeliveryVar(name);
+      const v = named ? await named.value(name) : undefined;
+      if (v === undefined || v === "") skipped.push(line);
+      else {
+        values.set(line, v);
+        keychainNames.push(line);
+      }
+    }
+    for (const name of prev.keys()) {
+      if (!isDelivery(name) || values.has(name)) continue;
+      if (deliverKnown && (prev.get(name) ?? "") !== "") dropped.push(name);
+      else if ((prev.get(name) ?? "") !== "") carried.add(name);
+    }
+  } else {
+    for (const [name, v] of prev) if (isSecretVar(name) && v !== "" && !(name in derived)) carried.add(name);
+    for (const name of opts.deliver ?? []) if (!prev.has(secretDeliveryVar(name))) skipped.push(secretDeliveryVar(name));
   }
-  // a line that already holds its value is left byte-for-byte as it is
-  const toWrite = new Map([...values].filter(([n, v]) => before.get(n) !== v));
-  const { text, missing } = rewriteEnv(seed, toWrite);
-  await writeEnvFile(target, appendEnv(text, toWrite, missing));
-  changed.push(...values.keys());
-  opts.out(`wrote ${changed.length} secret line(s) into ${target} from the Keychain (0600; every other line preserved): ${changed.join(", ") || "(none)"}`);
-  for (const n of adopted) opts.out(`adopted ${n} from ${opts.envFile} into the Keychain — it was not in the Keychain, and the value the running services hold is kept (nothing to restart)`);
-  for (const n of minted) opts.out(`minted ${n} — it was in neither the Keychain nor ${opts.envFile}: ${GENERATED_SECRETS[n]}`);
-  // Every value this run CHANGED in `.env` — minted, or the Keychain's
-  // differing from the file's — is one a service started earlier does not
-  // hold. Never silent: name the service, whether it is running, and the
-  // exact command.
-  const rotated = [...values.keys()].filter((n) => (before.get(n) ?? "") !== values.get(n));
+
+  // 3. configuration nothing in .metistry/*.yaml decides yet: carried as written
+  for (const [name, v] of prev) {
+    if (values.has(name) || name in derived || carried.has(name) || isSecretVar(name) || v === "") continue;
+    carried.add(name);
+  }
+
+  // 4. compose — three sections, fixed order, sorted names: a function of its inputs
+  derivedNames.sort();
+  keychainNames.sort();
+  adopted.sort();
+  adoptedEdits.sort();
+  const carriedNames = [...carried].sort();
+  const quoted = (n: string) => `${n}=${quoteEnvValue(values.get(n)!)}`;
+  const body = composeEnvBody(
+    { derived: derivedNames.map(quoted), keychain: keychainNames.map(quoted), carried: carriedNames.map((n) => `${n}=${raw.get(n) ?? ""}`) },
+    {
+      derived: "derived from .metistry/*.yaml",
+      keychain: darwin ? `from the login Keychain (metistry:<VAR>, account ${account})` : "secrets — this host has no Keychain, so these lines are the store",
+      carried: "carried from the previous .env: configuration nothing in .metistry/*.yaml decides yet (an edit here is kept, and named)",
+    },
+  );
+  const text = stampEnv(body);
+  const sha256 = inspectEnvText(text);
+  if (sha256.kind !== "rendered") throw new Error("renderEnvFile: the file it just composed does not verify — a bug, not a hand edit");
+
+  // 5. write: the previous file kept beside the render whenever it was not a
+  // clean render. The FIRST copy (`.env.pre-render`) is never overwritten —
+  // it is the hand-written file from before the file was derived, and the
+  // only copy of a value the render stopped honouring; a later hand-edited
+  // file is kept as `.env.pre-render.<n>`. Nothing here deletes any of them.
+  let preRenderKept: string | undefined;
+  await mkdir(stateDir, { recursive: true });
+  if (seedExists && before.kind !== "rendered") {
+    preRenderKept = preRenderSnapshotPath(stateDir, existsSync);
+    await cp(opts.envFile, preRenderKept, { force: false });
+    await chmod(preRenderKept, 0o600);
+  }
+  // the file itself lands whole or not at all: a crash between a truncate and
+  // a write would leave the carried section — which has no other copy — empty
+  const tmp = `${target}.tmp-${process.pid}`;
+  await writeFile(tmp, text, { mode: 0o600 });
+  await chmod(tmp, 0o600);
+  await rename(tmp, target);
+  const final = liveValues(text);
+  const rec: EnvRenderRecord = {
+    version: 1,
+    sha256: sha256.sha256,
+    lines: Object.fromEntries([...final].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([n, v]) => [n, lineHash(n, v)])),
+    sections: { derived: derivedNames, keychain: keychainNames, carried: carriedNames },
+    superseded,
+  };
+  await writeFile(recordPath, `${JSON.stringify(rec, null, 2)}\n`, { mode: 0o600 });
+  await chmod(recordPath, 0o600);
+
+  // 6. what changed under a running service: names only, with the restart it now needs
+  const rotated = [...values.keys()].filter((n) => (prev.get(n) ?? "") !== values.get(n));
   const restart: TokenService[] = [];
+  const out = opts.out;
+  const how = before.kind === "absent" ? "derived" : before.kind === "rendered" ? "derived again" : before.kind === "pre-render" ? "derived from the hand-written file" : "derived again over a hand edit";
+  out(`.env: ${how} → ${target} (sha256 ${sha256.sha256.slice(0, 12)}; ${derivedNames.length} from .metistry/*.yaml, ${keychainNames.length} from ${darwin ? "the login Keychain" : "the file — this host has no Keychain"}, ${carriedNames.length} carried)`);
+  if (target !== opts.envFile) out(`moved: ${opts.envFile} → ${target} (every line carried over; the old file is left in place — \`metistry secrets retire-legacy-env\` retires it)`);
+  if (handEdited) out(`hand edit since the last render: ${describeLineDiff(handEdited)}`);
+  else if (before.kind === "hand-edited") out("hand edit since the last render (which lines is not known: no render record) — every line is rendered from the stores again");
+  const removedBack = (handEdited?.removed ?? []).filter((n) => values.has(n));
+  const removedGone = (handEdited?.removed ?? []).filter((n) => !values.has(n) && !carried.has(n));
+  if (removedBack.length) out(`removed by hand but still in the store, so rendered again: ${removedBack.join(", ")}`);
+  if (removedGone.length) out(`removed by hand and in no store, so gone: ${removedGone.join(", ")}`);
+  if (adopted.length) out(`adopted into the login Keychain from the file (the value the running services hold is kept): ${adopted.join(", ")}`);
+  if (adoptedEdits.length) out(`your edit of ${adoptedEdits.join(", ")} went into the login Keychain and is what is rendered — next time, \`metistry secrets mint <VAR>\` (an install token) or \`metistry secrets replace <name>\` (a credential another service issues)`);
+  // an edited line the owner-named store overrules (a credential another
+  // service issues, filled from its item): not adopted, not kept — but named,
+  // with the verb, and the edited line is in the copy kept beside
+  const overruled = [...edited].filter((n) => values.has(n) && values.get(n) !== prev.get(n) && !(n in superseded)).sort();
+  if (overruled.length) out(`your edit of ${overruled.join(", ")} is not what is rendered — a credential another service issues is replaced with \`metistry secrets replace <name>\`; the edited line is in ${preRenderKept ? basename(preRenderKept) : PRE_RENDER_FILENAME}`);
+  for (const n of minted) out(`minted ${n} — it was in no store: ${GENERATED_SECRETS[n]}`);
+  for (const n of Object.keys(superseded).sort()) {
+    const d = derived[n]!;
+    out(`${n}: the file's value is superseded by ${d.from}, which is what is rendered${preRenderKept ? ` (the previous line is in ${basename(preRenderKept)})` : ""}`);
+    if (d.note) out(d.note);
+  }
+  if (dropped.length) out(`no longer delivered — nothing in compute.yaml, the connections or secrets.yaml names ${dropped.join(", ")} any more; the secret itself stays in the Keychain`);
+  if (carriedNames.length) out(`carried as written (nothing in .metistry/*.yaml decides these yet): ${carriedNames.join(", ")}`);
+  if (skipped.length) out(`in no store, so not rendered: ${skipped.join(", ")}`);
+  if (unmigrated.length) out(`still only in the retired shared scope, so not read: ${unmigrated.join(", ")} — \`${MIGRATE_SCOPE_COMMAND}\` copies them into this instance`);
+  if (preRenderKept) out(`the previous file is kept at ${preRenderKept} (0600) — delete it once the install is proven`);
   const byService = new Map<TokenService, string[]>();
   for (const n of rotated) {
     const svc = GENERATED_SECRET_READERS[n];
@@ -497,26 +831,42 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
   }
   for (const [svc, vars] of byService) {
     if (opts.restartFollows) {
-      opts.out(`${vars.join(", ")} changed — the ${svc} is restarted onto it below, with the rest of the launchd jobs`);
+      out(`${vars.join(", ")} changed — the ${svc} is restarted onto it below, with the rest of the launchd jobs`);
       continue;
     }
     const running = opts.serviceRunning ? await opts.serviceRunning(svc) : undefined;
     const cmd = `\`metistry restart ${svc}\``;
     if (running === true) {
       restart.push(svc);
-      opts.out(`RESTART NEEDED: the ${svc} is running with the previous ${vars.join(", ")} and will refuse the new value until restarted — run ${cmd}`);
+      out(`RESTART NEEDED: the ${svc} is running with the previous ${vars.join(", ")} and will refuse the new value until restarted — run ${cmd}`);
     } else if (running === false) {
-      opts.out(`the ${svc} is not running; it reads the new ${vars.join(", ")} when it next starts`);
+      out(`the ${svc} is not running; it reads the new ${vars.join(", ")} when it next starts`);
     } else {
-      opts.out(`${vars.join(", ")} changed — if the ${svc} is running it still holds the previous value: run ${cmd}`);
+      out(`${vars.join(", ")} changed — if the ${svc} is running it still holds the previous value: run ${cmd}`);
     }
   }
-  const others = rotated.filter((n) => !GENERATED_SECRET_READERS[n] && before.has(n));
-  if (others.length) opts.out(`changed in ${target} from the Keychain: ${others.join(", ")} — ${opts.restartFollows ? "the running jobs are re-rendered onto it below" : "a service started before this run holds the previous value until it is restarted (`metistry restart <service>`)"}`);
-  if (missing.length) opts.out(`appended (no line existed): ${missing.join(", ")}`);
-  if (skipped.length) opts.out(`not in this instance's Keychain, left as they are: ${skipped.join(", ")}`);
-  if (unmigrated.length) opts.out(`still only in the retired shared scope, so not read: ${unmigrated.join(", ")} — \`${MIGRATE_SCOPE_COMMAND}\` copies them into this instance`);
-  return { direction, changed, skipped, unmigrated, minted, adopted, rotated, restart, wrote: target };
+  const others = rotated.filter((n) => !GENERATED_SECRET_READERS[n] && prev.has(n) && !(n in superseded));
+  if (others.length) out(`changed from the store: ${others.join(", ")} — ${opts.restartFollows ? "the running jobs are re-rendered onto it below" : "a service started before this run holds the previous value until it is restarted (`metistry restart <service>`)"}`);
+  return {
+    wrote: target,
+    sha256: sha256.sha256,
+    before,
+    values,
+    derived: derivedNames,
+    keychain: keychainNames,
+    carried: carriedNames,
+    adopted,
+    adoptedEdits,
+    minted,
+    skipped,
+    unmigrated,
+    superseded: Object.keys(superseded).sort(),
+    dropped,
+    ...(handEdited ? { handEdited } : {}),
+    ...(preRenderKept ? { preRenderKept } : {}),
+    rotated,
+    restart,
+  };
 }
 
 /** Mint a fresh random token into the Keychain and into `.env` — the only place a new secret is created. */
@@ -563,6 +913,57 @@ export async function adoptOrMintSecret(name: string, opts: SecretsOptions): Pro
   let value = "";
   await mintSecret(name, { ...opts, mint: () => (value = (opts.mint ?? mintToken)()) });
   return { how: "minted", value };
+}
+
+export interface EnsuredSecret {
+  /**
+   * `kept` — the Keychain (macOS) or `.env` already held one and it stands;
+   * `adopted` — only `.env` held one, and it is now in the Keychain too;
+   * `minted` — neither did.
+   */
+  how: "kept" | "adopted" | "minted";
+  value: string;
+  /** `.env` was written by this call */
+  wroteEnv: boolean;
+}
+
+/**
+ * Make sure this install has `name`, creating it ONLY when no store holds one:
+ * the idempotent sibling of `mintSecret` (which always replaces). On macOS
+ * the Keychain is read first and its value is the one `.env` is made to hold;
+ * a value only `.env` has (an owner-pasted one) is adopted into the Keychain
+ * and never replaced; elsewhere `.env` is the store. Names only in the
+ * output, never the value.
+ */
+export async function ensureSecret(name: string, opts: SecretsOptions): Promise<EnsuredSecret> {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`${JSON.stringify(name)} is not a variable name`);
+  if (!isSecretVar(name)) throw new Error(`${name} is not a secret-shaped name`);
+  const platform = opts.platform ?? process.platform;
+  const target = opts.envTarget ?? opts.envFile;
+  const fileText = await readText(target);
+  const inEnv = liveValues(fileText).get(name) || opts.env?.[name] || undefined;
+  const store = async (value: string): Promise<boolean> => {
+    if (liveValues(fileText).get(name) === value) return false;
+    const values = new Map([[name, value]]);
+    const { text, missing } = rewriteEnv(fileText, values);
+    await writeEnvFile(target, appendEnv(text, values, missing));
+    return true;
+  };
+  if (platform !== "darwin") {
+    if (inEnv) return { how: "kept", value: inEnv, wroteEnv: await store(inEnv) };
+    const value = (opts.mint ?? mintToken)();
+    return { how: "minted", value, wroteEnv: await store(value) };
+  }
+  const { own } = keychains(opts);
+  const held = await own.getSecret(name);
+  if (held !== undefined && held !== "") return { how: "kept", value: held, wroteEnv: await store(held) };
+  if (inEnv) {
+    await own.setSecret(name, inEnv);
+    return { how: "adopted", value: inEnv, wroteEnv: await store(inEnv) };
+  }
+  const value = (opts.mint ?? mintToken)();
+  await own.setSecret(name, value);
+  return { how: "minted", value, wroteEnv: await store(value) };
 }
 
 // ---- purge -------------------------------------------------------------------
@@ -860,11 +1261,14 @@ function instanceStore(opts: NamedSecretsOptions): InstanceSecrets {
   return new InstanceSecrets(securityKeychain(opts.exec ?? realExec), opts.instanceId);
 }
 
+// The stdin reader itself — the hidden prompt, the pipe, the refusal — is
+// `stdin-value.ts` (X-105), because `metistry remote set` takes a provider's
+// pasted token by the same rule; the names stay exported from here.
+export { readHiddenLine, type HiddenLineStdin, type HiddenLineStderr } from "./stdin-value.js";
+
+/** Where a secret's value comes from: piped stdin, or one hidden line at a prompt when run in a terminal (stdin-value.ts). `opts.readSecret` is the test seam. */
 async function readValue(opts: NamedSecretsOptions, name: string): Promise<string> {
-  const value = (await (opts.readSecret ?? readStdin)()).trim();
-  const issue = secretValueIssue(value);
-  if (issue) throw new StepFailed(`${issue} — pipe the value for ${name} on stdin (it is never taken as an argument)`);
-  return value;
+  return readSecretValue(name, { readSecret: opts.readSecret });
 }
 
 export interface NamedSecretResult {
@@ -1028,8 +1432,15 @@ export async function secretsHosts(rawName: string | undefined, args: { hosts: s
 /** `secrets grant <name> <grantee> <on|ask|off>`: *Who may use it*. */
 export async function secretsGrant(rawName: string | undefined, grantee: string | undefined, mode: string | undefined, opts: NamedSecretsOptions): Promise<NamedSecretResult & { grantee: string; mode: SecretGrantMode }> {
   const name = checkName(rawName);
-  if (!grantee || !parseSecretGrantee(grantee)) throw new StepFailed(`${JSON.stringify(grantee ?? "")} is not a grantee — connection:<name> or agent:<id> (e.g. connection:github, agent:devin)`);
+  if (!grantee || !parseSecretGrantee(grantee)) throw new StepFailed(`${JSON.stringify(grantee ?? "")} is not a grantee — ${SECRET_GRANTEE_FORMS} (e.g. connection:github, agent:devin, provider:openrouter)`);
   if (!mode || !(SECRET_GRANT_MODES as readonly string[]).includes(mode)) throw new StepFailed(`the mode is one of ${SECRET_GRANT_MODES.join(", ")} — not ${JSON.stringify(mode ?? "")}`);
+  // X-41: an owner-door secret (`github_write`) has no *Who may use it* line
+  // to widen — the door itself is the grant, and it is never a connection's
+  // or an agent's. Refused here at the source, so it never reaches
+  // secrets.yaml to be caught only by the schema.
+  if (isOwnerDoorSecret(name)) {
+    throw new StepFailed(`${name} is an owner-door secret — it is read only through its own door (docs/ops/cli.md), and \`metistry secrets grant\` never grants it to ${grantee}; no connection or agent may be granted it`);
+  }
   const edit = await openSecrets(opts);
   requireNamed(edit.file, name, edit.path);
   // setIn with a key holding `:` — the yaml library quotes it where it must
@@ -1037,6 +1448,94 @@ export async function secretsGrant(rawName: string | undefined, grantee: string 
   opts.out(`${grantee} may use ${name}: ${mode}${mode === "ask" ? " (each use waits for your answer in Needs You)" : mode === "off" ? " (refused)" : ""}`);
   const delivery = await commitSecrets(opts, edit, `secrets: ${grantee} ${mode} for ${name}`);
   return { name, service: secretService(name), account: opts.instanceId, hosts: edit.file.secrets[name]!.hosts, delivery, grantee, mode: mode as SecretGrantMode };
+}
+
+// ---- a provider key's grant (ruling 2 of the W2 checkpoint, X-7) ----------------------
+
+export interface ProviderGrant {
+  /** the secret a provider's `auth.secret` references */
+  secret: string;
+  /** `compute.yaml`'s provider name; the grantee is `provider:<name>` */
+  provider: string;
+  /** the provider's destination, added to the secret's *Sent only to* when it was not there */
+  host?: string | undefined;
+}
+
+export interface ProviderGrantsResult {
+  /** `provider:<name>: on` written (in a dry run: would be) */
+  granted: ProviderGrant[];
+  /** referenced by a provider but not in secrets.yaml — `metistry secrets set` first; nothing to grant yet */
+  unlisted: ProviderGrant[];
+  /** already had a grant for the provider — On, Ask or Off, the owner's word stands */
+  kept: ProviderGrant[];
+  delivery?: ProtectedWrite | undefined;
+}
+
+/**
+ * Give each provider key its grantee: for every provider in `compute` whose
+ * `auth.secret` is `{{ secret.x }}`, and whose secret `x` names NO grant for
+ * `provider:<name>` yet, write `provider:<name>: on` — and add the provider's
+ * host to `x`'s *Sent only to* if it is missing, since that is where the
+ * key is for. A grant already there (On, Ask or Off) is the owner's word and
+ * is left alone, so this is idempotent: a second run finds nothing to do and
+ * writes nothing.
+ *
+ * Why it exists: `computeFetch` refuses a provider key without its grant
+ * (X-7). An install whose keys predate the grantee must not lose compute on
+ * the update that brings the refusal, so `metistry update` and
+ * `secrets migrate-scope` run this, and `compute providers add|set` run it
+ * for the provider they just wrote. `only` narrows it to those providers.
+ */
+export async function grantProviderSecrets(opts: NamedSecretsOptions & { compute?: Compute | undefined; only?: readonly string[] | undefined }): Promise<ProviderGrantsResult> {
+  const res: ProviderGrantsResult = { granted: [], unlisted: [], kept: [] };
+  let compute = opts.compute;
+  if (!compute) {
+    const path = instanceFile(opts.instanceDir, "compute");
+    if (!existsSync(path)) return res;
+    try {
+      compute = parseCompute(await readFile(path, "utf8"));
+    } catch (e) {
+      opts.out(`provider grants: ${path} does not validate, so no provider key was granted (${e instanceof Error ? e.message : String(e)})`);
+      return res;
+    }
+  }
+  const bindings: ProviderGrant[] = [];
+  for (const [provider, p] of Object.entries(compute.providers)) {
+    if (opts.only && !opts.only.includes(provider)) continue;
+    const cred = providerCredential(p);
+    if (cred?.kind !== "secret") continue;
+    bindings.push({ secret: cred.name, provider, host: egressDestination(p.base_url)?.entry });
+  }
+  if (bindings.length === 0) return res;
+  const edit = await openSecrets(opts);
+  for (const b of bindings) {
+    const grantee = providerGrantee(b.provider);
+    if (!has(edit.file, b.secret)) {
+      res.unlisted.push(b);
+      opts.out(`providers.${b.provider} uses {{ secret.${b.secret} }}, which ${edit.path} does not list — \`metistry secrets set ${b.secret}\` stores it; then \`metistry secrets grant ${b.secret} ${grantee} on\``);
+      continue;
+    }
+    const policy = edit.file.secrets[b.secret]!;
+    if (Object.hasOwn(policy.grants, grantee)) {
+      res.kept.push(b);
+      continue;
+    }
+    edit.doc.setIn(["secrets", b.secret, "grants", grantee], "on");
+    const addHost = b.host !== undefined && !policy.hosts.includes(b.host);
+    if (addHost) {
+      edit.doc.setIn(["secrets", b.secret, "hosts"], [...policy.hosts, b.host]);
+      flowList(edit, b.secret);
+    }
+    // keep the parsed view in step, so a second binding of the same secret sees this one
+    policy.grants[grantee] = "on";
+    if (addHost) policy.hosts.push(b.host!);
+    res.granted.push({ ...b, ...(addHost ? {} : { host: undefined }) });
+    opts.out(`${opts.dryRun ? "[dry-run] would grant" : "granted"} ${b.secret} to ${grantee}: on${addHost ? `, and sent only to ${b.host} as well` : ""} — the provider's key now reaches its provider (\`metistry secrets grant ${b.secret} ${grantee} off\` revokes it)`);
+  }
+  if (res.granted.length > 0 && !opts.dryRun) {
+    res.delivery = await commitSecrets(opts, edit, `secrets: grant provider keys — ${res.granted.map((g) => `${g.secret} → provider:${g.provider}`).join(", ")}`);
+  }
+  return res;
 }
 
 /**
@@ -1241,6 +1740,8 @@ export interface MigrateScopeResult {
   pending: Array<ScopeRewrite & { why: string }>;
   /** step 4: originals still under the per-user account — the migration never deletes one */
   originals: string[];
+  /** after step 2: provider keys given their `provider:<name>` grant (X-7) — see `grantProviderSecrets` */
+  granted: ProviderGrant[];
   /** every original is in this instance: nothing is left for the owner to do. A `pending` reference waits on a release, not on the owner — `metistry update` reruns this and finishes it. */
   complete: boolean;
   deliveries: ProtectedWrite[];
@@ -1271,7 +1772,7 @@ export async function migrateScope(opts: MigrateScopeOptions): Promise<MigrateSc
   const out = opts.out;
   const dry = opts.dryRun === true;
 
-  const res: MigrateScopeResult = { instanceId: store.account, sharedAccount, copied: [], kept: [], unreadable: [], unmappable: [], recorded: [], rewritten: [], pending: [], originals: [], complete: false, deliveries: [] };
+  const res: MigrateScopeResult = { instanceId: store.account, sharedAccount, copied: [], kept: [], unreadable: [], unmappable: [], recorded: [], rewritten: [], pending: [], granted: [], originals: [], complete: false, deliveries: [] };
   out(`shared scope: account ${sharedAccount} → this instance's ${store.account} (${opts.instanceDir})`);
 
   // ---- step 1: copy, instance wins -----------------------------------------------
@@ -1360,6 +1861,15 @@ export async function migrateScope(opts: MigrateScopeOptions): Promise<MigrateSc
       out(`rewrote ${file} ${s.field}: ${s.from} → {{ secret.${to} }}`);
     }
   }
+
+  // ---- after step 2: a provider key's grantee (X-7) ------------------------------------
+  // Step 2 may just have pointed a provider at `{{ secret.x }}`, and the door
+  // refuses a provider key the owner has not granted to that provider — so
+  // the migration that made the reference gives it its grant, exactly as
+  // `compute providers add` does. Idempotent: a grant already there is kept.
+  const grants = await grantProviderSecrets({ ...opts, dryRun: dry });
+  res.granted = grants.granted;
+  if (grants.delivery) res.deliveries.push(grants.delivery);
 
   // ---- step 4: the originals stay --------------------------------------------------------
   if (res.originals.length) out(`left in the shared scope — this migration deletes nothing: ${res.originals.join(", ")}. \`metistry secrets purge-shared\` removes an original once every instance on this Mac has its copy.`);

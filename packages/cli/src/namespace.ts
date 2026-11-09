@@ -115,6 +115,26 @@ export function portsOf(base: number): Record<PortedService, number> {
   return Object.fromEntries(PORTED_SERVICES.map((s, i) => [s, base + i])) as Record<PortedService, number>;
 }
 
+/** The console's proxy listener's variable (plan §2.23, X-103) — filled from the block like the five above, but not one of `PORTED_SERVICES` (below). */
+export const CONSOLE_PROXY_PORT_VAR = "METISTRY_CONSOLE_PROXY_PORT";
+
+/**
+ * The console's PROXY listener port on a namespaced instance (plan §2.23,
+ * X-103): the block's second-to-last slot, beside the egress proxy's last
+ * one (egress.ts, which says why the far end rather than a sixth
+ * `PORTED_SERVICES` entry — an existing `ports.yaml` records the five it had
+ * when written, and a sixth would fail every allocated instance's parse).
+ *
+ * It must be filled here and not left to the console's own default, because
+ * that default — the console port + 1 — is this block's `db` slot: a
+ * namespaced console would try to bind its own Postgres's port. Off a
+ * namespace the default stands (8080 → 8081), and `METISTRY_CONSOLE_PROXY_PORT`
+ * in `.env` wins everywhere, as every port does.
+ */
+export function consoleProxyPortOf(ns: Namespace): number {
+  return ns.base + BLOCK_SIZE - 2;
+}
+
 /** Can this process bind `127.0.0.1:<port>` right now? The only honest "is it free" — a table of known ports would go stale the first time anything else on the Mac took one. */
 export function portFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -223,23 +243,24 @@ export function portEnv(ns: Namespace): Record<string, string> {
     const uv = URL_VARS[s];
     if (uv) out[uv] = `http://127.0.0.1:${ns.ports[s]}`;
   }
+  out[CONSOLE_PROXY_PORT_VAR] = String(consoleProxyPortOf(ns));
   return out;
 }
 
 export function applyPorts(env: NodeJS.ProcessEnv, ns: Namespace): string[] {
   const applied: string[] = [];
+  const fill = (name: string, value: string) => {
+    if (env[name] === undefined || env[name] === "") {
+      env[name] = value;
+      applied.push(`${name}=${value}`);
+    }
+  };
   for (const s of PORTED_SERVICES) {
     const port = ns.ports[s];
-    const pv = PORT_VARS[s];
-    if (env[pv] === undefined || env[pv] === "") {
-      env[pv] = String(port);
-      applied.push(`${pv}=${port}`);
-    }
+    fill(PORT_VARS[s], String(port));
     const uv = URL_VARS[s];
-    if (uv && (env[uv] === undefined || env[uv] === "")) {
-      env[uv] = `http://127.0.0.1:${port}`;
-      applied.push(`${uv}=http://127.0.0.1:${port}`);
-    }
+    if (uv) fill(uv, `http://127.0.0.1:${port}`);
   }
+  fill(CONSOLE_PROXY_PORT_VAR, String(consoleProxyPortOf(ns)));
   return applied;
 }

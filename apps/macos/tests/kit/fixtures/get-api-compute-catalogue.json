@@ -18,7 +18,7 @@
         "ok": true,
         "detail": "https://openrouter.ai/api/v1/models → 2 model(s)",
         "count": 2,
-        "read_at": "2026-09-27T03:23:35.612Z"
+        "read_at": "2026-09-30T04:49:51.865Z"
       },
       {
         "name": "lmstudio",
@@ -26,7 +26,7 @@
         "ok": true,
         "detail": "http://127.0.0.1:1234/v1/models → 3 model(s)",
         "count": 3,
-        "read_at": "2026-09-27T03:23:35.612Z"
+        "read_at": "2026-09-30T04:49:51.865Z"
       }
     ],
     "skipped": [
@@ -105,6 +105,6 @@
         }
       }
     ],
-    "as_of": "2026-09-27T03:23:35.613Z"
+    "as_of": "2026-09-30T04:49:51.865Z"
   }
 }

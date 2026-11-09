@@ -171,15 +171,31 @@ public struct NeedsYouRowModel: Sendable, Equatable, Identifiable {
     public let age: String
     public let spokenAge: String
     public let isToday: Bool
+    /// Every request this line answers for: its own id, or a meeting's parts.
+    public let partIDs: [Int]
+    /// A meeting: its parts' rows are one line, and one card in the detail.
+    public var isMeeting: Bool { meetingTitle != nil }
+    private let meetingTitle: String?
 
-    public init(_ row: RequestRow, assistantName: String?, now: Date, calendar: Calendar) {
+    /// One line for `row`, or — given its `meeting` — for the whole meeting,
+    /// asked by `row` (its oldest part) and carrying its id.
+    public init(_ row: RequestRow, meeting: MeetingGroup? = nil, assistantName: String?, now: Date, calendar: Calendar) {
         id = row.id
-        type = row.request?.type
-        // A row with no reading says what it is in general, and nothing more:
-        // the stored kind is the machinery's word, not the owner's.
-        word = row.request?.word ?? "request"
-        symbol = NeedsYouTypeGlyph.symbol(row.request?.type)
-        title = Self.title(of: row)
+        partIDs = meeting?.parts.map(\.id) ?? [row.id]
+        meetingTitle = meeting.map { $0.title(assistantName: assistantName ?? "") }
+        if meeting != nil {
+            type = RequestShape.meeting.type
+            word = RequestShape.meeting.word
+            symbol = NeedsYouTypeGlyph.symbol(RequestShape.meeting.type)
+            title = meetingTitle
+        } else {
+            type = row.request?.type
+            // A row with no reading says what it is in general, and nothing more:
+            // the stored kind is the machinery's word, not the owner's.
+            word = row.request?.word ?? "request"
+            symbol = NeedsYouTypeGlyph.symbol(row.request?.type)
+            title = Self.title(of: row)
+        }
         from = NeedsYouFrom.of(row)
         switch from {
         case .assistant:
@@ -207,6 +223,9 @@ public struct NeedsYouRowModel: Sendable, Equatable, Identifiable {
         spokenAge = elapsed.map(NeedsYouAge.spoken) ?? "age unknown"
         isToday = at.map { calendar.isDate($0, inSameDayAs: now) } ?? false
     }
+
+    /// *3 parts* — a meeting's notes and to-dos, answered together.
+    var partsWords: String { "\(partIDs.count) \(partIDs.count == 1 ? "part" : "parts")" }
 
     /// What the request asks, from its own payload: its title, or its summary,
     /// or — an access request — the folder it wants. Nil rather than a kind or
@@ -238,6 +257,7 @@ public struct NeedsYouRowModel: Sendable, Equatable, Identifiable {
         }
         // Provenance is neutral: a grey chip, never the warning tint (C22, review 01).
         if let trust { chips.append(Mark(trust, style: .caption1, ink: .textSecondary, plate: .sunken, on: ground, shape: .chip)) }
+        if isMeeting { chips.append(Mark(partsWords, style: .caption1, ink: .textSecondary, plate: .sunken, on: ground, shape: .chip)) }
 
         let titleMark = title.map { Mark($0, style: .body, weight: .medium, ink: .textPrimary, on: ground) }
             ?? PartialNoteModel("this request carries no title").mark(on: ground)
@@ -259,7 +279,8 @@ public struct NeedsYouRowModel: Sendable, Equatable, Identifiable {
         if let sourceName { who.append(["from \(sourceName)", person].compactMap { $0 }.joined(separator: ", ")) }
         if let trust { who.append(trust) }
         let lead = who.isEmpty ? "" : who.joined(separator: ", ") + ": "
-        return "\(lead)\(word), \(title ?? "no title"). \(spokenAge)."
+        let parts = isMeeting ? " \(partsWords)." : ""
+        return "\(lead)\(word), \(title ?? "no title").\(parts) \(spokenAge)."
     }
 }
 
@@ -491,6 +512,7 @@ public final class NeedsYouModel {
     @ObservationIgnored private var didFirstSelect = false
     @ObservationIgnored private var anchor: Int?
     @ObservationIgnored private var requestCards: (name: String, generation: Int, cards: RequestCards)?
+    @ObservationIgnored private var meetingCards: (name: String, generation: Int, byID: [String: GroupAnswering])?
 
     public init(session: ConsoleSession, timeZone: TimeZone = .current, now: @escaping @MainActor () -> Date = { Date() }) {
         self.session = session
@@ -529,9 +551,21 @@ public final class NeedsYouModel {
         }
     }
 
+    /// What the list draws: a request on its own, or a meeting's rows as one
+    /// card (`group_id`). Selection, the batch and the page limit stay keyed by
+    /// the requests inside (`bulkIDs`); a card is selected by its `leadID`.
+    public var visibleCards: [QueueCard] { MeetingGroup.cards(visibleRows) }
+
     public func groups(assistantName: String?) -> [NeedsYouGroup] {
         let at = now()
-        let models = visibleRows.map { NeedsYouRowModel($0, assistantName: assistantName, now: at, calendar: calendar) }
+        let models = visibleCards.map { card -> NeedsYouRowModel in
+            switch card {
+            case .request(let row):
+                return NeedsYouRowModel(row, assistantName: assistantName, now: at, calendar: calendar)
+            case .meeting(let group):
+                return NeedsYouRowModel(group.parts[0], meeting: group, assistantName: assistantName, now: at, calendar: calendar)
+            }
+        }
         return [NeedsYouGroup.Day.today, .earlier].compactMap { day in
             let rows = models.filter { $0.isToday == (day == .today) }
             return rows.isEmpty ? nil : NeedsYouGroup(day: day, rows: rows)
@@ -574,19 +608,40 @@ public final class NeedsYouModel {
     /// The selection, as the bulk list answers it: only rows still listed, in
     /// the list's order, never more than a page.
     public var bulkIDs: [Int] {
-        Array(visibleRows.map(\.id).filter(selection.contains).prefix(Self.pageLimit))
+        Array(visibleCards.filter { selection.contains($0.leadID) }.flatMap(\.partIDs).prefix(Self.pageLimit))
     }
 
-    public var isBulk: Bool { bulkIDs.count >= 2 }
+    /// Two or more cards selected. One meeting is one card, however many parts.
+    public var isBulk: Bool { visibleCards.filter { selection.contains($0.leadID) }.count >= 2 }
+
+    /// The one card selected, if exactly one is.
+    private var selectedCard: QueueCard? {
+        guard selection.count == 1, let id = selection.first else { return nil }
+        return visibleCards.first { $0.leadID == id }
+    }
 
     public var selectedRow: RequestRow? {
-        guard selection.count == 1, let id = selection.first else { return nil }
-        return visibleRows.first { $0.id == id }
+        guard case .request(let row)? = selectedCard else { return nil }
+        return row
     }
 
-    /// *Select All on This Page*: every row the filters show, up to the page.
+    /// The meeting selected, when the one card selected is one.
+    public var selectedMeeting: MeetingGroup? {
+        guard case .meeting(let group)? = selectedCard else { return nil }
+        return group
+    }
+
+    /// *Select All on This Page*: every card the filters show, up to a page of
+    /// the requests inside them (a card is never cut in two).
     public func selectAllOnPage() {
-        selection = Set(visibleRows.prefix(Self.pageLimit).map(\.id))
+        var leads: Set<Int> = []
+        var count = 0
+        for card in visibleCards {
+            guard count + card.partIDs.count <= Self.pageLimit else { break }
+            count += card.partIDs.count
+            leads.insert(card.leadID)
+        }
+        selection = leads
     }
 
     public func clearSelection() {
@@ -599,7 +654,8 @@ public final class NeedsYouModel {
             typeFilter = nil
             fromFilter = nil
         }
-        selection = [id]
+        // A part of a meeting lands on the meeting's card.
+        selection = [visibleCards.first { $0.partIDs.contains(id) }?.leadID ?? id]
         didFirstSelect = true
     }
 
@@ -620,7 +676,7 @@ public final class NeedsYouModel {
     func reconcile() {
         if let type = typeFilter, !rows.contains(where: { $0.request?.type == type }) { typeFilter = nil }
         if let from = fromFilter, !rows.contains(where: { NeedsYouFrom.of($0) == from }) { fromFilter = nil }
-        let visible = visibleRows.map(\.id)
+        let visible = visibleCards.map(\.leadID)
         let kept = selection.filter(visible.contains)
         if kept.isEmpty, !visible.isEmpty, !selection.isEmpty || !didFirstSelect {
             selection = [visible[min(anchor ?? 0, visible.count - 1)]]
@@ -743,6 +799,27 @@ public final class NeedsYouModel {
         return cards
     }
 
+    /// One card per meeting, held while its group is in the queue so a held
+    /// Accept All, its Undo and its receipts survive the list refreshing around
+    /// it. A card still open when its parts changed is rebuilt; one mid-answer
+    /// or showing its outcome is kept as it is.
+    public func meetingCard(for group: MeetingGroup, assistantName: String) -> GroupAnswering? {
+        guard let session else { return nil }
+        var held = meetingCards
+        if held == nil || held?.name != assistantName || held?.generation != session.generation {
+            held = (assistantName, session.generation, [:])
+        }
+        var byID = (held?.byID ?? [:]).filter { id, _ in visibleCards.contains { $0.id == "group:\(id)" } }
+        if let card = byID[group.id], card.phase != .open || card.group.parts.map(\.id) == group.parts.map(\.id) {
+            meetingCards = (assistantName, session.generation, byID)
+            return card
+        }
+        let card = GroupAnswering(group, store: session.stores, assistantName: assistantName)
+        byID[group.id] = card
+        meetingCards = (assistantName, session.generation, byID)
+        return card
+    }
+
     /// The owner's day, for the dates a card's body prints.
     public var today: TaskDay {
         let d = calendar.dateComponents([.year, .month, .day], from: now())
@@ -774,6 +851,7 @@ public final class NeedsYouModel {
         didFirstSelect = false
         anchor = nil
         requestCards = nil
+        meetingCards = nil
     }
 }
 
@@ -915,6 +993,25 @@ public struct NeedsYouView<Detail: View>: View {
         }
     }
 
+    /// A meeting is one card (screen 3 §10.3): its parts are answered together.
+    /// With the assistant's name still unknown the card would print none, so
+    /// the oldest part goes to `detail`, which says what it can.
+    @ViewBuilder
+    private func meetingDetail(_ group: MeetingGroup) -> some View {
+        if let name = assistantName, let card = model.meetingCard(for: group, assistantName: name) {
+            ScrollView {
+                MeetingCardView(card, assistantName: name, allowsDecisions: model.allowsDecisions, today: model.today, now: model.now())
+                    .frame(maxWidth: MetistrySize.contentMax, alignment: .leading)
+                    .padding(MetistrySpace.s5)
+            }
+            .id(group.id)
+            // Every part answered: the shell's count asks again.
+            .task(id: card.isDone) { if card.isDone { await model.onQueueChanged?() } }
+        } else if let lead = group.parts.first {
+            detail(lead)
+        }
+    }
+
     @ViewBuilder
     private var detailColumn: some View {
         if model.isBulk {
@@ -924,6 +1021,8 @@ public struct NeedsYouView<Detail: View>: View {
             }
         } else if let row = model.selectedRow {
             detail(row)
+        } else if let group = model.selectedMeeting {
+            meetingDetail(group)
         } else {
             StatePanel(StatePanelModel(.empty, title: "No Request Selected", sentence: "Choose one to read it, or several to answer them together."))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

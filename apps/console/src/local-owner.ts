@@ -22,8 +22,27 @@
 // and docker-compose.yml is the only place that sets it. Unset (the launchd
 // shape, and any console this file did not configure) = plain loopback,
 // which is the fail-closed direction.
+//
+// The second wrinkle is every remote-access provider (plan §2.23, X-103).
+// `tailscaled`, `cloudflared`, zrok, ngrok, a TLS terminator for a forwarded
+// port — each of them connects to the console FROM 127.0.0.1, so a request
+// that crossed a tunnel arrives with a loopback peer and the rule above would
+// honour the token for it. That is why the console has a second listener for
+// proxies only (proxy-listener.ts): a request on it is remote BY CONSTRUCTION,
+// and this module never honours the token there, whatever the peer says.
+// The listener a request arrived on is a fact about the socket the server
+// accepted it from — not a header, not an address — so it is the one other
+// input this module takes.
 
 import { parseBearer, tokenEquals } from "@foldedspacelabs/metistry-core";
+
+/**
+ * Which of the console's two listeners accepted the connection: `main` is
+ * `METISTRY_CONSOLE_HOST:METISTRY_CONSOLE_PORT`, where the local door lives;
+ * `proxy` is the proxy-only listener (the Unix socket and
+ * `METISTRY_CONSOLE_PROXY_PORT`), where every request is remote.
+ */
+export type Listener = "main" | "proxy";
 
 /** Every peer address that means "this machine" over a real loopback socket. */
 export const LOOPBACK_ADDRESSES = ["127.0.0.1", "::1", "::ffff:127.0.0.1"] as const;
@@ -49,7 +68,7 @@ export interface LocalOwnerConfig {
 export type LocalOwnerVerdict =
   | "absent" // no bearer, or no local owner token configured at all
   | "mismatch" // a bearer that is not this token (may still be an agent/owner token — keep looking)
-  | "remote" // THE token, from an address that is not this machine: refused, and audited
+  | "remote" // THE token, from an address that is not this machine — or on the proxy listener, from anywhere: refused, and audited
   | "ok";
 
 export interface PeerRequest {
@@ -134,12 +153,20 @@ export function parseTrustedProxies(spec: string | undefined, gateway: () => str
  * refusal from a remote address can be audited as "the owner token, from
  * $addr" — a mismatch is indistinguishable from any other stray bearer and
  * is left to fall through to the other credential classes.
+ *
+ * `listener` is where the connection was accepted. On the proxy listener the
+ * answer is `remote` for THE token from every peer — loopback, a trusted
+ * gateway, a Unix socket with no address at all — because the one thing
+ * known about a request there is that a proxy carried it, and a proxy's peer
+ * address says nothing about where the request began. There is no
+ * configuration that opens the local door on that listener.
  */
-export function checkLocalOwner(req: PeerRequest, cfg: LocalOwnerConfig | undefined): { verdict: LocalOwnerVerdict; peer: string } {
+export function checkLocalOwner(req: PeerRequest, cfg: LocalOwnerConfig | undefined, listener: Listener = "main"): { verdict: LocalOwnerVerdict; peer: string } {
   const peer = peerAddressOf(req);
   const presented = parseBearer(req.headers.authorization);
   if (!cfg || cfg.token === "" || presented === null) return { verdict: "absent", peer };
   if (!tokenEquals(presented, cfg.token)) return { verdict: "mismatch", peer };
+  if (listener === "proxy") return { verdict: "remote", peer };
   const local = isLoopbackAddress(peer) || cfg.trusted.some((t) => addressMatches(peer, t));
   return { verdict: local ? "ok" : "remote", peer };
 }

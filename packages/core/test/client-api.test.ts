@@ -74,7 +74,7 @@ describe("every row", () => {
   });
 
   it("serves exactly N rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(120); // T4-26: POST /api/trackers/:connection/issues/:key/complete; T4-25: POST /api/trackers/:connection/issues, POST /api/vault-tasks/:task_key/link; X-12: POST /api/today/add; T2-13: the three pull request doors; T2-12: POST /api/calendar/events/:id/move; T2-10: POST /api/knowledge/conflicts/resolve; T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback; T2-11: POST /api/meetings/:event_id/note; T2-7: GET /api/today, GET /api/vault-tasks, PUT /api/today/order; T3-8: POST /api/scheduled/routines
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(124); // X-128: GET /api/briefing; T4-17: POST /api/calendar/invitations/:id/respond, POST /api/mail/messages/:id/draft; T8-4: GET /api/recordings/:id; T4-26: POST /api/trackers/:connection/issues/:key/complete; T4-25: POST /api/trackers/:connection/issues, POST /api/vault-tasks/:task_key/link; X-12: POST /api/today/add; T2-13: the three pull request doors; T2-12: POST /api/calendar/events/:id/move; T2-10: POST /api/knowledge/conflicts/resolve; T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback; T2-11: POST /api/meetings/:event_id/note; T2-7: GET /api/today, GET /api/vault-tasks, PUT /api/today/order; T3-8: POST /api/scheduled/routines
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {
@@ -83,6 +83,22 @@ describe("every row", () => {
       if (r.idempotent === "key") expect(r.method, key(r)).not.toBe("GET");
       if (r.method === "GET") expect(r.idempotent, key(r)).toBe("natural");
     }
+  });
+});
+
+describe("minting an enrolment code (plan §2.22, X-75)", () => {
+  it("is no route's job: the only enrolment rows are the two ceremonies that SPEND a code, and nothing in the table mints one", () => {
+    // Shell access to the Mac is the root of trust for a first passkey (plan
+    // §4.2): `metistry enroll` mints, and the console's conformance test holds
+    // the server to this table — so a row here is the only way a mint could be
+    // served, and there is none. Not an unauthenticated one, not a `local` one.
+    const enrolment = CLIENT_API.filter((r) => /enrol/i.test(r.path));
+    expect(enrolment.map(key).sort()).toEqual(["POST /auth/enroll/finish", "POST /auth/enroll/start"]);
+    for (const r of enrolment) expect(r.reach, key(r)).toEqual(["public"]);
+    // the only mints the table knows are agent bearer tokens (`/api/agents`), never a code for a passkey
+    const mints = CLIENT_API.filter((r) => /\bmint/i.test(r.summary) || /mint/i.test(r.path));
+    expect(mints.map(key).sort()).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate"]);
+    expect(CLIENT_API.filter((r) => /enrol\w*\s+code|passkey\s+code|one-time\s+code/i.test(r.summary) && !/enrol/i.test(r.path)).map(key)).toEqual([]);
   });
 });
 
@@ -137,7 +153,7 @@ describe("reach and principals", () => {
 
   it("no agent bearer reaches anything but the agent surface", () => {
     const agentRows = CLIENT_API.filter((r) => r.principals.includes("agent")).map(key);
-    expect(agentRows).toEqual(["* /mcp", "POST /capture"]);
+    expect(agentRows).toEqual(["* /mcp", "POST /capture", "GET /api/briefing"]); // X-128: the session-start briefing, agent bearers alone
   });
 
   it("the capture owner token reaches the capture door and five owner routes — pinned, so widening it is a decision", () => {
@@ -194,8 +210,10 @@ describe("matchRoute", () => {
 
   it("servedRoute answers only for what is served", () => {
     expect(servedRoute("GET", "/api/devices") && key(servedRoute("GET", "/api/devices")!)).toBe("GET /api/devices");
-    expect(servedRoute("GET", "/api/recordings/r1")).toBeUndefined(); // T8-4's, frozen ahead of it
-    expect(matchRoute("GET", "/api/recordings/r1")?.route.served).toBe(false);
+    expect(servedRoute("POST", "/api/mail/messages/m1/draft") && key(servedRoute("POST", "/api/mail/messages/m1/draft")!)).toBe("POST /api/mail/messages/:id/draft"); // T4-17 serves it
+    expect(servedRoute("GET", "/api/mail/messages/m1/draft")).toBeUndefined(); // the path, not the method
+    expect(matchRoute("POST", "/api/calendar/invitations/i1/respond")?.route.served).toBe(true);
+    expect(servedRoute("GET", "/api/recordings/r1") && key(servedRoute("GET", "/api/recordings/r1")!)).toBe("GET /api/recordings/:id"); // T8-4 serves it
   });
 });
 
@@ -211,8 +229,10 @@ describe("noRouteMessage", () => {
   });
 
   it("says a frozen route is not served yet, rather than that it does not exist", () => {
-    expect(noRouteMessage("GET", "/api/recordings/r1")).toBe("GET /api/recordings/:id is in the client API but this console does not serve it yet (docs/ops/client-api.md)");
-    expect(noRouteMessage("POST", "/api/mail/messages/m1/draft")).toContain("POST /api/mail/messages/:id/draft is in the client API");
+    // T4-17 served the last frozen rows, so none is left to say "not yet" of — a row frozen ahead of its ticket again is named here
+    expect(CLIENT_API.filter((r) => !r.served).map(key)).toEqual([]);
+    // …and a served path with the wrong method offers the one it serves
+    expect(noRouteMessage("GET", "/api/mail/messages/m1/draft")).toContain("this console serves POST /api/mail/messages/:id/draft");
   });
 
   it("falls back to the document when nothing is near", () => {

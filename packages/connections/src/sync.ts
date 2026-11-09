@@ -40,12 +40,25 @@
 // and `envSecretSource` reads it back. Unlike the engine's provider key,
 // the value is never put on a request by the caller: it is filled by the
 // door, for the listed host, or not at all.
+//
+// **OAuth sign-in** (`auth: oauth`, Google Calendar — T4-14). The delivered
+// secret is the REFRESH token; what the door fills into
+// `Bearer {{ secret.<token> }}` is an access token minted from it at the
+// token endpoint (`oauth.ts`: `OAuthTokens`, `oauthSource` — through its own
+// guarded request, pinned to that endpoint, no redirect) and held in this
+// process's memory until a minute before it expires. The opener keeps one
+// per connection across runs (`OAuthCache`). A sync that knows its
+// provider's hosts passes them (`tokenHosts`), and the token secret's *Sent
+// only to* list must be EXACTLY those — the access token and the refresh
+// token go to nothing else, even if the owner's list says more.
 
 import {
   SecretRedactor,
+  connectionTypeSyncs,
   guardedFetch,
   parseSecretsFile,
   secretDeliveryVar,
+  type AgentDispatch,
   type ConnectionFile,
   type ConnectionTypeManifest,
   type RegistryUnit,
@@ -56,7 +69,9 @@ import {
 import { loadInstanceCatalog, type CatalogRoots, type ConnectionCatalog } from "./catalog.js";
 import { ConnectionRefused } from "./errors.js";
 import type { ConnectionEntry } from "./load.js";
-import { connectionGrantee } from "./pool.js";
+import { basicSource, connectionGrantee } from "./door.js";
+import { OAuthError, OAuthTokens, oauthClientOf, oauthSource, type OAuthClientPlan, type TokenDoor } from "./oauth.js";
+import { openImap, type ImapDialer, type ImapSession } from "./imap.js";
 
 /**
  * A `SecretSource` over an environment: `{{ secret.x }}` is
@@ -78,30 +93,10 @@ export function envSecretSource(env: NodeJS.ProcessEnv): SecretSource {
   };
 }
 
-/**
- * Basic sign-in (RFC 7617) at the door: the header the sync holds is
- * `Basic {{ secret.<name> }}`, and this source fills that reference with
- * `base64(<username>:<value>)` — so the encoding happens inside the door,
- * for a listed host or not at all, and the pair never exists outside it.
- * The redactor learns the value itself as well as the encoded pair, so a
- * server that echoes either shows the secret's name, never the value.
- * Every other name reads through unchanged.
- */
-function basicSource(source: SecretSource, basic: { secret: string; username: string }, redactor: SecretRedactor): SecretSource {
-  return {
-    async value(name) {
-      const v = await source.value(name);
-      if (name !== basic.secret || v === undefined) return v;
-      redactor.learn(name, v);
-      return Buffer.from(`${basic.username}:${v}`, "utf8").toString("base64");
-    },
-  };
-}
-
-/** The sync a connection's provider declares, when its provider is product code a sync reads. */
-function declaredSync(entry: ConnectionEntry): string | undefined {
+/** The syncs a connection's provider declares (`sync`, then `also_read_by`), when its provider is product code a sync reads. */
+function declaredSyncs(entry: ConnectionEntry): string[] {
   const m = entry.provider?.manifest;
-  return m && m.implementation.kind === "builtin" ? m.sync : undefined;
+  return m && m.implementation.kind === "builtin" ? connectionTypeSyncs(m) : [];
 }
 
 /** What a sync reads, or why it reads nothing. */
@@ -124,12 +119,12 @@ export function syncTarget(catalog: Pick<ConnectionCatalog, "entries" | "schedul
     if (entry.status !== "ok" || !entry.connection || !entry.provider) {
       return { ok: false, status: entry.status === "absent" ? "absent" : "failed", why: `connection ${named} is ${entry.status}: ${entry.issues.join("; ") || "not ready"}` };
     }
-    if (declaredSync(entry) !== sync) {
-      return { ok: false, status: "failed", why: `scheduled.yaml names connection ${named} for ${sync}, but its provider ${entry.provider.name} is read by ${declaredSync(entry) ?? "no sync"}` };
+    if (!declaredSyncs(entry).includes(sync)) {
+      return { ok: false, status: "failed", why: `scheduled.yaml names connection ${named} for ${sync}, but its provider ${entry.provider.name} is read by ${declaredSyncs(entry).join(", ") || "no sync"}` };
     }
     return { ok: true, entry: entry as Extract<SyncTarget, { ok: true }>["entry"] };
   }
-  const mine = catalog.entries.filter((e) => e.status === "ok" && e.connection && declaredSync(e) === sync);
+  const mine = catalog.entries.filter((e) => e.status === "ok" && e.connection && declaredSyncs(e).includes(sync));
   if (mine.length === 1) return { ok: true, entry: mine[0] as Extract<SyncTarget, { ok: true }>["entry"] };
   if (mine.length > 1) {
     return {
@@ -151,7 +146,7 @@ export function syncReaders(catalog: Pick<ConnectionCatalog, "entries" | "schedu
   const out = new Map<string, string[]>();
   const add = (connection: string, sync: string) => out.set(connection, [...new Set([...(out.get(connection) ?? []), sync])].sort());
   for (const [sync, entry] of Object.entries(catalog.scheduled?.syncs ?? {})) add(entry.connection, sync);
-  const syncs = new Set(catalog.entries.map(declaredSync).filter((s): s is string => s !== undefined));
+  const syncs = new Set(catalog.entries.flatMap(declaredSyncs));
   for (const sync of syncs) {
     if (catalog.scheduled?.syncs && Object.hasOwn(catalog.scheduled.syncs, sync)) continue;
     const t = syncTarget(catalog, sync);
@@ -162,14 +157,35 @@ export function syncReaders(catalog: Pick<ConnectionCatalog, "entries" | "schedu
 
 /**
  * The secrets every sync-read connection lists — what `metistry secrets sync
- * --to env` delivers so the console's syncs can be filled at the door.
- * Only `ok` connections whose provider is product code a sync reads: an MCP
- * connection's secrets are filled by the pool in the process that dials it,
- * and never delivered to the console's environment.
+ * --to env` delivers so the console's syncs can be filled at the door. Only
+ * `ok` connections whose provider is product code a sync reads.
  */
 export function syncSecretNames(catalog: Pick<ConnectionCatalog, "entries">): string[] {
   const out = new Set<string>();
-  for (const e of catalog.entries) if (e.status === "ok" && e.connection && declaredSync(e) !== undefined) for (const s of e.connection.secrets) out.add(s);
+  for (const e of catalog.entries) if (e.status === "ok" && e.connection && declaredSyncs(e).length > 0) for (const s of e.connection.secrets) out.add(s);
+  return [...out].sort();
+}
+
+/**
+ * Every secret the console fills (T4-10): a sync's (above); because the
+ * console holds the pool the proxy dials through, every `ok` MCP, API, feed
+ * or files connection's — its headers, a command's environment, an OAuth
+ * sign-in's refresh token and the owner's own client; and, because dispatch
+ * sends a brief through one (T4-11), every `ok` agent connection's whose
+ * type says how it is dispatched to. What `metistry secrets sync --to env`
+ * delivers as `METISTRY_SECRET_<NAME>`. A calendar, mail or tracker
+ * connection nothing syncs and a bridge's are not the console's to fill, and
+ * are not delivered.
+ */
+export function consoleSecretNames(catalog: Pick<ConnectionCatalog, "entries">): string[] {
+  const out = new Set(syncSecretNames(catalog));
+  for (const e of catalog.entries) {
+    if (e.status !== "ok" || !e.connection) continue;
+    const impl = e.provider?.manifest.implementation.kind ?? "native";
+    const dialled = impl === "native" && (e.connection.type === "mcp" || e.connection.type === "api" || e.connection.type === "feed" || e.connection.type === "files");
+    const dispatched = e.connection.type === "agent" && e.provider?.manifest.dispatch !== undefined;
+    if (dialled || dispatched) for (const s of e.connection.secrets) out.add(s);
+  }
   return [...out].sort();
 }
 
@@ -191,6 +207,8 @@ export interface SyncHttp {
   capabilities: readonly string[];
   /** the owner's Needs You switches for this sync from `scheduled.yaml` (`syncs.<sync>.raise`) — only what the file says; the manifest's defaults are the sync's */
   raise: Readonly<Record<string, boolean>>;
+  /** the connection's text config values (`config.<field>`), as the file writes them — never a secret (a secret or oauth field is left out) */
+  config: Readonly<Record<string, string>>;
   /** the secret names the calls so far carried — for the run's `meta.secrets` */
   secretsUsed(): string[];
 }
@@ -203,6 +221,8 @@ export interface OpenSyncOptions {
   sync: string;
   /** the provider's own origin (`https://api.linear.app`): the connection's URL must be it, and nothing else is reached. Absent (a provider that lives anywhere, like an ICS feed): the connection's own URL's origin is the only one reached */
   origin?: string | undefined;
+  /** further origins the provider's code reaches for the same service (Devin's wikis at `https://mcp.devin.ai`) — named by product code, never by the file; a secret still goes only to its listed hosts */
+  alsoOrigins?: readonly string[] | undefined;
   /** the builtin module that must implement the connection's provider (`linear`) */
   module: string;
   /** where a value comes from — `envSecretSource(process.env)` in the console */
@@ -210,6 +230,28 @@ export interface OpenSyncOptions {
   redactor?: SecretRedactor | undefined;
   /** the base fetch under the door (a test's fake; default global fetch) */
   fetch?: typeof fetch | undefined;
+  /**
+   * An OAuth connection: the exact hosts its token secret's *Sent only to*
+   * list must be — the token endpoint's and the service's (Google:
+   * `GOOGLE_TOKEN_HOSTS`). Absent: the list is the owner's, held by the door.
+   */
+  tokenHosts?: readonly string[] | undefined;
+  /** where an OAuth connection's access token is kept between runs (the opener's); absent = minted afresh on each open */
+  oauth?: OAuthCache | undefined;
+}
+
+/** One process's OAuth access tokens, by connection — kept while the sign-in's plan is the same, so a run every 15 minutes mints one an hour, not one a run. */
+export type OAuthCache = Map<string, { key: string; tokens: OAuthTokens; door: { current: TokenDoor } }>;
+
+/** The exact-hosts rule for an OAuth sign-in's token secret, or why it is broken. Names hosts and secrets, never a value. */
+function tokenHostsIssue(name: string, plan: OAuthClientPlan, secrets: SecretsFile, want: readonly string[]): string | undefined {
+  const expected = [...new Set(want)].sort();
+  const tokenHost = new URL(plan.tokenUrl).host;
+  if (!expected.includes(tokenHost)) return `connection ${name}: its sign-in's token endpoint (${tokenHost}) is not one of the hosts this sync signs in at (${expected.join(", ")})`;
+  const policy = Object.hasOwn(secrets.secrets, plan.tokenSecret) ? secrets.secrets[plan.tokenSecret] : undefined;
+  const listed = [...new Set(policy?.hosts ?? [])].sort();
+  if (listed.length === expected.length && listed.every((h, i) => h === expected[i])) return undefined;
+  return `connection ${name}: its sign-in (${plan.tokenSecret}) is sent to exactly ${expected.join(" and ")} — its *Sent only to* list is ${listed.length ? listed.join(", ") : "empty"}, so nothing is sent (\`metistry secrets hosts ${plan.tokenSecret} ${expected.join(" ")}\`)`;
 }
 
 function urlOf(input: Parameters<typeof fetch>[0]): string {
@@ -227,30 +269,52 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
   const target = syncTarget(opts.catalog, opts.sync);
   if (!target.ok) return target;
   const { entry } = target;
-  const c = entry.connection;
   const impl = entry.provider.manifest.implementation;
   if (impl.kind !== "builtin" || impl.module !== opts.module) {
-    return { ok: false, status: "failed", why: `connection ${c.name}: provider ${entry.provider.name} is not implemented by ${opts.module}` };
+    return { ok: false, status: "failed", why: `connection ${entry.connection.name}: provider ${entry.provider.name} is not implemented by ${opts.module}` };
   }
+  const scheduled: Scheduled | null | undefined = opts.catalog.scheduled;
+  const raise = scheduled?.syncs && Object.hasOwn(scheduled.syncs, opts.sync) ? { ...(scheduled.syncs[opts.sync]?.raise ?? {}) } : {};
+  return connectionHttp(entry, opts.sync, { ...opts, raise });
+}
+
+type ReadyEntry = ConnectionEntry & { connection: ConnectionFile; provider: RegistryUnit<ConnectionTypeManifest> };
+
+/** What a connection's HTTP door is built from — a sync's options, or dispatch's. */
+interface HttpDoorOptions extends Pick<OpenSyncOptions, "origin" | "alsoOrigins" | "secrets" | "redactor" | "fetch" | "tokenHosts" | "oauth"> {
+  catalog: Pick<ConnectionCatalog, "secrets">;
+  raise: Record<string, boolean>;
+}
+
+/**
+ * One `ok` connection's HTTP door, for `who` (a sync, or dispatch): its URL
+ * and headers with every sign-in shortcut written as a `{{ secret.x }}`
+ * reference, and a `fetch` pinned to its origin (and any origin the
+ * product's code names beside it), through core's `guardedFetch` with the
+ * connection as the grantee, following no redirect.
+ */
+function connectionHttp(entry: ReadyEntry, who: string, opts: HttpDoorOptions): OpenedSync {
+  const c = entry.connection;
   const http = c.reach.http;
-  if (!http) return { ok: false, status: "failed", why: `connection ${c.name}: ${opts.sync} reads it over http — its reach is not http` };
+  if (!http) return { ok: false, status: "failed", why: `connection ${c.name}: ${who} reads it over http — its reach is not http` };
   let url: URL;
   try {
     url = new URL(http.url);
   } catch {
-    return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.url is not a URL (a {{ variable }} there is not read by ${opts.sync})` };
+    return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.url is not a URL (a {{ variable }} there is not read by ${who})` };
   }
   if (opts.origin !== undefined && url.origin !== opts.origin) {
     return { ok: false, status: "failed", why: `connection ${c.name}: ${entry.provider.name} is reached at ${opts.origin} and nowhere else — reach.http.url is ${url.origin}` };
   }
-  if (Object.keys(http.query).length > 0) return { ok: false, status: "failed", why: `connection ${c.name}: ${opts.sync} sends no query parameters` };
+  if (Object.keys(http.query).length > 0) return { ok: false, status: "failed", why: `connection ${c.name}: ${who} sends no query parameters` };
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(http.headers)) {
-    if (/\{\{\s*variable\./.test(v)) return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.headers.${k}: a {{ variable }} is not read by ${opts.sync}` };
+    if (/\{\{\s*variable\./.test(v)) return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.headers.${k}: a {{ variable }} is not read by ${who}` };
     headers[k.toLowerCase()] = v;
   }
   const auth = http.auth;
   let basic: { secret: string; username: string } | undefined;
+  let oauth: OAuthClientPlan | undefined;
   if (auth.scheme === "bearer") headers.authorization = `Bearer {{ secret.${auth.secret} }}`;
   else if (auth.scheme === "api_key") headers[auth.header.toLowerCase()] = `{{ secret.${auth.secret} }}`;
   else if (auth.scheme === "basic") {
@@ -264,21 +328,36 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
     }
     headers.authorization = `Basic {{ secret.${auth.secret} }}`;
     basic = { secret: auth.secret, username: auth.username };
-  } else if (auth.scheme !== "none") return { ok: false, status: "failed", why: `connection ${c.name}: ${auth.scheme} sign-in is not sent by ${opts.sync}` };
+  } else if (auth.scheme === "oauth") {
+    // the client the owner signed in with — the type's shipped one, or the owner's own (oauth.ts)
+    try {
+      oauth = oauthClientOf(entry);
+    } catch (err) {
+      if (err instanceof OAuthError || err instanceof ConnectionRefused) return { ok: false, status: "failed", why: `connection ${c.name}: ${err.message}` };
+      throw err;
+    }
+    if (opts.tokenHosts !== undefined) {
+      const why = tokenHostsIssue(c.name, oauth, opts.catalog.secrets.ok ? opts.catalog.secrets.file : parseSecretsFile(""), opts.tokenHosts);
+      if (why) return { ok: false, status: "failed", why };
+    }
+    headers.authorization = `Bearer {{ secret.${oauth.tokenSecret} }}`;
+  } // `none`: no sign-in header — every scheme core has is handled above
 
   const secretsFile: SecretsFile = opts.catalog.secrets.ok ? opts.catalog.secrets.file : parseSecretsFile("");
   const redactor = opts.redactor ?? new SecretRedactor();
   const used = new Set<string>();
   const base = opts.fetch ?? fetch;
   const origin = url.origin;
+  const origins = new Set([origin, ...(opts.alsoOrigins ?? [])]);
   const name = c.name;
+  const source = basic ? basicSource(opts.secrets, basic, redactor) : oauth ? oauthSourceFor(name, oauth, opts, secretsFile, redactor, used) : opts.secrets;
   const door = guardedFetch(
     {
       secrets: secretsFile,
       grantee: connectionGrantee(name),
       purpose: "service",
       redactor,
-      source: basic ? basicSource(opts.secrets, basic, redactor) : opts.secrets,
+      source,
       onUse: ({ names }) => {
         for (const n of names) used.add(n);
       },
@@ -293,16 +372,17 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
     } catch {
       throw new ConnectionRefused("other_host", name, "not a URL");
     }
-    if (target.origin !== origin) throw new ConnectionRefused("other_host", name, `a request to ${target.origin} — this connection is ${origin}, and it goes nowhere else`);
+    if (!origins.has(target.origin)) throw new ConnectionRefused("other_host", name, `a request to ${target.origin} — this connection is ${[...origins].join(", ")}, and it goes nowhere else`);
     const res = await door(to, { ...(init ?? {}), redirect: "manual" });
     if (res.status >= 300 && res.status < 400) {
       await res.body?.cancel().catch(() => undefined);
-      throw new ConnectionRefused("other_host", name, `${origin} answered with a redirect (HTTP ${res.status}) — a redirect is not followed`);
+      throw new ConnectionRefused("other_host", name, `${target.origin} answered with a redirect (HTTP ${res.status}) — a redirect is not followed`);
     }
     return res;
   };
-  const scheduled: Scheduled | null | undefined = opts.catalog.scheduled;
-  const raise = scheduled?.syncs && Object.hasOwn(scheduled.syncs, opts.sync) ? { ...(scheduled.syncs[opts.sync]?.raise ?? {}) } : {};
+  const config: Record<string, string> = {};
+  const secretFields = new Set(entry.provider.manifest.fields.filter((f) => f.kind === "secret" || f.kind === "oauth").map((f) => f.key));
+  for (const [k, v] of Object.entries(c.config)) if (typeof v === "string" && !secretFields.has(k)) config[k] = v;
   return {
     ok: true,
     sync: {
@@ -313,14 +393,104 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
       headers,
       fetch: pinned,
       capabilities: [...entry.provider.manifest.capabilities],
-      raise,
+      raise: opts.raise,
+      config,
       secretsUsed: () => [...used].sort(),
     },
   };
 }
 
+// --- agent connections: what dispatch sends a brief through (T4-11) ------------
+
+/** An agent connection dispatch may send through: its door, and its type's dispatch block. */
+export interface AgentHttp extends SyncHttp {
+  /** the type's dispatch — dispatcher, data policy, purposes, result, cost */
+  dispatch: AgentDispatch;
+  /** the connection file's description, when it has one */
+  description?: string | undefined;
+}
+
+export type OpenedAgent = { ok: true; agent: AgentHttp } | { ok: false; status: "absent" | "failed"; why: string };
+
+/**
+ * The agent connections dispatch lists: every file that parses as `type:
+ * agent` and is either `ok` with a type that says how it is dispatched to,
+ * or not `ok` (so the listing can say why). A file that does not parse at
+ * all is the connection listing's to report, not dispatch's.
+ */
+export function agentConnections(catalog: Pick<ConnectionCatalog, "entries">): ConnectionEntry[] {
+  return catalog.entries.filter((e) => e.connection?.type === "agent" && (e.status !== "ok" || e.provider?.manifest.dispatch !== undefined));
+}
+
+export interface OpenAgentOptions {
+  catalog: Pick<ConnectionCatalog, "entries" | "secrets">;
+  /** the connection's name */
+  connection: string;
+  /** the provider's own origin, when the dispatcher reaches one service and nowhere else (GitHub: `https://api.github.com`) */
+  origin?: string | undefined;
+  secrets: SecretSource;
+  redactor?: SecretRedactor | undefined;
+  fetch?: typeof fetch | undefined;
+}
+
+/**
+ * Open an agent connection for dispatch, or say why it cannot be. Never
+ * dials. `absent`: no such connection, or its provider is not installed.
+ * `failed`: the file is wrong, it is not an agent connection, or its type
+ * says nothing about dispatch.
+ */
+export function openAgentHttp(opts: OpenAgentOptions): OpenedAgent {
+  const entry = opts.catalog.entries.find((e) => e.name === opts.connection);
+  if (!entry) return { ok: false, status: "absent", why: `no connection named ${opts.connection}` };
+  if (entry.status !== "ok" || !entry.connection || !entry.provider) {
+    return { ok: false, status: entry.status === "absent" ? "absent" : "failed", why: `connection ${opts.connection} is ${entry.status}: ${entry.issues.join("; ") || "not ready"}` };
+  }
+  if (entry.connection.type !== "agent") return { ok: false, status: "failed", why: `connection ${opts.connection} is ${entry.connection.type} — only an agent connection is dispatched to` };
+  const dispatch = entry.provider.manifest.dispatch;
+  if (!dispatch) return { ok: false, status: "failed", why: `connection ${opts.connection}: its provider ${entry.provider.name} says nothing about how it is dispatched to` };
+  const opened = connectionHttp(entry as ReadyEntry, "dispatch", { ...opts, raise: {} });
+  if (!opened.ok) return opened;
+  return { ok: true, agent: { ...opened.sync, dispatch, ...(entry.connection.description !== undefined ? { description: entry.connection.description } : {}) } };
+}
+
+/**
+ * An OAuth connection's source: its token secret is the access token, minted
+ * from the delivered refresh token (and reused from `opts.oauth` while the
+ * plan is the same); a refusal at the token endpoint is the connection's
+ * `sign_in`, naming `authorize`.
+ */
+function oauthSourceFor(name: string, plan: OAuthClientPlan, opts: Pick<OpenSyncOptions, "secrets" | "fetch" | "oauth">, secrets: SecretsFile, redactor: SecretRedactor, used: Set<string>): SecretSource {
+  const door: TokenDoor = {
+    secrets,
+    source: opts.secrets,
+    redactor,
+    ...(opts.fetch ? { fetch: opts.fetch } : {}),
+    onUse: (names) => names.forEach((n) => used.add(n)),
+  };
+  const key = JSON.stringify(plan);
+  let held = opts.oauth?.get(name);
+  if (!held || held.key !== key) {
+    const ref = { current: door };
+    held = { key, tokens: new OAuthTokens(plan, () => ref.current), door: ref };
+    opts.oauth?.set(name, held);
+  }
+  // this open's grants, redactor and run: a token minted now is told to this run
+  held.door.current = door;
+  const wrapped = oauthSource(opts.secrets, held.tokens);
+  return {
+    async value(n) {
+      try {
+        return await wrapped.value(n);
+      } catch (err) {
+        if (err instanceof OAuthError) throw new ConnectionRefused("sign_in", name, err.message);
+        throw err;
+      }
+    },
+  };
+}
+
 /** How a collector opens its connection: the console builds one per process; a test hands in its own. */
-export type SyncOpener = (req: { sync: string; origin?: string | undefined; module: string }) => Promise<OpenedSync>;
+export type SyncOpener = (req: { sync: string; origin?: string | undefined; alsoOrigins?: readonly string[] | undefined; module: string; tokenHosts?: readonly string[] | undefined }) => Promise<OpenedSync>;
 
 /**
  * The console's opener: reads the instance's catalog afresh on every open
@@ -330,8 +500,131 @@ export type SyncOpener = (req: { sync: string; origin?: string | undefined; modu
  */
 export function instanceSyncOpener(roots: CatalogRoots & { env: NodeJS.ProcessEnv; fetch?: typeof fetch | undefined }): SyncOpener {
   const secrets = envSecretSource(roots.env);
+  const oauth: OAuthCache = new Map();
   return async (req) => {
     const catalog = await loadInstanceCatalog(roots);
-    return openSyncHttp({ catalog, ...req, secrets, ...(roots.fetch ? { fetch: roots.fetch } : {}) });
+    return openSyncHttp({ catalog, ...req, secrets, oauth, ...(roots.fetch ? { fetch: roots.fetch } : {}) });
+  };
+}
+
+// ---- a mail sync reading its mailbox (T4-17) -------------------------------------------------
+//
+// An IMAP connection is not reached over HTTP (core's `imap` reach class,
+// T4-15), so a sync that reads one opens it here rather than through
+// `openSyncHttp`: the same choice of connection (`syncTarget`), the same
+// delivered secrets (`envSecretSource`), and the IMAP provider's own door —
+// `openImap`, whose host guard sends the app password to the exact
+// host:port on the secret's *Sent only to* list, over TLS, for this
+// connection, or nowhere. Nothing is dialled until the caller opens a
+// session; a session reads headers and appends drafts, and cannot send.
+
+/** The sync (collector unit) that reads IMAP connections — named by the imap types' `sync:`. */
+export const MAIL_SYNC = "mail-messages";
+
+/** What a mail sync — or the Draft Reply door — holds while it reads one mailbox. Carries names, never a value. */
+export interface ImapSync {
+  /** the connection's name */
+  connection: string;
+  /** its provider's connection-type name */
+  provider: string;
+  /** the server, for a message: `host:port` */
+  server: string;
+  /** the sign-in name — the owner's address, when it is one */
+  username: string;
+  /** what its provider declares it can do (`read`, `draft`) — checked again by the session before anything is sent */
+  capabilities: readonly string[];
+  /** the owner's Needs You switches for this sync from `scheduled.yaml` (`syncs.<sync>.raise`) — only what the file says */
+  raise: Readonly<Record<string, boolean>>;
+  /** sign in and return the session (`close()` it). Every refusal of the host guard happens here, before a byte is sent */
+  open(): Promise<ImapSession>;
+  /** the secret names the sessions so far carried — for the run's `meta.secrets` */
+  secretsUsed(): string[];
+}
+
+export type OpenedImapSync = { ok: true; sync: ImapSync } | { ok: false; status: "absent" | "failed"; why: string };
+
+export interface OpenImapSyncOptions {
+  catalog: Pick<ConnectionCatalog, "entries" | "scheduled" | "secrets">;
+  /** the sync opening its connection (`MAIL_SYNC`) */
+  sync: string;
+  /** the builtin module that must implement the connection's provider (`imap`) */
+  module: string;
+  /** open exactly this connection (the Draft Reply door names one) rather than the one the sync reads */
+  connection?: string | undefined;
+  /** where a value comes from — `envSecretSource(process.env)` in the console */
+  secrets: SecretSource;
+  redactor?: SecretRedactor | undefined;
+  /** the socket under the door (a test's; default Node's TLS) */
+  dial?: ImapDialer | undefined;
+  timeoutMs?: number | undefined;
+}
+
+/**
+ * Open the mailbox a sync reads — or the one named — or say why there is
+ * none. Never dials: the first byte goes out when the caller opens a
+ * session. Refusals that are the file's fault (a provider this module does
+ * not implement, a reach that is not imap) are `failed`.
+ */
+export function openSyncImap(opts: OpenImapSyncOptions): OpenedImapSync {
+  const catalog =
+    opts.connection === undefined ? opts.catalog : { ...opts.catalog, scheduled: { ...(opts.catalog.scheduled ?? {}), syncs: { ...(opts.catalog.scheduled?.syncs ?? {}), [opts.sync]: { ...(opts.catalog.scheduled?.syncs?.[opts.sync] ?? {}), connection: opts.connection } } } as Scheduled };
+  const target = syncTarget(catalog, opts.sync);
+  if (!target.ok) return target;
+  const { entry } = target;
+  const c = entry.connection;
+  const impl = entry.provider.manifest.implementation;
+  if (impl.kind !== "builtin" || impl.module !== opts.module) {
+    return { ok: false, status: "failed", why: `connection ${c.name}: provider ${entry.provider.name} is not implemented by ${opts.module}` };
+  }
+  const reach = c.reach.imap;
+  if (!reach) return { ok: false, status: "failed", why: `connection ${c.name}: ${opts.sync} reads it over imap — its reach is not imap` };
+  const secretsFile: SecretsFile = opts.catalog.secrets.ok ? opts.catalog.secrets.file : parseSecretsFile("");
+  const redactor = opts.redactor ?? new SecretRedactor();
+  const used = new Set<string>();
+  const capabilities = [...entry.provider.manifest.capabilities];
+  const scheduled: Scheduled | null | undefined = opts.catalog.scheduled;
+  const raise = scheduled?.syncs && Object.hasOwn(scheduled.syncs, opts.sync) ? { ...(scheduled.syncs[opts.sync]?.raise ?? {}) } : {};
+  return {
+    ok: true,
+    sync: {
+      connection: c.name,
+      provider: entry.provider.name,
+      server: `${reach.host}:${reach.port}`,
+      username: reach.username,
+      capabilities,
+      raise,
+      open: () =>
+        openImap({
+          connection: c.name,
+          reach,
+          capabilities,
+          secretsFile,
+          source: opts.secrets,
+          redactor,
+          ...(opts.dial ? { dial: opts.dial } : {}),
+          ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+          onUse: ({ names }) => {
+            for (const n of names) used.add(n);
+          },
+        }),
+      secretsUsed: () => [...used].sort(),
+    },
+  };
+}
+
+/** How a mail sync (or the Draft Reply door) opens a mailbox: the console builds one per process; a test hands in its own. */
+export type ImapSyncOpener = (req: { sync: string; module: string; connection?: string | undefined }) => Promise<OpenedImapSync>;
+
+/**
+ * The console's mailbox opener: the instance's catalog afresh on every
+ * open, the app password from the environment `metistry secrets sync --to
+ * env` delivered — filled into the one LOGIN, for the listed host:port, or
+ * nowhere.
+ */
+export function instanceImapOpener(roots: CatalogRoots & { env: NodeJS.ProcessEnv; dial?: ImapDialer | undefined; timeoutMs?: number | undefined }): ImapSyncOpener {
+  const secrets = envSecretSource(roots.env);
+  return async (req) => {
+    const catalog = await loadInstanceCatalog(roots);
+    return openSyncImap({ catalog, ...req, secrets, ...(roots.dial ? { dial: roots.dial } : {}), ...(roots.timeoutMs !== undefined ? { timeoutMs: roots.timeoutMs } : {}) });
   };
 }

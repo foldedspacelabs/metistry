@@ -153,15 +153,16 @@ export const CLIENT_API: readonly ClientRoute[] = [
     principals: ["session", "local_owner", "owner_token", "agent"],
     idempotent: "key",
   }),
+  route("GET", "/api/briefing", "the session-start briefing for one repository (`repo`, `remote`): the owner's project page, open tasks, folds and recent sessions as handles plus owner text, under the agent's grant (X-128)", { reach: ["agent"], principals: ["agent"] }),
 
   // ----- who you are, and your devices -----
   route("GET", "/api/whoami", "which credential this is and whether it reaches management", { principals: OWNER_AND_CAPTURE_TOKEN }),
   route("POST", "/auth/logout", "end this device's session", { principals: SESSION_ONLY }),
-  route("GET", "/api/devices", "the enrolled passkeys and their sessions"),
-  route("POST", "/api/devices/:id/revoke", "end one device session"),
+  route("GET", "/api/devices", "the devices: a passkey each, its sessions under it (§2.22)"),
+  route("POST", "/api/devices/:id/revoke", "remove a device — its passkey and every session under it; `scope: \"sessions\"` signs it out and keeps the passkey"),
 
   // ----- chat -----
-  route("POST", "/message", "send a message; `tier` picks the model tier for this one", { principals: OWNER_AND_CAPTURE_TOKEN }),
+  route("POST", "/message", "send a message; `tier` picks the model tier for this one; `capture_session` holds it to the private tier", { principals: OWNER_AND_CAPTURE_TOKEN, conflict: ["stale"] }),
   route("GET", "/api/messages", "the conversation, inbound and outbound", { principals: OWNER_AND_CAPTURE_TOKEN, cursor: true }),
   route("POST", "/api/messages/:id/feedback", "rate one reply, with an optional note", { idempotent: "natural" }),
   route("DELETE", "/api/messages/:id/feedback", "clear a reply's rating", { idempotent: "natural" }),
@@ -272,8 +273,8 @@ export const CLIENT_API: readonly ClientRoute[] = [
   // ----- calendar and mail -----
   route("POST", "/api/meetings/:event_id/note", "the meeting note for one event; a second call returns the first", { idempotent: "natural" }),
   route("POST", "/api/calendar/events/:id/move", "move an event: preview (who is in it, the new time), then confirm with a single-use token", { conflict: ["stale"] }),
-  planned("POST", "/api/calendar/invitations/:id/respond", "T4-17", "answer an invitation through the connection that can"),
-  planned("POST", "/api/mail/messages/:id/draft", "T4-17", "draft a reply through the connection that can; never sends"),
+  route("POST", "/api/calendar/invitations/:id/respond", "answer an invitation through a connection that can (`rsvp`): preview, then confirm with a single-use token; 503 names Open in Calendar where none can", { conflict: ["stale"] }),
+  route("POST", "/api/mail/messages/:id/draft", "draft a reply into Drafts through the connection's `draft` capability: preview, then confirm with a single-use token; never sends", { conflict: ["stale"] }),
 
   // ----- Scheduled -----
   route("GET", "/api/scheduled", "every routine and sync with its schedule and last run"),
@@ -294,7 +295,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("GET", "/api/connections/:name", "one connection, with its file and its provider's unit"),
   route("GET", "/api/secrets", "secret names, hosts, grants, last used — never a value"),
   route("GET", "/api/variables", "the variables agents read — name, value, read by, used in"),
-  planned("GET", "/api/recordings/:id", "T8-4", "one recording's retention state"),
+  route("GET", "/api/recordings/:id", "one recording's retention state"),
 
   // ----- outbound doors through a connection -----
   route("POST", "/api/github/pulls/:owner/:repo/:number/review", "post a review; the head SHA must match the one shown", { conflict: ["stale"] }),

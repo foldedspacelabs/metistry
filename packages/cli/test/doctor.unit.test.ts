@@ -21,11 +21,13 @@ import {
   restartHint,
   registriesRow,
   renderTable,
+  retiredTargetKeysRow,
   walkManifests,
   type Db,
   type DoctorRow,
 } from "../src/doctor.js";
 import { SANDBOX_EXEC } from "../src/sandbox.js";
+import { sandboxProfileOf, type ChildStatus } from "@foldedspacelabs/metistry-core";
 import { cliShimPath, writeCliShim } from "../src/cli-shim.js";
 import { StepRunner } from "../src/steps.js";
 import { parseDotEnv } from "../src/env.js";
@@ -46,11 +48,14 @@ async function checkout(opts: { brokenManifests?: boolean } = {}): Promise<strin
   await put("package.json", JSON.stringify({ name: "metistry" }));
   await put("seed/identity.yaml", "name: Seed\n");
   await put("collectors/good/manifest.yaml", "schema: 1\nname: good\ntype: collector\nschedule: '@hourly'\nwrites: [t]\n");
+  // its compiled entry — doctor asks every collector its own check() (X-87)
+  await put("collectors/package.json", JSON.stringify({ type: "module" }));
+  await put("collectors/dist/good/run.js", "export async function check() { return { name: 'good', status: 'ok', latency_ms: 1, probe: 'canned' }; }\n");
   await put("packages/mcp-x/manifest.yaml", "name: x\ntype: bridge\ntransport: http\nport: 7901\nruns_on: host\nexposes: [{name: a}]\n");
   await put("packages/mcp-y/manifest.yaml", "name: y\ntype: bridge\ntransport: http\nport: 7902\nruns_on: host\nexposes: [{name: a}]\n");
   await put("apps/console/manifest.yaml", "name: console\ntype: service\nruns_on: container\nport: 8080\n");
   await put("apps/watchdog/manifest.yaml", "name: watchdog\ntype: service\nruns_on: host\n");
-  await put("targets/tgt/manifest.yaml", "schema: 1\nname: tgt\ntype: target\ntransport: local\nsubmit: {}\nresult: {via: report_queue}\ndata_policy: {allow: [], deny_sources: [], max_brief_bytes: 10}\n");
+  await put("targets/local-crew/manifest.yaml", "schema: 1\nname: local-crew\ntype: target\ntransport: local\nsubmit: {}\nresult: {via: report_queue}\ndata_policy: {allow: [], deny_sources: [], max_brief_bytes: 10}\n");
   await put("db/migrations/0001_a.sql", "select 1;");
   await put("db/migrations/0002_b.sql", "select 1;");
   await put("ops/launchd/com.foldedspacelabs.metistry.a.plist", PLIST("com.foldedspacelabs.metistry.a"));
@@ -133,7 +138,7 @@ describe("doctor: everything healthy", () => {
       "bridge:y=absent",
       "service:console=ok",
       "service:watchdog=ok",
-      "target:tgt=ok",
+      "target:local-crew=ok",
       "registry:registries=ok", // every registry kind loads; no extensions, nothing skipped
       "instance:instance layout=absent", // a bare temp dir is not an instance directory
       "instance:inbox=ok",
@@ -146,6 +151,9 @@ describe("doctor: everything healthy", () => {
       // macOS: one row for the power policy, and this install has not been
       // asked the question — absent, never a failure (see keep-awake.test.ts)
       "keep-awake:keep-awake=absent",
+      // how the phone reaches this Mac (plan §2.23): never chosen is `none`,
+      // and an install that exposes nothing is correct — ok (remote.test.ts)
+      "remote:remote=ok",
       "container:compose:assistant=ok",
       "container:compose:console=ok",
       "container:compose:db=ok",
@@ -187,13 +195,14 @@ describe("doctor: everything healthy", () => {
     // the remediation wrapped underneath it (docs/ops/cli-style.md). The
     // icon spelling depends on the terminal's locale, so nothing here
     // asserts on the glyph itself.
-    expect(text.split("\n")[0]).toContain(`${productDir} — shape compose`);
-    expect(text).toMatch(/20 checks: 10 ok, 0 degraded, 0 failed, 10 absent — .*healthy/);
+    expect(text.split("\n")[0]).toContain(`${productDir} — checkout, shape compose`);
+    expect(text).toMatch(/21 checks: 11 ok, 0 degraded, 0 failed, 10 absent — .*healthy/);
     expect(text).toMatch(/^local-model$/m); // the kind is the heading, not a repeated column
     expect(text).toMatch(/^\s+\S+\s+local:llamaserver\s+absent\s+\d+ms$/m);
     expect(text).toMatch(/^\s+\S+\s+local:applefm\s+absent\s+\d+ms$/m);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
-    expect(text).toMatch(/^\s+\S+\s+compose\s+absent\s+\d+ms$/m);
+    // docker missing is the owner's to install: the row says so (X-123); an informational absent row (above) carries no marker
+    expect(text).toMatch(/^\s+\S+\s+compose\s+absent\s+\d+ms\s+your hand$/m);
     expect(text).toContain("docker not found");
 
     const json: string[] = [];
@@ -201,7 +210,7 @@ describe("doctor: everything healthy", () => {
     expect(json).toHaveLength(1); // --json purity: nothing but the one document reaches stdout
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(20);
+    expect(parsed.rows).toHaveLength(21);
     expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
   });
@@ -248,7 +257,9 @@ describe("doctor: the console row with the local owner token", () => {
     expect(r.console?.remediation).not.toMatch(/secrets sync/);
     expect(r.console?.remediation).toMatch(/METISTRY_TRUSTED_LOOPBACK_PROXY/);
     expect(r.console?.remediation).not.toContain("owner-token"); // the value never reaches a report
-    expect(r.console?.action).toEqual({ kind: "run_verb", command: ["metistry", "secrets", "sync", "--to", "env"], label: "Sync secrets to .env" });
+    // the button is the fix the sentence names — a restart, so the running console reads .env's value (re-syncing .env changes nothing)
+    expect(r.console?.action).toEqual({ kind: "run_verb", command: ["metistry", "restart", "console"], label: "Restart the console" });
+    expect(r.console?.repair).toEqual({ id: "restart", target: "console", confirm: true, does: expect.stringContaining("metistry restart console") });
   });
 
   it("without the token, a 401 is still a pass — unchanged", async () => {
@@ -394,9 +405,11 @@ describe("doctor: degraded (runs, needs a hand) never fails the exit code", () =
     const r = byName(report.rows);
     expect(report.ok).toBe(true);
     expect(r.x).toMatchObject({ status: "degraded", remediation: "helper lost its TCC grant" });
-    expect(r.migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/1 migration\(s\) not applied \(0002_b\.sql\) — run pnpm db:migrate/) });
+    // never `pnpm db:migrate` (a release install has no pnpm): doctor applies them itself (X-123)
+    expect(r.migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/1 migration\(s\) not applied \(0002_b\.sql\) — `metistry doctor` applies them/) });
     // T4-21: a per-problem action for the Services pane, beside the terminal text
-    expect(r.migrations?.action).toEqual({ kind: "run_verb", command: ["metistry", "update"], label: "Run metistry update" });
+    expect(r.migrations?.action).toEqual({ kind: "run_verb", command: ["metistry", "doctor"], label: "Apply migrations" });
+    expect(r.migrations?.repair).toMatchObject({ id: "migrate", confirm: false });
     expect(r["compose:console"]).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/starting/) });
     expect(renderTable(report)).toMatch(/0 failed/);
   });
@@ -405,7 +418,7 @@ describe("doctor: degraded (runs, needs a hand) never fails the exit code", () =
     const productDir = await checkout();
     const base = { productDir, env, fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(200) }), exec: fakeExec({ docker: { code: 127 } }), platform: "linux" as const };
     expect(byName((await doctor({ ...base, db: fakeDb(["0001_a.sql", "0002_b.sql", "0003_future.sql"]) })).rows).migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/0003_future\.sql/) });
-    expect(byName((await doctor({ ...base, db: fakeDb("no-table") })).rows).migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/no schema_migrations table.*2 migrations pending/) });
+    expect(byName((await doctor({ ...base, db: fakeDb("no-table") })).rows).migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/no schema_migrations table — 2 migration\(s\) pending; `metistry doctor` applies them/), repair: { id: "migrate" } });
   });
 });
 
@@ -429,7 +442,7 @@ describe("doctor: failed", () => {
     expect(r.x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/x down at http:\/\/127\.0\.0\.1:7901 \(connect ECONNREFUSED.*\) — docker compose up -d x/) });
     expect(r.console).toMatchObject({ status: "failed", remediation: expect.stringMatching(/\/health returned 500/) });
     expect(r.db).toMatchObject({ status: "failed", remediation: expect.stringMatching(/ECONNREFUSED — docker compose up -d db/) });
-    expect(r.migrations).toMatchObject({ status: "absent", remediation: "not checked — db unreachable" });
+    expect(r.migrations).toMatchObject({ status: "absent", remediation: "not checked — db unreachable; follows the db row" });
     expect(r["launchd:com.foldedspacelabs.metistry.a"]).toMatchObject({ status: "failed", remediation: expect.stringMatching(/state = waiting, last exit code 78 — launchctl kickstart -k gui\/\$\(id -u\)\/com\.foldedspacelabs\.metistry\.a/) });
     expect(r["launchd:com.foldedspacelabs.metistry.b"]?.status).toBe("ok");
     expect(r["compose:db"]).toMatchObject({ status: "failed", remediation: expect.stringMatching(/container exited \(Exited \(1\).*\) — docker compose up -d db/) });
@@ -466,8 +479,8 @@ describe("doctor: failed", () => {
       "packages/mcp-y=true",
       "apps/console=true",
       "apps/watchdog=true",
+      "targets/local-crew=true",
       "targets/mismatch=false",
-      "targets/tgt=true",
     ]);
     const report = await doctor({ productDir, env: {}, fetchFn: fakeFetch({ "/health": res(200), "/api/status": res(401) }), db: null, exec: fakeExec({ docker: { code: 127 } }), platform: "linux" });
     const r = byName(report.rows);
@@ -554,6 +567,76 @@ describe("doctor: the registries row", () => {
     // T4-21: nothing here can name WHICH unit to fix in one command (there may
     // be several), so the button just gets the operator to the list
     expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "extensions", "list"], label: "List extensions" });
+  });
+});
+
+// X-85: the one-release targets shim is gone. The environment keys it read are
+// named by one row (and ignored); a `targets/` manifest but local-crew is a
+// skipped unit on the registries row, each naming the verb that replaces them.
+describe("doctor: the targets shim is removed (X-85)", () => {
+  const target = (name: string, transport = "local") =>
+    `schema: 1\nname: ${name}\ntype: target\ntransport: ${transport}\nsubmit: {}\nresult: {via: report_queue}\ndata_policy: {allow: [], deny_sources: [], max_brief_bytes: 10}\n`;
+  async function tree(files: Record<string, string>): Promise<string> {
+    const root = await mkdtemp(join(tmpdir(), "metistry-doctor-shim-"));
+    for (const [rel, text] of Object.entries(files)) {
+      await mkdir(join(root, rel, ".."), { recursive: true });
+      await writeFile(join(root, rel), text);
+    }
+    return root;
+  }
+
+  it("no row when neither key is set — or when one is blank", () => {
+    expect(retiredTargetKeysRow({})).toBeUndefined();
+    expect(retiredTargetKeysRow({ METISTRY_DEVIN_API_KEY: "  ", METISTRY_GITHUB_TOKEN: "" })).toBeUndefined();
+  });
+
+  it("an env key alone is ignored, and the row names it and `connections add` — degraded, never failed", () => {
+    const row = retiredTargetKeysRow({ METISTRY_DEVIN_API_KEY: "cog_x" })!;
+    expect(row).toMatchObject({ kind: "instance", name: "target keys", status: "degraded", meta: { keys: ["METISTRY_DEVIN_API_KEY"] } });
+    expect(row.remediation).toContain("METISTRY_DEVIN_API_KEY is set and ignored");
+    expect(row.remediation).toContain("metistry connections add");
+    expect(row.remediation).not.toContain("Releases API"); // only a GitHub token has a second reader
+    expect(JSON.stringify(row)).not.toContain("cog_x"); // names, never values
+    expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "connections", "list"], label: "List connections" });
+  });
+
+  it("the GitHub token's row says `metistry update` still reads it for the Releases API", () => {
+    const row = retiredTargetKeysRow({ METISTRY_GITHUB_TOKEN: "ghp_x", METISTRY_DEVIN_API_KEY: "cog_x" })!;
+    expect(row.meta).toEqual({ keys: ["METISTRY_GITHUB_TOKEN", "METISTRY_DEVIN_API_KEY"] });
+    expect(row.remediation).toContain("METISTRY_GITHUB_TOKEN, METISTRY_DEVIN_API_KEY are set and ignored");
+    expect(row.remediation).toContain("`metistry update` still reads METISTRY_GITHUB_TOKEN");
+  });
+
+  it("doctor() carries the row only when a key is set, and still passes (ok: no row is failed)", async () => {
+    const productDir = await checkout();
+    const deps = {
+      productDir,
+      fetchFn: (async () => { throw new Error("no network"); }) as unknown as typeof fetch,
+      db: null,
+      exec: async () => ({ code: 127, stdout: "", stderr: "" }),
+      platform: "linux" as const,
+    };
+    const without = await doctor({ ...deps, env: {} });
+    expect(without.rows.find((r) => r.name === "target keys")).toBeUndefined();
+    const withKey = await doctor({ ...deps, env: { METISTRY_DEVIN_API_KEY: "cog_x" } });
+    expect(withKey.rows.find((r) => r.name === "target keys")).toMatchObject({ status: "degraded" });
+  });
+
+  it("local-crew still loads: the registries row is ok with it alone", async () => {
+    const product = await tree({ "targets/local-crew/manifest.yaml": target("local-crew") });
+    const row = await registriesRow(product, {});
+    expect(row.status).toBe("ok");
+    expect(row.meta).toMatchObject({ units: { target: 1 }, skipped: [] });
+  });
+
+  it("a targets/ manifest other than local-crew is a skipped unit naming `connections add`, in the product tree or the owner's", async () => {
+    const product = await tree({ "targets/local-crew/manifest.yaml": target("local-crew"), "targets/github-issues/manifest.yaml": target("github-issues") });
+    const instance = await tree({ ".metistry/targets/devin-sessions/manifest.yaml": target("devin-sessions") });
+    const row = await registriesRow(product, { METISTRY_INSTANCE_DIR: instance });
+    expect(row.status).toBe("degraded");
+    const skipped = (row.meta as { skipped: { name: string; reason: string }[] }).skipped;
+    expect(skipped.map((x) => x.name).sort()).toEqual(["devin-sessions", "github-issues"]);
+    for (const x of skipped) expect(x.reason).toContain("metistry connections add");
   });
 });
 
@@ -789,48 +872,107 @@ describe("the sandbox row — which children run confined, and where their egres
   const child = (name: string, argv: string[]) => ({ name, argv, env: {}, log: `/tmp/metistry-${name}.log`, stopTimeoutMs: 10_000 });
   const base = { schema: 1 as const, label: "com.foldedspacelabs.metistry", socket: "/s.sock", token: "t".repeat(32), env: {} };
   const confined = (name: string, profile: string) => child(name, [SANDBOX_EXEC, "-f", `/p/ops/sandbox/${profile}`, "-D", "X=1", "/n/bin/node", `/p/apps/${name}/dist/main.js`]);
+  /** the supervisor's `status` entry for a child it spawned from `spec` — what spawn() was handed, and the profile read off it */
+  const ran = (spec: ReturnType<typeof child>): ChildStatus => ({
+    name: spec.name,
+    state: "running",
+    pid: 100,
+    restarts: 0,
+    log: spec.log,
+    spawned: { argv: spec.argv, profile: sandboxProfileOf(spec.argv) },
+  });
+  const statusOf = (specs: ReturnType<typeof child>[]) => specs.map(ran);
 
-  it("reports both confined children, their profiles and the door — from the argv that actually runs", async () => {
-    const row = await confinementRow({
-      ...base,
-      egress: { port: 7814, allow: ["openrouter.ai", "github.com"], tokens: { assistant: "a", reconciler: "r" } },
-      children: [child("db", ["/pg/bin/postgres", "-D", "/d"]), child("console", ["/n/bin/node", "/p/console.js"]), confined("reconciler", "reconciler.sb"), confined("assistant", "assistant.sb")],
-    });
+  it("reports both confined children, their profiles and the door — from what the supervisor spawned", async () => {
+    const specs = [child("db", ["/pg/bin/postgres", "-D", "/d"]), child("console", ["/n/bin/node", "/p/console.js"]), confined("reconciler", "reconciler.sb"), confined("assistant", "assistant.sb")];
+    const row = await confinementRow(
+      { ...base, egress: { port: 7814, allow: ["openrouter.ai", "github.com"], tokens: { assistant: "a", reconciler: "r" } }, children: specs },
+      statusOf(specs),
+    );
     expect(row.kind).toBe("sandbox");
     expect(row.status).toBe("ok");
     expect(row.meta).toMatchObject({
       confined: ["reconciler", "assistant"],
       unconfined: ["db", "console"],
+      unknown: [],
       egress: { port: 7814, allow: ["openrouter.ai", "github.com"] },
     });
     expect((row.meta as { profiles: Record<string, string> }).profiles.reconciler).toBe("/p/ops/sandbox/reconciler.sb");
   });
 
   it("an unconfined.sb profile is NOT confinement — the off switch is visible, not silent", async () => {
-    const row = await confinementRow({
-      ...base,
-      egress: { port: 7814, allow: ["openrouter.ai"], tokens: {} },
-      children: [confined("assistant", "assistant.sb"), confined("reconciler", "unconfined.sb")],
-    });
+    const specs = [confined("assistant", "assistant.sb"), confined("reconciler", "unconfined.sb")];
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: ["openrouter.ai"], tokens: {} }, children: specs }, statusOf(specs));
     expect(row.status).toBe("degraded");
     expect(row.remediation).toMatch(/sole committer/);
     expect(row.meta).toMatchObject({ confined: ["assistant"], unconfined: ["reconciler"] });
   });
 
   it("an empty allowlist is reported: correct for a local-only install, a bug for any other", async () => {
-    const row = await confinementRow({
-      ...base,
-      egress: { port: 7814, allow: [], tokens: {} },
-      children: [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")],
-    });
+    const specs = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: [], tokens: {} }, children: specs }, statusOf(specs));
     expect(row.status).toBe("degraded");
     expect(row.remediation).toMatch(/allowlist is empty/);
   });
 
   it("no profile anywhere is degraded, and says which shape that is legitimate in", async () => {
-    const row = await confinementRow({ ...base, children: [child("console", ["/n/bin/node", "/p/console.js"])] });
+    const specs = [child("console", ["/n/bin/node", "/p/console.js"])];
+    const row = await confinementRow({ ...base, children: specs }, statusOf(specs));
     expect(row.status).toBe("degraded");
     expect(row.remediation).toMatch(/no child runs under a profile/);
     expect(row.remediation).toMatch(/compose shape the container is the boundary/);
+  });
+
+  // THE BUG (X-48). The live instance's row called a confined reconciler
+  // unconfined: supervisor.json no longer matched what the supervisor had
+  // spawned. The row answers for what was SPAWNED, so the file cannot flip it.
+  it("a stale supervisor.json beside a confined running child does not report it unconfined", async () => {
+    const spawnedAs = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const staleFile = [confined("assistant", "assistant.sb"), child("reconciler", ["/n/bin/node", "/p/apps/reconciler/dist/main.js"])];
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: ["github.com"], tokens: {} }, children: staleFile }, statusOf(spawnedAs));
+    expect(row.status).toBe("degraded"); // the file is out of step with what runs, and the row says so …
+    expect(row.meta).toMatchObject({ confined: ["assistant", "reconciler"], unconfined: [], stale: ["reconciler"] });
+    expect(row.remediation).not.toMatch(/NOT confined/); // … but never calls the confined child unconfined
+    expect(row.remediation).toMatch(/spawned from a different argv/);
+  });
+
+  it("the converse: a stale file claiming confinement does not make an unconfined child confined", async () => {
+    const spawnedAs = [confined("assistant", "assistant.sb"), child("reconciler", ["/n/bin/node", "/p/apps/reconciler/dist/main.js"])];
+    const staleFile = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: ["github.com"], tokens: {} }, children: staleFile }, statusOf(spawnedAs));
+    expect(row.meta).toMatchObject({ confined: ["assistant"], unconfined: ["reconciler"] });
+    expect(row.remediation).toMatch(/NOT confined/);
+  });
+
+  it("a status without the field (an older supervisor) reads 'could not confirm' — never confined, never unconfined", async () => {
+    const specs = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const old: ChildStatus[] = specs.map((s) => ({ name: s.name, state: "running", pid: 1, restarts: 0, log: s.log }));
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: ["github.com"], tokens: {} }, children: specs }, old);
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/could not confirm/);
+    expect(row.remediation).not.toMatch(/NOT confined/);
+    expect(row.meta).toMatchObject({ confined: [], unconfined: [], unknown: ["assistant", "reconciler"] });
+  });
+
+  it("a supervisor that did not answer reads 'could not confirm' — supervisor.json alone is not evidence of anything", async () => {
+    const specs = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const row = await confinementRow({ ...base, children: specs }, undefined);
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/could not confirm/);
+    expect(row.meta).toMatchObject({ confined: [], unconfined: [], unknown: ["assistant", "reconciler"] });
+  });
+
+  it("a reconciler the supervisor has not spawned is 'could not confirm', not unconfined, beside a confined assistant", async () => {
+    const specs = [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")];
+    const row = await confinementRow({ ...base, egress: { port: 7814, allow: ["github.com"], tokens: {} }, children: specs }, [ran(specs[0]!), { name: "reconciler", state: "pending", restarts: 0, log: specs[1]!.log }]);
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/could not confirm the reconciler/);
+    expect(row.remediation).not.toMatch(/NOT confined/);
+  });
+
+  it("sandboxProfileOf reads the -f operand of a leading sandbox-exec, and only that", () => {
+    expect(sandboxProfileOf([SANDBOX_EXEC, "-f", "/p/r.sb", "-D", "X=1", "/n/node", "m.js"])).toBe("/p/r.sb");
+    expect(sandboxProfileOf(["/n/node", "m.js", "-f", "/p/r.sb"])).toBeNull();
+    expect(sandboxProfileOf([SANDBOX_EXEC, "/n/node", "m.js"])).toBeNull();
   });
 });

@@ -1,12 +1,15 @@
 // The connection model (§2.6) and the connection-type manifest (§2.7):
 // the closed vocabularies are refusals with tests, not sentences (U3).
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import {
+  AGENT_DISPATCHERS,
   CONNECTION_CAPABILITIES,
   FIELD_KINDS,
   capabilityIssue,
   connectionIssues,
+  connectionTypeSyncs,
   templateRefs,
   validateConnectionFile,
   type ConnectionFile,
@@ -277,6 +280,12 @@ describe("connection files (§2.6)", () => {
     expect(conn(devin({ reach: { http: { url: "https://mcp.devin.ai/mcp" } }, secrets: [] })).reach.http?.auth).toEqual({ scheme: "none" });
   });
 
+  it("folds large answers by default; the owner turns it off per connection with `fold: false`, and nothing else is a value for it (X-132)", () => {
+    expect(conn(workCalendar()).fold).toBe(true);
+    expect(conn({ ...workCalendar(), fold: false }).fold).toBe(false);
+    expect(fileErrors({ ...workCalendar(), fold: "sometimes" })).toMatch(/fold/);
+  });
+
   it("refuses a secret used in a value but not listed in secrets", () => {
     const e = fileErrors(devin({ reach: { http: { url: "https://mcp.devin.ai/mcp", headers: { "X-Org": "{{ secret.devin_org_key }}" } } } }));
     expect(e).toMatch(/reach\.http\.headers\.X-Org: secret "devin_org_key" is used but not listed in secrets/);
@@ -289,8 +298,8 @@ describe("connection files (§2.6)", () => {
     expect(templateRefs("Bearer {{ secret.a }} {{variable.b}} {{ date }}")).toEqual({ secrets: ["a"], variables: ["b"], invalid: ["{{ date }}"] });
   });
 
-  it("refuses a reach that is not exactly one of http, command, path", () => {
-    expect(fileErrors(devin({ reach: {} }))).toMatch(/exactly one of http, command, path — got none/);
+  it("refuses a reach that is not exactly one of http, command, path, imap", () => {
+    expect(fileErrors(devin({ reach: {} }))).toMatch(/exactly one of http, command, path, imap — got none/);
     expect(fileErrors(devin({ reach: { http: { url: "https://x.test" }, path: { path: "/tmp" } } }))).toMatch(/got http, path/);
     expect(fileErrors(devin({ reach: { http: { url: "file:///etc/passwd" } } }))).toMatch(/http\(s\) URL/);
   });
@@ -392,5 +401,184 @@ describe("a connection joined to its connection type", () => {
   it("refuses config for a field the type does not have", () => {
     const c = conn({ ...workCalendar(), config: { ...(workCalendar().config as object), colour: "blue" } });
     expect(connectionIssues(c, type())).toEqual(['config.colour: google-calendar has no field "colour"']);
+  });
+});
+
+// T4-15: IMAP is a reach class of its own — a mailbox is neither an HTTP
+// service, a command nor a path — with its own guard: a submission port is
+// never a reach, TLS off this Mac, and only a mail type that declares basic
+// sign-in is reached by it.
+describe("the imap reach class (T4-15)", () => {
+  const mail = (imap: Record<string, unknown> = {}, patch: Record<string, unknown> = {}) => ({
+    name: "gmail",
+    type: "mail",
+    provider: "gmail-mail",
+    reach: { imap: { host: "imap.gmail.com", username: "me@gmail.com", secret: "gmail_app_password", ...imap } },
+    secrets: ["gmail_app_password"],
+    ...patch,
+  });
+  const imapType = (patch: Record<string, unknown> = {}) => ({
+    schema: 1,
+    name: "gmail-mail",
+    type: "connection-type",
+    provides: "mail",
+    transports: ["imap"],
+    auth: ["basic"],
+    capabilities: ["read", "draft"],
+    implementation: { kind: "builtin", module: "imap" },
+    ...patch,
+  });
+
+  it("defaults to implicit TLS on 993 and names the secret, which must be listed", () => {
+    expect(conn(mail()).reach.imap).toEqual({ host: "imap.gmail.com", port: 993, security: "tls", username: "me@gmail.com", secret: "gmail_app_password" });
+    expect(fileErrors(mail({}, { secrets: [] }))).toMatch(/secret "gmail_app_password" is used but not listed in secrets/);
+    expect(fileErrors(mail({}, { reach: { imap: mail().reach.imap, http: { url: "https://x.test" } } }))).toMatch(/got http, imap/);
+  });
+
+  it("refuses a submission port, plain off this Mac, a host that is not a host name, and a username that could be a template", () => {
+    for (const port of [25, 465, 587, 2525]) expect(fileErrors(mail({ port }))).toMatch(/mail submission port/);
+    expect(fileErrors(mail({ security: "plain" }))).toMatch(/security: plain is for a server on this Mac only/);
+    expect(conn(mail({ host: "127.0.0.1", port: 1143, security: "plain" })).reach.imap!.security).toBe("plain");
+    for (const host of ["imaps://imap.gmail.com", "imap.gmail.com:993", "IMAP.GMAIL.COM", "*.gmail.com", "imap.gmail.com/x"]) expect(fileErrors(mail({ host }))).toMatch(/lowercase host name/);
+    for (const username of ["{{ secret.gmail_app_password }}", 'a"b', "a\r\nb"]) expect(fileErrors(mail({ username }))).toMatch(/no control character/);
+    expect(fileErrors(mail({ security: "starttls" }))).toMatch(/security/);
+  });
+
+  it("a connection type reached by imap provides mail and declares basic sign-in", () => {
+    expect(validateManifest(imapType()).ok).toBe(true);
+    expect(errorsOf(imapType({ auth: undefined }))).toMatch(/declare auth: \[basic\]/);
+    expect(errorsOf(imapType({ provides: "calendar", capabilities: ["read"] }))).toMatch(/only a mail connection type is reached by imap/);
+    const t = asType(imapType());
+    expect(connectionIssues(conn(mail()), t)).toEqual([]);
+    // a type that does not declare basic: the file is refused against it
+    const noBasic = { ...t, auth: ["none"] as ConnectionTypeManifest["auth"] };
+    expect(connectionIssues(conn(mail()), noBasic).join(" ")).toMatch(/does not declare basic sign-in/);
+    // a custom connection has nothing to reach a mailbox with
+    expect(fileErrors(mail({}, { provider: "custom", type: "mcp" }))).toMatch(/a custom mcp connection is reached by http or command/);
+    expect(fileErrors(mail({}, { provider: "custom" }))).toMatch(/a mail connection needs a connection type/);
+  });
+});
+
+// C118 (T4-10): a custom connection signs in with OAuth by carrying the client
+// model no connection type's manifest supplies — and the client id is the
+// owner's own, a secret, because nothing ships one.
+describe("the OAuth client of a custom connection (C118)", () => {
+  const client = {
+    authorize_url: "https://auth.example.com/authorize",
+    token_url: "https://auth.example.com/token",
+    scopes: ["read"],
+    pkce: true,
+    redirect: "loopback",
+  };
+  const custom = (auth: Record<string, unknown>, secrets = ["ex_token", "ex_client_id"]) => ({
+    name: "example",
+    type: "mcp",
+    provider: "custom",
+    reach: { http: { url: "https://mcp.example.com/mcp", auth: { scheme: "oauth", ...auth } } },
+    secrets,
+  });
+  const refs = { token: "{{ secret.ex_token }}", client_id: "{{ secret.ex_client_id }}" };
+
+  it("accepts a client, a token and a bring-your-own client id, each a secret reference", () => {
+    const c = conn(custom({ client, ...refs }));
+    expect(c.reach.http?.auth).toMatchObject({ scheme: "oauth", client: { redirect: "loopback", pkce: true }, token: "{{ secret.ex_token }}" });
+    expect(connectionIssues(c, undefined)).toEqual([]);
+    expect(conn(custom({ client, ...refs, client_secret: "{{ secret.ex_secret }}" }, ["ex_token", "ex_client_id", "ex_secret"])).reach.http?.auth).toMatchObject({ client_secret: "{{ secret.ex_secret }}" });
+  });
+
+  it("refuses a custom OAuth connection with no client, no token or no client id — nothing supplies them", () => {
+    expect(fileErrors(custom({ ...refs }))).toMatch(/auth\.client: a custom OAuth connection names its client/);
+    expect(fileErrors(custom({ client, client_id: refs.client_id }))).toMatch(/auth\.token: a custom OAuth connection names the secret/);
+    expect(fileErrors(custom({ client, token: refs.token }))).toMatch(/auth\.client_id: a custom OAuth connection has no shipped client id/);
+    expect(fileErrors(custom({ client, ...refs, field: "account" }))).toMatch(/a custom connection has no fields/);
+  });
+
+  it("refuses a client id, a client secret or a token written as text — each is a secret", () => {
+    expect(fileErrors(custom({ client: { ...client, client_id: "abc.apps.example" }, ...refs }))).toMatch(/client id is the owner's own — store it as a secret/);
+    expect(fileErrors(custom({ client: { ...client, client_secret: "s3cret" }, ...refs }))).toMatch(/a client secret is a secret/);
+    expect(fileErrors(custom({ client, ...refs, token: "ya29.literal" }))).toMatch(/auth\.token: must be a \{\{ secret\.name \}\} reference/);
+    expect(fileErrors(custom({ client, ...refs, client_id: "{{ secret.not_listed }}" }))).toMatch(/secret "not_listed" is used but not listed/);
+  });
+
+  it("holds the client to the manifest's rules: https endpoints, scopes, PKCE on a loopback", () => {
+    expect(fileErrors(custom({ client: { ...client, token_url: "http://auth.example.com/token" }, ...refs }))).toMatch(/https only/);
+    expect(fileErrors(custom({ client: { ...client, scopes: [] }, ...refs }))).toMatch(/declare the scopes/);
+    expect(fileErrors(custom({ client: { ...client, pkce: false }, ...refs }))).toMatch(/pkce must be true/);
+    // the broker is modelled: the file may name it, and the flow refuses it (packages/connections)
+    expect(conn(custom({ client: { ...client, redirect: "broker", pkce: false }, ...refs })).reach.http?.auth).toMatchObject({ client: { redirect: "broker" } });
+  });
+
+  it("refuses the custom shape on a typed connection — its type supplies the client, its oauth field keeps the token", () => {
+    const c = conn({ ...workCalendar(), secrets: ["google_calendar_token", "ex_token"], reach: { http: { url: "https://www.googleapis.com/calendar/v3", auth: { scheme: "oauth", token: "{{ secret.ex_token }}" } } } });
+    expect(connectionIssues(c, asType(googleCalendar()))).toEqual([
+      "reach.http.auth: google-calendar supplies the OAuth client — token belongs to a custom connection; this one keeps its token and any client of your own in its oauth field (config.<field>)",
+    ]);
+  });
+});
+
+describe("agent connection types — targets as connections (T4-11)", () => {
+  const agentType = (dispatch: Record<string, unknown> | undefined, patch: Record<string, unknown> = {}) => ({
+    schema: 1,
+    name: "devin",
+    type: "connection-type",
+    provides: "agent",
+    transports: ["http"],
+    implementation: { kind: "builtin", module: "devin" },
+    ...(dispatch ? { dispatch } : {}),
+    ...patch,
+  });
+  const devinDispatch = (patch: Record<string, unknown> = {}) => ({
+    dispatcher: "devin-session",
+    data_policy: { allow: [], deny_sources: ["comms"], max_brief_bytes: 16384 },
+    purposes: { work: { label: "Work", preamble: "Do it." }, knowledge_research: { label: "Research", preamble: "Answer it." } },
+    default_purpose: "work",
+    result: { via: "report_queue", status_via: "devin-sessions" },
+    ...patch,
+  });
+
+  it("the shipped agent and tracker types validate", () => {
+    for (const name of ["devin", "github-issues", "github"]) {
+      const text = readFileSync(new URL(`../../../seed/connection-types/${name}/manifest.yaml`, import.meta.url), "utf8");
+      expect(asType(parseYaml(text)).name).toBe(name);
+    }
+  });
+
+  it("the Devin type carries the purposes that were DEVIN_PURPOSES, each with its preamble", () => {
+    const t = asType(parseYaml(readFileSync(new URL("../../../seed/connection-types/devin/manifest.yaml", import.meta.url), "utf8")));
+    expect(Object.keys(t.dispatch!.purposes).sort()).toEqual(["knowledge_research", "work"]);
+    expect(t.dispatch!.default_purpose).toBe("work");
+    expect(t.dispatch!.purposes.knowledge_research!.preamble).toContain("Do not open a pull request");
+    expect(t.dispatch!.data_policy).toEqual({ allow: [], deny_sources: ["comms", "devin"], max_brief_bytes: 16384 });
+    expect(connectionTypeSyncs(t)).toEqual(["devin-sessions", "devin-knowledge"]);
+  });
+
+  it("a dispatcher is one the console implements — an unknown one is refused, never ignored", () => {
+    expect(errorsOf(agentType(devinDispatch({ dispatcher: "a2a" })))).toMatch(/dispatcher/);
+    expect(AGENT_DISPATCHERS).toEqual(["github-issue", "devin-session"]);
+  });
+
+  it("dispatch is an agent type's, product code's, over http", () => {
+    expect(errorsOf(agentType(devinDispatch(), { provides: "tracker", capabilities: ["read"] }))).toMatch(/dispatch is an agent type's/);
+    expect(errorsOf(agentType(devinDispatch(), { implementation: { kind: "native" } }))).toMatch(/implementation: \{ kind: builtin/);
+    expect(errorsOf(agentType(undefined))).toMatch(/a builtin agent type says how it is dispatched to/);
+  });
+
+  it("purposes need a default that is one of them; max_acu is Devin's alone", () => {
+    expect(errorsOf(agentType(devinDispatch({ default_purpose: undefined })))).toMatch(/name the purpose a dispatch that names none gets/);
+    expect(errorsOf(agentType(devinDispatch({ default_purpose: "exfiltrate" })))).toMatch(/"exfiltrate" is not one of the purposes/);
+    expect(errorsOf(agentType(devinDispatch({ purposes: { Work: { label: "W", preamble: "p" } } })))).toMatch(/snake_case/);
+    expect(errorsOf(agentType(devinDispatch({ dispatcher: "github-issue", purposes: {}, default_purpose: undefined, max_acu: 3 })))).toMatch(/only a devin-session dispatcher takes one/);
+  });
+
+  it("the data policy is a declaration: every field required, vault prefixes only", () => {
+    expect(errorsOf(agentType(devinDispatch({ data_policy: { allow: [] } })))).toMatch(/deny_sources/);
+    expect(errorsOf(agentType(devinDispatch({ data_policy: { allow: [".metistry"], deny_sources: [], max_brief_bytes: 1 } })))).toMatch(/allow/);
+  });
+
+  it("also_read_by names further syncs, after a first one, each once", () => {
+    const tracker = { schema: 1, name: "t", type: "connection-type", provides: "tracker", transports: ["http"], capabilities: ["read"], implementation: { kind: "builtin", module: "t" } };
+    expect(connectionTypeSyncs(asType({ ...tracker, sync: "a", also_read_by: ["b"] }))).toEqual(["a", "b"]);
+    expect(errorsOf({ ...tracker, also_read_by: ["b"] })).toMatch(/declare the first one as sync:/);
+    expect(errorsOf({ ...tracker, sync: "a", also_read_by: ["a"] })).toMatch(/a sync is named once/);
   });
 });

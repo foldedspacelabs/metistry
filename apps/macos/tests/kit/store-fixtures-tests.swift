@@ -195,7 +195,8 @@ private let drives: [String: Drive] = [
     "GET /api/identity": { s, _ in done(await s.identity()) },
     "GET /api/whoami": { s, _ in done(await s.whoami()) },
     "GET /api/devices": { s, _ in done(await s.devices()) },
-    "POST /api/devices/:id/revoke": { s, a in done(await s.revokeDevice(a.pInt("id"))) },
+    // Remove is the route's default scope, sent as the empty body the fixture recorded; Sign Out Everywhere sends `{scope: "sessions"}`
+    "POST /api/devices/:id/revoke": { s, a in done(await s.revokeDevice(a.pInt("id"), scope: a.b("scope") == "sessions" ? .sessions : .device)) },
     "GET /api/status": { s, _ in done(await s.status()) },
     "GET /api/instances": { s, _ in done(await s.instances()) },
     "GET /api/connections": { s, _ in done(await s.connections()) },
@@ -230,15 +231,15 @@ private let drives: [String: Drive] = [
         done(await s.moveEvent(a.p("id"), EventMove(start: a.b("start") ?? "", end: a.b("end") ?? "", confirmToken: a.b("confirm_token"))))
     },
     "POST /api/calendar/invitations/:id/respond": { s, a in
-        done(await s.respond(toInvitation: a.p("id"), InvitationResponse(rawValue: a.b("response") ?? "") ?? .tentative))
+        done(await s.respond(toInvitation: a.p("id"), InvitationResponse(rawValue: a.b("response") ?? "") ?? .tentative, confirmToken: a.b("confirm_token")))
     },
-    "POST /api/mail/messages/:id/draft": { s, a in done(await s.draftReply(toMessage: a.p("id"), body: a.b("body") ?? "")) },
+    "POST /api/mail/messages/:id/draft": { s, a in done(await s.draftReply(toMessage: a.p("id"), body: a.b("body") ?? "", confirmToken: a.b("confirm_token"))) },
     "POST /api/trackers/:connection/issues": { s, a in done(await s.createIssue(connection: a.p("connection"), taskKey: a.b("task_key") ?? "", title: a.b("title"))) },
     "POST /api/trackers/:connection/issues/:key/complete": { s, a in done(await s.completeIssue(connection: a.p("connection"), key: a.p("key"))) },
     "POST /api/prose/:id/feedback": { s, a in done(await s.rateProse(a.p("id"), Rating(rawValue: a.bInt("rating") ?? 0) ?? .up, note: a.b("note"))) },
     "DELETE /api/prose/:id/feedback": { s, a in done(await s.clearProseRating(a.p("id"))) },
     // Chat
-    "POST /message": { s, a in done(await s.send(a.b("text") ?? "", threadID: a.b("thread_id"), tier: a.b("tier"))) },
+    "POST /message": { s, a in done(await s.send(a.b("text") ?? "", threadID: a.b("thread_id"), tier: a.b("tier"), captureSession: a.b("capture_session"))) },
     "GET /api/messages": { s, a in done(await s.messages(limit: a.qInt("limit"), since: a.q("since"))) },
     "POST /api/messages/:id/feedback": { s, a in done(await s.rate(message: a.pInt("id"), Rating(rawValue: a.bInt("rating") ?? 0) ?? .up, note: a.b("note"))) },
     "DELETE /api/messages/:id/feedback": { s, a in done(await s.clearRating(message: a.pInt("id"))) },
@@ -552,12 +553,16 @@ private struct WaitingRow: View {
 // MARK: - Management verbs: §2.2's closed set, at the type
 
 @Test func aManagementCommandIsOnlyEverOneOfSection2point2sVerbs() {
-    #expect(ManagementRow.allCases.map(\.rawValue) == (1...18).map { "M\($0)" })
+    #expect(ManagementRow.allCases.map(\.rawValue) == (1...20).map { "M\($0)" }) // M20: remote access (X-107)
     for row in ManagementRow.allCases {
         #expect(!row.verbs.isEmpty && !row.whyNotTheAPI.isEmpty, "\(row.rawValue)")
     }
     #expect(ManagementCommand(.services, ["restart", "console"]) != nil)
     #expect(ManagementCommand(.vaultGit, ["vault", "rollback", "--to", "2026-09-20"]) != nil)
+    // M19 (§2.22): mint, and cancel by id — never a code on argv, never a `console call`
+    #expect(ManagementCommand(.enrollment, ["enroll", "--json"]) != nil)
+    #expect(ManagementCommand(.enrollment, ["enroll", "--cancel", "42", "--json"]) != nil)
+    #expect(ManagementCommand(.enrollment, ["console", "call", "POST", "/api/enroll"]) == nil)
     #expect(ManagementCommand(.computeProviders, ["compute", "providers", "add", "--from", "openrouter"], standardInput: "sk-not-in-argv")?.standardInput == "sk-not-in-argv")
     // misuse: a verb another row owns, a verb §2.2 does not list, and the generic console client
     #expect(ManagementCommand(.services, ["doctor"]) == nil)
@@ -675,21 +680,31 @@ func everyStoreMethodSpeaksItsRouteOverTheSessionTransport() async throws {
     // production wiring: the session child, the gate, the stores
     let session = ConsoleSession(cli: cli, spawner: FixtureSpawner(child: child))
     let byStem = Dictionary(uniqueKeysWithValues: console.fixtures.map { ($0.stem, $0) })
+    let driven = requirements.compactMap { r -> (Requirement, ConsoleFixture, Drive)? in
+        guard r.route != "GET /api/events", let fixture = byStem[stem(r.route)], let drive = drives[r.route] else { return nil }
+        return (r, fixture, drive)
+    }
 
-    for r in requirements where r.route != "GET /api/events" {
-        guard let fixture = byStem[stem(r.route)], let drive = drives[r.route] else { continue }
-        child.clear()
-        if case .failure(let error) = await drive(session.stores, Args(fixture)) {
-            Issue.record("\(r) over the session: \(error.localizedDescription)")
+    // Every method at once, and the answers gathered off the main actor —
+    // see `driveAll`. A line is matched to its route by content, which is sound
+    // because no two fixtures share a method and a path (query included); the
+    // total says no method wrote a line that matched nothing.
+    child.clear()
+    for (r, error) in await driveAll(driven, session.stores) {
+        Issue.record("\(r) over the session: \(error.localizedDescription)")
+    }
+    let lines = child.sent
+    #expect(lines.count == driven.count, "\(driven.count) methods wrote \(lines.count) request lines; a store method is one route")
+    for (r, fixture, _) in driven {
+        let matching = lines.filter { line in
+            let path = line["path"] as? String ?? ""
+            return line["method"] as? String == fixture.method
+                && path.split(separator: "?").first == fixture.path.split(separator: "?").first
+                && ConsoleFixture.query(of: path) == fixture.query
         }
-        let lines = child.sent
-        guard lines.count == 1, let line = lines.first else {
-            Issue.record("\(r) wrote \(lines.count) request lines; a store method is one route"); continue
+        guard matching.count == 1, let line = matching.first else {
+            Issue.record("\(r): \(matching.count) request lines spoke \(fixture.method) \(fixture.path); a store method is one route"); continue
         }
-        let path = line["path"] as? String ?? ""
-        #expect(line["method"] as? String == fixture.method, "\(r)")
-        #expect(path.split(separator: "?").first == fixture.path.split(separator: "?").first, "\(r): sent \(path)")
-        #expect(ConsoleFixture.query(of: path) == fixture.query, "\(r): query")
         let body = try line["body"].map { try JSONValue.parse(JSONSerialization.data(withJSONObject: $0, options: [.fragmentsAllowed])) }
         #expect(body == fixture.body, "\(r): the body on the line is not the body the console accepted")
         #expect(line["idempotency_key"] as? String == fixture.idempotencyKey, "\(r): Idempotency-Key")
@@ -717,6 +732,33 @@ func everyStoreMethodSpeaksItsRouteOverTheSessionTransport() async throws {
     let many = try RunExport(ndjson: Data("{\"id\":1}\n{\"id\":2}\n".utf8))
     #expect(many.rows.count == 2)
     #expect(throws: (any Error).self) { try RunExport(ndjson: Data("{\"id\":1}\nnot json\n".utf8)) }
+}
+
+/// Drives every method at once and answers the failures, in one return to the
+/// caller. Nonisolated on purpose. The test is main-actor bound, and `swift
+/// test` runs it beside some 480 other main-actor tests dispatched at the same
+/// moment, so every `await` that comes back to the main actor waits its turn
+/// behind all of their work — on CI's three-core runner, a third of a second
+/// to a second each. The sequential walk this replaces was three such turns
+/// per route, ~300 in all: 45–55 s against a 60 s limit for a test that takes
+/// 0.1 s alone. Driving the routes concurrently brought the calls down to a
+/// handful of turns, and then draining the group from the main actor put them
+/// back — `next()` is a nonisolated async call, one round trip per result. From
+/// the generic executor the group's hops are cheap, and the caller pays once.
+private nonisolated func driveAll(_ driven: [(Requirement, ConsoleFixture, Drive)], _ stores: ConsoleStores) async -> [(Requirement, ConsoleError)] {
+    await withTaskGroup(of: (Requirement, ConsoleError?).self) { group in
+        for (r, fixture, drive) in driven {
+            group.addTask {
+                if case .failure(let error) = await drive(stores, Args(fixture)) { return (r, error) }
+                return (r, nil)
+            }
+        }
+        var failures: [(Requirement, ConsoleError)] = []
+        for await (r, error) in group {
+            if let error { failures.append((r, error)) }
+        }
+        return failures
+    }
 }
 
 /// A runner for a session whose every request goes down the child: running anything else is the bug.

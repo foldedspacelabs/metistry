@@ -26,14 +26,14 @@ kind.
 
 | Kind | Unit | Contract | Registry (replaces) |
 | --- | --- | --- | --- |
-| `connection-type` | `manifest.yaml`: `provides`, `transports`, config `fields`, `capabilities`, `tools` with their group, optional `sync`, `implementation` | `check()`; the bridge wire contract when it runs as a process | connection types (new); known-service forms — the app renders fields, no per-service Swift |
+| `connection-type` | `manifest.yaml`: `provides`, `transports`, config `fields`, `capabilities`, `tools` with their group, optional `sync` (and `also_read_by`), `implementation`, and an agent type's `dispatch` | `check()`; the bridge wire contract when it runs as a process | connection types (new); known-service forms — the app renders fields, no per-service Swift |
 | `provider` (compute) | `manifest.yaml`: `type: provider` and a `provider:` block — exactly what `compute.yaml` carries under `providers.<name>` (base URL, auth as a secret reference, locality, data policy, …) | `providers test` | `COMPUTE_TEMPLATES` → `seed/compute-templates/<name>/` + extensions (T4-5) |
 | `bridge` | `packages/mcp-*/manifest.yaml` | the wire contract, `check()`, lazy discovery, preview-then-confirm, redaction; `requires_tcc` from a closed enum | bridge discovery by manifest |
 | `routine` | manifest + code (product), or no code (an assignment in `scheduled.yaml`) | declared `config` fields, default `schedule`, declared output paths, `requires` | `routines/index.ts`'s array (T4-5) |
 | `collector` / sync | manifest + code | declared `needs_you` raise rules, the connection type it reads | `collectors/index.ts`'s array (T4-5) |
 | `agent` (actor) | `.metistry/agents/**.md` | the agent manifest | exists |
 | named query | `queries/*.yaml` | `expose`, params | exists (overlay) |
-| target | `targets/<name>/manifest.yaml` | folds into connection type `agent` (T4-11) | the target registry (T4-5); the `transport` enum goes with T4-11 |
+| target | `targets/local-crew/manifest.yaml` only (X-85) | everything else folded into connection type `agent` (T4-11): a type's `dispatch:` block | the target registry (T4-5), which reads agent connections beside the crews' `local-crew` (T4-11) |
 
 **In this program** the registries and data-only extensions ship. Code from an
 extension never runs inside the console: an extension that needs code runs as a
@@ -100,7 +100,7 @@ directory and the owner's.
 | --- | --- | --- | --- |
 | `collector` | `collectors/<name>/` | the console's runner, the watchdog's silent-collector probe | **overlay** — replace a product collector's manifest |
 | `routine` | `routines/<name>/` | the same | **overlay** |
-| `target` | `targets/<name>/` (and the owner's older `.metistry/targets/`) | the console (dispatch, `GET /api/targets`) | add a target, or replace one |
+| `target` | `targets/local-crew/` (and the owner's older `.metistry/targets/`) | the console (dispatch, `GET /api/targets`) | replace `local-crew`'s manifest; any other name is refused at load, naming `metistry connections add` (X-85) |
 | `provider` | `seed/compute-templates/<name>/` | `metistry compute providers add --from`, the hints that name templates | add a template, or replace one |
 | `connection-type` | `seed/connection-types/<name>/` (the first ship with T4-12–T4-15) | the connections package (T4-8a) | add a type, or replace one |
 
@@ -215,13 +215,15 @@ type (somewhere work is sent). One key cannot mean both, so the kind is
 | Key | Is |
 | --- | --- |
 | `provides` | one of `mcp` · `agent` · `api` · `feed` · `files` · `calendar` · `mail` · `tracker` |
-| `transports` | the reach classes a connection of this type may use: `http` · `command` · `path` (C118) |
+| `transports` | the reach classes a connection of this type may use: `http` · `command` · `path` (C118) · `imap` (a mailbox, T4-15 — only a `mail` type that declares `auth: [basic]`) |
 | `fields` | the config the app renders — each a `key` (snake_case), `kind`, `label`, optional `help`, `required` (default true) |
 | `capabilities` | from the type's closed vocabulary (below) |
 | `tools` | `<tool>: { group, description? }` — no mode; the mode is the owner's |
-| `auth` | optional: the sign-in schemes a connection of this type may use (`none` · `bearer` · `basic` · `api_key` · `oauth`). Absent: any but `basic`. **`basic` is accepted only by a type that lists it** (CalDAV's app password, T4-13) — the CLI and the file check both refuse it elsewhere |
+| `auth` | optional: the sign-in schemes a connection of this type may use (`none` · `bearer` · `basic` · `api_key` · `oauth`). Absent: any but `basic`. **`basic` is accepted only by a type that lists it** (CalDAV's app password, T4-13; IMAP's, T4-15) — the CLI and the file check both refuse it elsewhere |
 | `sync` | the sync unit that reads connections of this type; its default schedule lives in that unit's manifest (§2.5) |
+| `also_read_by` | optional: further sync units that read the same connection (T4-11 — Devin's `devin-knowledge` beside `devin-sessions`); needs `sync`, each named once |
 | `implementation` | `native` (the type's own handler — a data-only extension) · `builtin` + `module` (product code in `packages/connections`) · `bridge` + `bridge` (an existing bridge, e.g. `eventkit`). Default `native` |
+| `dispatch` | an `agent` type's (T4-11), and required on a builtin one: `dispatcher` (closed: `devin-session` · `github-issue` — `AGENT_DISPATCHERS`), `data_policy` (`allow`, `deny_sources`, `max_brief_bytes` — what a brief may carry), `purposes` (`<snake_case>: { label, preamble }`) with `default_purpose`, `result` (`via: report_queue`, `status_via`), optional `cost` and Devin's `max_acu`. An overlay of the type is how the owner widens its data policy (D4) |
 
 **Field kinds** (closed): `text` · `secret` · `variable` · `url` · `choice` ·
 `oauth`. A field of any other kind is refused. A `secret` field can never carry
@@ -296,6 +298,23 @@ offer_to_agents: false
 - **`auth`** is a shortcut: `none` · `bearer` + `secret` · `basic` + `username`,
   `secret` · `api_key` + `header`, `secret` · `oauth` (+ `field` when the type
   has more than one oauth field). A bare string is shorthand: `auth: oauth`.
+  A **custom** connection signing in with OAuth (C118, T4-10) has no field to
+  take its client from, so the shortcut carries it: `client` (the model
+  above — `authorize_url`, `token_url`, `scopes`, `pkce`, `redirect` — with no
+  `client_id` or `client_secret` in it), `token`, `client_id` and an optional
+  `client_secret`, each a `{{ secret.name }}`; the client id is always the
+  owner's own. A typed connection is refused these keys:
+
+  ```yaml
+  reach:
+    http:
+      url: https://mcp.example.com/mcp
+      auth:
+        scheme: oauth
+        client: { authorize_url: "https://auth.example.com/authorize", token_url: "https://auth.example.com/token", scopes: [read], pkce: true, redirect: loopback }
+        token: "{{ secret.example_oauth_token }}"
+        client_id: "{{ secret.example_client_id }}"
+  ```
 - **Values take text, `{{ secret.name }}` and `{{ variable.name }}`** — nothing
   else in double braces. Every secret or variable a value uses must be listed in
   `secrets` / `variables`, because those lists are what the grant check and the
@@ -347,21 +366,25 @@ list. **Done (T4-5):**
 - `COMPUTE_TEMPLATES` (`packages/cli/src/compute.ts`) → the provider registry,
   `seed/compute-templates/<name>/manifest.yaml` + extensions
 - targets → the target registry (the console's `TargetRegistry` loads through it)
+- `DEVIN_PURPOSES` (`apps/console/src/devin.ts`) → the Devin connection
+  type's `dispatch.purposes` (T4-11)
 - connection types → the registry is ready (`loadKind("connection-type", …)`);
   its first units and its consumer come with T4-8a and T4-12–T4-15
+- the connection known-service list → the connection-type units that ship them:
+  the calendar's (`icloud-calendar`, `fastmail-calendar`) with T4-13, the
+  mail's (`gmail-mail`) with T4-15
 
 **Still to move, each with the ticket that owns it:**
 
-- `targetManifest.transport` (`packages/core/src/manifest.ts`) and
-  `DEVIN_PURPOSES` (`apps/console/src/devin.ts`) → the `agent` connection type
-  and the Devin connection type (T4-11)
+- `targetManifest.transport` (`packages/core/src/manifest.ts`) → retired with
+  the `targets/` manifests (T4-11 moved their content into agent connection
+  types; `AGENT_DISPATCHERS` is the closed set that replaces the enum; X-85
+  stopped the console loading any `targets/` manifest but the crews'
+  `local-crew`, so the enum's other values have no manifest left)
 - `CREW_MODELS` (→ compute references, T4-6)
 - `SECRET_SCOPES` (→ removed, §2.14, T4-3)
 - the proposal kind → request type mapping (→ the F-5 table, open to new types
   that pick a closed body)
-- the connection known-service list → the connection-type units that ship them
-  (T4-15 for mail; the calendar's — `icloud-calendar`, `fastmail-calendar` — shipped
-  with T4-13)
 - `inbox.source` values (a capture-source registry — no ticket yet)
 - Swift's per-service setting forms, and the Mac app's `ComputeTemplate` enum
   (→ rendered from field schemas and the provider registry)

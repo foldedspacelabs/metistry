@@ -41,7 +41,7 @@
 // `scrubModelOutput` before any caller sees it. Same guarantee, one place,
 // and now it covers every collector rather than one route.
 
-import { resolveOnMachineCall, scrubModelOutput, type ModelAccess } from "@foldedspacelabs/metistry-core";
+import { EgressRefused, resolveOnMachineCall, scrubModelOutput, type ModelAccess } from "@foldedspacelabs/metistry-core";
 
 /** A JSON Schema object, as `response_format.json_schema.schema` takes it. */
 export type JsonSchema = Record<string, unknown>;
@@ -83,8 +83,8 @@ const DEFAULT_TIMEOUT_MS = 60_000; // limit: fixed — one generation on a resid
 
 const skip = (why: string): { ok: false; why: string } => ({ ok: false, why });
 
-// The provider resolution, the money rule, the bearer and the URL are
-// core's `resolveOnMachineCall` — ONE implementation, shared with
+// The provider resolution, the money rule, the credential's door and the URL
+// are core's `resolveOnMachineCall` — ONE implementation, shared with
 // `scoreChoice` (which moved into `packages/core` with T9-2, because the
 // console's router asks the same one-token question and cannot import from
 // here). It THROWS for an off-machine provider, the one thing that does not
@@ -102,13 +102,16 @@ const skip = (why: string): { ok: false; why: string } => ({ ok: false, why });
 export async function completeJson<T>(ctx: ComputeAccess, opts: CompleteJsonOptions): Promise<JsonCompletion<T>> {
   const resolved = resolveOnMachineCall(ctx, opts.collector, ctx.usesModel, `${opts.collector} declares no uses_model: in its manifest, so it calls nothing`);
   if ("ok" in resolved) return resolved;
-  const { ref, provider, url, bearer } = resolved;
+  // `fetchFn` is core's `computeFetch`, bound to this provider: it refuses a
+  // host that is not the provider's and attaches the credential itself, only
+  // on the owner's grant (ruling 2, X-7) — this file never holds the key.
+  const { ref, provider, url, fetchFn } = resolved;
 
   let res: Response;
   try {
-    res = await (ctx.fetchFn ?? fetch)(url, {
+    res = await fetchFn(url, {
       method: "POST",
-      headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         model: ref.model,
         messages: opts.messages,
@@ -119,6 +122,10 @@ export async function completeJson<T>(ctx: ComputeAccess, opts: CompleteJsonOpti
       signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
   } catch (err) {
+    // A refusal at the door (no grant, a host that is not the provider's) is
+    // a reason like any other: nothing was sent, and the caller keeps its
+    // deterministic result.
+    if (err instanceof EgressRefused) return skip(err.message);
     return skip(`${url} did not answer (${err instanceof Error ? err.message : String(err)})`);
   }
   if (!res.ok) {

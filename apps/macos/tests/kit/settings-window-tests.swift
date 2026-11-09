@@ -20,7 +20,7 @@ import Testing
 @Test func theSidebarIsScreen15sSectionsInItsFourGroups() {
     #expect(SettingsModel.SectionGroup.allCases.map { $0.sections.map(\.title) } == [
         ["Instance", "Services", "Compute", "Updates"],
-        ["Account", "Connections", "Secrets", "Variables"],
+        ["Account", "Remote Access", "Devices", "Connections", "Secrets", "Variables"],
         ["Live Capture", "Sessions"],
         ["Keyboard", "Advanced"],
     ])
@@ -30,13 +30,16 @@ import Testing
     // Connections is renamed Account; the external servers' pane is Connections (C114)
     #expect(SettingsModel.Section.account.title == "Account")
     #expect(SettingsModel.Section.connections.group == .access)
+    // the ACCESS group gains Devices (plan §2.22, X-77): the website's "Settings, then Devices" is the product's path
+    #expect(SettingsModel.Section.devices.group == .access)
+    #expect(SettingsModel.Section.devices.title == "Devices")
+    // and Remote Access, before Devices (plan §2.23, X-107; screen-15 §1)
+    #expect(SettingsModel.Section.remoteAccess.group == .access)
+    #expect(SettingsModel.Section.remoteAccess.title == "Remote Access")
+    #expect(SettingsModel.SectionGroup.access.sections.firstIndex(of: .remoteAccess)! + 1 == SettingsModel.SectionGroup.access.sections.firstIndex(of: .devices)!)
     // the window is fixed and set by its widest pane (§2)
     #expect(SettingsLayout.width == SettingsLayout.sidebar + SettingsLayout.pane)
     #expect((SettingsLayout.width, SettingsLayout.height) == (840, 600))
-    // a pane whose own ticket has not landed says what it will hold — never a dead end
-    for section in [SettingsModel.Section.variables, .liveCapture, .sessions] {
-        #expect((section.pendingNote?.count ?? 0) > 40, "\(section)")
-    }
 }
 
 // MARK: - The lid dialog never runs a command
@@ -431,6 +434,7 @@ private func appReading() async throws -> (AppModel, RecordedSession, () -> Void
     await app.settings.refreshDeployment()
     await app.settings.refreshSecrets()
     await app.settings.refreshLinked()
+    await app.settings.connectionsPane.refresh()
     return (app, recorded, { UserDefaults.standard.removePersistentDomain(forName: id) })
 }
 

@@ -15,7 +15,7 @@
 // through the console's `writeGrants`, one validator, one audit row
 // (invariant 2).
 
-import { INSTANCE_LAYOUT, isUserOwnedPath, isVaultPath, validAgentAreaGrant, VAULT_ROOT_AREA } from "./instance-layout.js";
+import { INSTANCE_LAYOUT, isUserOwnedPath, isVaultPath, TRANSCRIPTS_DIR, validAgentAreaGrant, VAULT_ROOT_AREA } from "./instance-layout.js";
 
 /**
  * Read tiers (§4.11): default-deny, user-granted, attached to the token
@@ -97,9 +97,17 @@ export function validKnowledgePath(path: string): boolean {
  * prefix. The console admits that spelling for internal principals only.
  */
 export function underAreas(path: string, areas: readonly string[]): boolean {
+  // A recording's transcript is other people's words (daily-flow-spec §8.4,
+  // T8-4): outside every default grant. An area that CONTAINS
+  // `Journal/Transcripts/` — `Journal` — does not reach into it; only the
+  // whole vault (`/`, which the console admits for the owner's own assistant
+  // alone) or an area at or below the folder itself does.
+  const transcript = path.startsWith(`${TRANSCRIPTS_DIR}/`);
   return areas.some((raw) => {
     const a = raw.endsWith("/") ? raw.slice(0, -1) : raw;
-    return a === "" || path === a || path.startsWith(`${a}/`);
+    if (a === "") return true;
+    if (transcript && !(a === TRANSCRIPTS_DIR || a.startsWith(`${TRANSCRIPTS_DIR}/`))) return false;
+    return path === a || path.startsWith(`${a}/`);
   });
 }
 
@@ -507,7 +515,16 @@ export type Decision = { readonly ok: true } | Refusal;
 export type KnowledgeDoor = "read" | "list" | "grep" | "links" | "write" | "resources" | "console_page";
 export type QueryDoor = "queries_run" | "console_query";
 export type ProjectDoor = "task" | "task_create";
-export type ConsoleDoor = "console_agent" | "console_management";
+/**
+ * `console_briefing` (X-128): `GET /api/briefing`, the session-start briefing
+ * an external agent is handed under its grant. Agent bearers only — the
+ * route admits the credential class before `may` is asked, as `/mcp` does
+ * (an owner credential is not an agent principal there, docs/ops/client-api.md),
+ * so the owner's rule in `may` never meets this door; what `may` decides is
+ * the ROLE among agent bearers: `agent` is served, the assistant and a crew
+ * are not (the review proposed it for external agents alone).
+ */
+export type ConsoleDoor = "console_agent" | "console_management" | "console_briefing";
 /** The proxy's two doors (§2.6's lazy pair on `/mcp`). */
 export type ConnectionDoor = "connections_list" | "connections_call";
 
@@ -906,6 +923,7 @@ export function may(p: Principal, verb: Verb, r: Resource): Decision {
       // outside /capture and /mcp; `console_management` is the `isUser`
       // gate, which excludes the capture owner token by name.
       if (r.door === "console_agent" && p.role === "tool") return OK;
+      if (r.door === "console_briefing" && p.role === "agent") return OK;
       return hidden("forbidden", "role_required");
   }
   // Unreachable while `Resource` is a closed union; kept so a new variant
@@ -1490,6 +1508,23 @@ export const TITLES_ONLY_LABEL = "Titles only";
 export interface PermissionConnection {
   readonly name: string;
   readonly tools?: readonly { readonly name: string; readonly group: ToolGroup; readonly mode: ToolMode }[] | undefined;
+  /**
+   * The owner's offer switch (C115). Given: the table asks `may()` whether
+   * THIS principal reaches the connection — the assistant always, a borrower
+   * only when offered and granted — so a host may hand every connection to
+   * every actor. Absent: the caller has already decided, and it is drawn.
+   */
+  readonly offered?: boolean | undefined;
+}
+
+/**
+ * The connections a principal reaches, of those a host handed it: a name as
+ * it is, and a connection that says whether it is offered only when `may()`
+ * admits this principal to call it (T4-10) — the proxy's own rule, asked the
+ * proxy's way, so the table and the door cannot disagree.
+ */
+export function reachableConnections(p: Principal, list: readonly (string | PermissionConnection)[]): (string | PermissionConnection)[] {
+  return list.filter((c) => typeof c === "string" || c.offered === undefined || may(p, "act", { kind: "connection", door: "connections_call", name: c.name, offered: c.offered }).ok);
 }
 
 export interface DescribePermissionsOptions {
@@ -1637,13 +1672,18 @@ export function describePermissions(p: Principal, opts: DescribePermissionsOptio
   }
 
   // ---- connections: one row per name, tools by group and mode -----------------
-  const connections = (opts.connections ?? []).map((c) => (typeof c === "string" ? { name: c } : c));
+  //
+  // Only those `may()` admits (reachableConnections), each entry marked
+  // *Through Metistry* (screen 7 §10): Metistry calls the tool with the
+  // owner's credential; the actor never holds it.
+  const proxied: PermissionProvenance = { kind: "proxy" };
+  const connections = reachableConnections(p, opts.connections ?? []).map((c) => (typeof c === "string" ? { name: c } : c));
   for (const c of [...connections].sort((a, b) => a.name.localeCompare(b.name))) {
     const read: PermissionEntry[] = [];
     const write: PermissionEntry[] = [];
     for (const t of c.tools ?? []) {
       if (t.mode === "off") continue;
-      (t.group === "reads" ? read : write).push({ key: t.name, label: t.name, asks: t.mode === "ask", provenance: base });
+      (t.group === "reads" ? read : write).push({ key: t.name, label: t.name, asks: t.mode === "ask", provenance: proxied });
     }
     if (read.length === 0 && write.length === 0) continue;
     rows.push({ resource: { kind: "connection", name: c.name }, label: c.name, read, write });
@@ -1664,10 +1704,17 @@ export function describePermissions(p: Principal, opts: DescribePermissionsOptio
 export const PERMISSION_EMPTY_CELL = "—";
 /** The owner answers first: an action at `propose`, a connection tool at `ask`. */
 export const PERMISSION_ASKS_MARK = "⏱";
-/** A connection's row (§2.6). */
+/** A connection's row (§2.6): the relay glyph, *reached through Metistry*. */
 export const PERMISSION_CONNECTION_MARK = "⧉";
+/** What the relay glyph says, in a legend and to VoiceOver — the *Through Metistry* provenance, said once per row (MetistryKit's `PermissionWords.relayed`). */
+export const PERMISSION_CONNECTION_WORDS = "reached through Metistry";
 
-/** Where an entry came from, in words — nothing for `base`: a marker on everything is a marker on nothing. */
+/**
+ * Where an entry came from, in words — nothing for `base`: a marker on
+ * everything is a marker on nothing. Nothing for `proxy` either: every entry
+ * of a connection row is reached through Metistry, so the row's ⧉ says it
+ * once instead of every tool saying it again.
+ */
 export function permissionProvenanceText(p: PermissionProvenance): string | null {
   if (p.kind === "approved") return p.proposalId === null ? "approved in Needs You" : `approved in Needs You · #${p.proposalId}`;
   if (p.kind === "routine") return `during ${p.routine} only`;

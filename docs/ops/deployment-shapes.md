@@ -9,7 +9,7 @@ boundary differ. Set in `.metistry/deployment.yaml` (plan §4.17, open decision 
 |  | `compose` | `launchd` |
 |---|---|---|
 | db | `pgvector/pgvector:pg17` container | a user-space Postgres 17, `postgres -D`, a **child of the supervisor** |
-| console | container, published on `127.0.0.1:8080` | a child of the supervisor, binds `127.0.0.1:8080` |
+| console | container, published on `127.0.0.1:8080`; its **proxy listener** (plan §2.23) published on `127.0.0.1:8081` only — no socket, the container holds no instance directory | a child of the supervisor, binds `127.0.0.1:8080`; its proxy listener binds `127.0.0.1:8081` (a namespaced block's `base + 6`) and the 0600 socket `<instance>/.metistry/state/console-proxy.sock` |
 | assistant | container; the file passes through the provider key `compute.yaml` names | a child of the supervisor, **under `ops/sandbox/assistant.sb`** — and not a child at all without an engine (below) |
 | reconciler | launchd job | a child of the supervisor, **under `ops/sandbox/reconciler.sb`** |
 | watchdog | launchd job | **it IS the supervisor** |
@@ -22,6 +22,22 @@ boundary differ. Set in `.metistry/deployment.yaml` (plan §4.17, open decision 
 
 `compose` is the default and stays the default until an instance flips
 it. Nothing about an existing install changes by upgrading past this.
+
+**The console's two listeners.** The main one is where this Mac's own
+processes reach the console — the Mac app, the CLI, the PWA opened here —
+and the only place the local owner token is honoured. The **proxy listener**
+is where a remote-access provider (`tailscaled`, `cloudflared`, zrok, ngrok,
+a TLS terminator for a forwarded port) forwards to, and every request on it
+is remote by construction: the token is never honoured, no `local` route
+answers, and the `Host` must be a remote host `METISTRY_ORIGIN` names
+(`docs/ops/auth.md`, "The proxy listener"). `METISTRY_CONSOLE_PROXY_PORT`
+names its port in either shape — the console port + 1 unless `.env` or a
+namespaced instance's block says otherwise (`metistry up` renders it into the
+console's job environment, like `METISTRY_CONSOLE_PORT`; under compose the
+host side of the published port is the variable, the container side is
+`8081`). A provider must never be pointed at the main port; `doctor` fails
+one that is, and `metistry remote` is how a provider is chosen and pointed at
+the proxy listener (`docs/ops/remote-access.md`).
 
 ## Status: `launchd` is trialled end to end (2026-09-10)
 
@@ -313,6 +329,16 @@ used to get implicitly (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `HOME`,
 {"op":"stop","token":"…","service":"assistant"}
 {"op":"start","token":"…","service":"assistant"}
 ```
+
+Each entry in `children` carries `name`, `state`, `pid`, `uptimeMs`, `restarts`,
+`lastExit` and `log`, and — once the supervisor has spawned the child —
+`spawned: {argv, profile}`: the argv it handed to `spawn()` and the Seatbelt
+profile path read off its `sandbox-exec -f` prefix (`null` when there is none).
+That is the only honest source for "is this child confined": `sandbox-exec`
+execs into its target, so the running process's own argv (`ps`) never names the
+profile, and `supervisor.json` is what the *next* start runs. The field is
+optional and additive — a supervisor that predates it, or a child it has not
+spawned, simply omits it, and a reader treats that as "not known".
 
 `metistry restart|stop|start <service>` uses it for the supervisor's children,
 because launchctl cannot address a process launchd has never heard of;
@@ -917,7 +943,8 @@ never a value:
 | `secret_in_url` | a reference, a known value in any encoding, or userinfo in the URL — URLs land in logs and histories |
 | `secret_in_model_body` | `purpose: "model"` and a reference or known value in the body. The body is the model's context; the provider key goes in a header. |
 | `cleartext` | a secret over plain http to anything but loopback |
-| `not_granted` · `needs_approval` | the caller's grant (`connection:<name>` or `agent:<id>`) is Off, or Ask without the owner's approval of this call |
+| `not_granted` · `needs_approval` | the caller's grant (`connection:<name>`, `agent:<id>` or `provider:<name>`) is Off, or Ask without the owner's approval of this call |
+| `not_provider_host` | a compute call (`computeFetch`, X-7) to anything but its provider's `base_url` destination — the key is only ever attached after this passes |
 | `missing_secret` · `malformed_reference` | all or nothing: one missing item or one bad `{{ secret… }}` and nothing is filled or sent |
 | `uninspectable_body` | a body the door cannot read (a stream, a Blob, FormData) |
 | `bad_url` | not an http(s) URL |
@@ -945,12 +972,28 @@ names)`, which merges them into `meta.secrets` as a sorted set. The
 to say "sends `github_write` to `api.github.com`" without touching the
 Keychain.
 
-**Not yet on a compute provider's chat client.** Since T4-18 a provider's
-key is a `{{ secret.name }}`, but the engine sends the key it was delivered
-(`METISTRY_SECRET_<NAME>`, docs/ops/compute.md "Secrets") rather than
-filling it here: a provider key has no grantee in `secrets.yaml`'s
-vocabulary, and the engine's sandbox does not read `secrets.yaml`. The
-proxy above still refuses any host `compute.yaml` does not name.
+**On every compute call, too** (X-7, ruling 2 of the W2 checkpoint). A
+provider key's grantee is `provider:<name>`, and the engine, the
+collectors, the router's scorer and the embedder call through core's
+`computeFetch`, which binds each call to its provider's host and fills a
+`{{ secret.x }}` key only on that grant (docs/ops/compute.md). The grant is
+read from `secrets.yaml` on every call, and each shape gives the process
+that file and nothing more of the instance:
+
+| shape | how the process reads `secrets.yaml` |
+|---|---|
+| `launchd` | the engine's sandbox profile grants the instance's `.metistry/secrets.yaml` by name (`CONFIG_SECRETS`, a fifth literal beside the four config files); the console is unconfined and reads it under `METISTRY_INSTANCE_DIR` |
+| `compose` | `docker-compose.yml` bind-mounts the policy mirror DIRECTORY `.metistry/state/policy/` **read-only** at `/run/metistry/policy` in the `console` and `assistant` containers, with `METISTRY_SECRETS_FILE=/run/metistry/policy/secrets.yaml` (the owner's rulings of 2026-09-30). It holds only a copy of `secrets.yaml`, which the reconciler refreshes every second (and removes when the policy is deleted). `metistry up` creates it, mirrors once, and passes it as `METISTRY_SECRETS_POLICY_DIR`; unset, the product's `seed/` is mounted in its place, `METISTRY_SECRETS_FILE` is empty, and every `{{ secret.x }}` provider key is refused naming the mount. The bind never creates a host path (`create_host_path: false`); `.metistry/` itself, with `state/.env`, is never mounted (D5). |
+
+Why a directory: a single-file bind pins the inode it was given, and every
+writer of `secrets.yaml` replaces it by rename, so a file mount would keep a
+revoked grant until the container restarted. A directory bind resolves the
+entry by name, so a revoke reaches a running container on its next call
+(within the mirror's one-second refresh) — the same as under launchd.
+`packages/core/test/compute-egress.test.ts` holds the difference: a hardlink
+(the pinned-inode view) keeps the old grant after a rename-replaced revoke,
+the directory view does not. The proxy above still refuses any host
+`compute.yaml` does not name.
 
 ## Secrets in plists
 
@@ -1010,6 +1053,16 @@ Doctor carries the same comparison as the **`launchd env`** row: `degraded`
 with the drifted names (never a value — the meta carries a short sha256 of
 each side) and `metistry up` as the fix.
 
+Since X-124 the file itself is **derived**: `up` renders
+`.metistry/state/.env` from `.metistry/*.yaml` and the login Keychain before
+any job reads it, and renders the jobs from the same values — so within one
+`up` the file and the installed copies cannot disagree. Doctor's **`env`**
+row reads the file's own hash: `pre-render` (a hand-written file from before
+X-124), `hand-edited` (the changed, added and removed lines named) or `ok`,
+with `metistry up` as the fix (`cli.md`, "`.env` is derived"). "The jobs
+follow `.env`" above still covers the in-place writers that run outside
+`up`, each of which re-stamps a rendered file.
+
 ## Doctor
 
 `doctor`'s first row is the shape and where it was read from, and every
@@ -1025,6 +1078,14 @@ to one `status` call on the control socket — and a `child:<name>` row for each
 child, with its state, pid, restart count and log path. `launchctl print`
 cannot see those processes, so without this doctor would be blind to
 everything except the agent itself.
+
+The **`sandbox`** row is that `spawned` report too — never `supervisor.json`
+(re-rendered by `up` beside a supervisor still running the old spawn) and never
+the running process's argv (which cannot show confinement). A child the
+supervisor has not spawned, a supervisor that does not answer, and one that
+predates the field read **"could not confirm"** (`degraded`) — not unconfined,
+not confined. When the file's argv differs from what was spawned the row says so
+(`meta.stale`), and `metistry up` restarts the supervisor onto it.
 
 The **`assistant`** row under this shape is the supervisor's answer, not
 compute.yaml's: `failed` unless a child named `assistant` is running — "not

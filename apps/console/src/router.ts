@@ -17,6 +17,7 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import {
+  PRIVATE_TIER,
   POLICY_TIMEOUT_DEFAULT_MS,
   RUNTIME_BOUNDS,
   boundDecision,
@@ -38,10 +39,11 @@ import {
   type ComplexityFeature,
   type Effort,
   type IntentFeature,
-  type PolicyMode,
-  type RouteOperation,
+  type ModelAccess,
   type ModelFeatureOutcome,
   type ModelFeatures,
+  type PolicyMode,
+  type RouteOperation,
   type RoutePolicyConfig,
   type TierMap,
 } from "@foldedspacelabs/metistry-core";
@@ -422,6 +424,13 @@ export interface ConsultInput {
   messageId: number;
   /** absent = no `policy:` block — the shipped behaviour */
   policy?: RoutePolicy | undefined;
+  /**
+   * The turn carries a capture-session marker (X-84): it runs on the private
+   * tier whatever the rules chose (core `turnTier`, plan §2.15), so the
+   * policy is not consulted — its choice could never be served — and the
+   * record says the tier the turn runs on. Its text reaches no scorer.
+   */
+  captureSession?: boolean | undefined;
   /** runs `route_features` (the named query); a throw is a failed features query */
   loadFacts: () => Promise<ThreadFacts | null>;
   /** when the rules decided — what `reask`'s thirty minutes are measured to */
@@ -497,18 +506,25 @@ async function consult(input: ConsultInput): Promise<Consultation> {
   const kind = servedKindOf(served);
   const defaultTier = resolveTier(rules.tiers, undefined).tier;
   const phase: PolicyMode = input.phase ?? "shadow";
+  // A capture session in scope pins a model turn to the private tier before
+  // any choice is made (invariant 4: the rules bound the policy, never the
+  // reverse); the record names that tier, not the one the rules would have
+  // served without the marker. At serve this holds too: a pinned turn is
+  // never consulted, so the policy has no choice to serve (`serveRoute`).
+  const pinned = input.captureSession === true;
   const base: Record<string, unknown> = {
     v: 1,
     message_id: input.messageId,
     thread: input.thread,
     phase,
     rules: { served: kind, default_tier: defaultTier },
-    served: servedOf(served),
+    served: { ...servedOf(served), ...(pinned ? { capture_session: true, ...(served.kind === "model" ? { tier: PRIVATE_TIER } : {}) } : {}) },
   };
   // R1 and R4 are served without the policy (§1), and so is every row while
-  // no `policy:` block exists; their features are recorded all the same,
-  // best effort, so the report has one population to read.
-  const consulted = policy !== undefined && (kind === "default" || kind === "override");
+  // no `policy:` block exists, and so is a turn pinned to the private tier
+  // by its capture session; their features are recorded all the same, best
+  // effort, so the report has one population to read.
+  const consulted = policy !== undefined && !pinned && (kind === "default" || kind === "override");
   const timeoutMs = policy?.timeoutMs ?? POLICY_TIMEOUT_MS;
 
   type Step = { features: RouteFeatures; session: SessionFacts; factsError?: string; answer?: PolicyAnswer | string };
@@ -545,7 +561,7 @@ async function consult(input: ConsultInput): Promise<Consultation> {
   if (!consulted) {
     const features = got === TIMED_OUT ? cheap : got.features;
     const factsError = got === TIMED_OUT ? `route_features ran past ${timeoutMs} ms` : got.factsError;
-    const bounded_by = kind === "note" ? ["command:note"] : served.kind === "fast_path" ? [`fast_path:${served.query}`] : [];
+    const bounded_by = [...(pinned ? ["capture_session"] : []), ...(kind === "note" ? ["command:note"] : served.kind === "fast_path" ? [`fast_path:${served.query}`] : [])];
     return {
       record: {
         tool: kind,
@@ -554,7 +570,7 @@ async function consult(input: ConsultInput): Promise<Consultation> {
           ...base,
           features,
           ...(factsError !== undefined ? { features_error: factsError } : {}),
-          policy: { outcome: kind === "note" || kind === "fast_path" ? "not_consulted" : "absent", bounded_by },
+          policy: { outcome: pinned || kind === "note" || kind === "fast_path" ? "not_consulted" : "absent", bounded_by },
           agrees: null,
         },
       },
@@ -667,6 +683,8 @@ export interface RoutePolicyDeps {
   compute?: (() => Compute) | undefined;
   /** where a scorer provider's `auth.secret` resolves */
   secretEnv?: NodeJS.ProcessEnv | undefined;
+  /** `secrets.yaml`, read per call: where a scorer provider key's grant to `provider:<name>` is checked (X-7) */
+  secretsPolicy?: ModelAccess["secretsPolicy"] | undefined;
   fetchFn?: typeof fetch | undefined;
   /** the named query is loaded now — a `fast_path:<query>` choice whose query is not is `out_of_bounds` (`queries`) */
   hasQuery: (name: string) => boolean;
@@ -691,6 +709,7 @@ export function makeRoutePolicy(deps: RoutePolicyDeps): RoutePolicy | undefined 
   const access = {
     ...(deps.compute ? { compute: deps.compute } : {}),
     ...(deps.secretEnv ? { secretEnv: deps.secretEnv } : {}),
+    ...(deps.secretsPolicy ? { secretsPolicy: deps.secretsPolicy } : {}),
     ...(deps.fetchFn ? { fetchFn: deps.fetchFn } : {}),
   };
   const timeoutMs = scorerTimeoutMs(policy.timeout_ms);

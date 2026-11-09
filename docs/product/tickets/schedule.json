@@ -171,6 +171,11 @@
     },
     "W4": {
       "tickets": [
+        "X-24",
+        "X-29",
+        "X-31",
+        "X-32",
+        "X-41",
         "T4-10",
         "T4-11",
         "T4-14",
@@ -189,15 +194,53 @@
         "T8-7",
         "T9-4"
       ],
-      "count": 17,
-      "agent_days": 65
+      "count": 22,
+      "agent_days": 73
     },
     "W5": {
       "tickets": [
+        "X-103",
+        "X-104",
+        "X-111",
+        "X-88",
+        "X-80",
+        "X-85",
+        "X-102",
+        "X-101",
+        "X-87",
+        "X-75",
+        "X-76",
+        "X-78",
+        "X-105",
+        "X-112",
+        "X-106",
+        "X-77",
+        "X-79",
+        "X-114",
+        "X-107",
+        "X-82",
+        "X-86",
+        "X-90",
+        "X-91",
+        "X-92",
+        "X-93",
+        "X-94",
+        "X-95",
+        "X-96",
+        "X-97",
+        "X-98",
+        "X-99",
+        "X-100",
+        "X-83",
+        "X-84",
+        "X-121",
+        "X-122",
+        "X-126",
+        "X-127",
         "X-1"
       ],
-      "count": 1,
-      "agent_days": 1
+      "count": 39,
+      "agent_days": 69
     }
   },
   "tickets": {
@@ -1163,7 +1206,7 @@
         "T4-9"
       ],
       "file": "docs/product/tickets/t4/t4-10.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-11": {
       "title": "Targets and syncs as connections",
@@ -1177,7 +1220,7 @@
         "T4-10"
       ],
       "file": "docs/product/tickets/t4/t4-11.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-12": {
       "title": "Calendar: ICS feeds",
@@ -1221,7 +1264,7 @@
         "T4-12"
       ],
       "file": "docs/product/tickets/t4/t4-14.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-15": {
       "title": "Mail: IMAP",
@@ -1235,7 +1278,7 @@
         "T4-8a"
       ],
       "file": "docs/product/tickets/t4/t4-15.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-17": {
       "title": "Invitation and message requests",
@@ -1251,7 +1294,7 @@
         "T1-8"
       ],
       "file": "docs/product/tickets/t4/t4-17.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-18": {
       "title": "Compute",
@@ -1688,7 +1731,7 @@
         "T4-19"
       ],
       "file": "docs/product/tickets/t6/t6-12.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-13a": {
       "title": "Connections: list and detail",
@@ -1702,7 +1745,7 @@
         "T4-8a"
       ],
       "file": "docs/product/tickets/t6/t6-13a.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-13b": {
       "title": "Connections: add and configure",
@@ -1716,7 +1759,7 @@
         "T4-10"
       ],
       "file": "docs/product/tickets/t6/t6-13b.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-14": {
       "title": "Secrets and Variables",
@@ -1731,7 +1774,7 @@
         "T4-4"
       ],
       "file": "docs/product/tickets/t6/t6-14.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-15": {
       "title": "Live Capture and Sessions",
@@ -1746,7 +1789,7 @@
         "T3-9"
       ],
       "file": "docs/product/tickets/t6/t6-15.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-16": {
       "title": "Hot keys and the audit",
@@ -1760,7 +1803,7 @@
         "T5-2"
       ],
       "file": "docs/product/tickets/t6/t6-16.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T7-1": {
       "title": "Stop recomputing",
@@ -1854,7 +1897,7 @@
         "F-13"
       ],
       "file": "docs/product/tickets/t7/t7-6.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T7-7": {
       "title": "Live events in the PWA",
@@ -1923,7 +1966,7 @@
         "T8-2a"
       ],
       "file": "docs/product/tickets/t8/t8-3.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T8-4": {
       "title": "Retention and re-review",
@@ -1938,7 +1981,7 @@
         "F-6"
       ],
       "file": "docs/product/tickets/t8/t8-4.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T8-5": {
       "title": "The bar",
@@ -1953,7 +1996,7 @@
         "T5-5"
       ],
       "file": "docs/product/tickets/t8/t8-5.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T8-6": {
       "title": "The private tier",
@@ -1982,7 +2025,7 @@
         "T8-2b"
       ],
       "file": "docs/product/tickets/t8/t8-7.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T9-1": {
       "title": "Decisions, in shadow",
@@ -2039,7 +2082,7 @@
         "F-0"
       ],
       "file": "docs/product/tickets/t9/t9-4.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "T10-1": {
       "title": "One commit per act",
@@ -2219,7 +2262,7 @@
         "T4-2"
       ],
       "file": "docs/product/tickets/x/x-7.md",
-      "status": "in-review"
+      "status": "merged"
     },
     "X-8": {
       "title": "An agent's connection grants persist",
@@ -2451,7 +2494,7 @@
     "X-24": {
       "title": "Plan-tomorrow's test runs on its own clock",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W4",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -2460,7 +2503,7 @@
         "X-15"
       ],
       "file": "docs/product/tickets/x/x-24.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-25": {
       "title": "DB-backed suites survive file parallelism",
@@ -2472,7 +2515,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-25.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-26": {
       "title": "Linear's sync reads in a stable order",
@@ -2486,7 +2529,7 @@
         "T4-26"
       ],
       "file": "docs/product/tickets/x/x-26.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-27": {
       "title": "The router-policy test has no wall-clock bound",
@@ -2498,7 +2541,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-27.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-28": {
       "title": "The chat viewport test is deterministic",
@@ -2510,19 +2553,19 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-28.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-29": {
       "title": "Main's Mac fixtures match the recorder",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W4",
       "size": "M",
       "days": 2.5,
       "model": "opus",
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-29.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-30": {
       "title": "The recorder checks the values a contract depends on",
@@ -2541,26 +2584,26 @@
     "X-31": {
       "title": "The recorder's seeds are pinned to its clock",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W4",
       "size": "S",
       "days": 1,
       "model": "sonnet",
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-31.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-32": {
       "title": "A push carries Needs You only, and no text",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W4",
       "size": "M",
       "days": 2.5,
       "model": "opus",
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-32.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-33": {
       "title": "The PWA's last browser dialogs",
@@ -2674,7 +2717,7 @@
     "X-41": {
       "title": "An owner-door secret refuses a connection or agent grant",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W4",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -2683,7 +2726,7 @@
         "T2-13"
       ],
       "file": "docs/product/tickets/x/x-41.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-42": {
       "title": "An owner door is a grantee kind",
@@ -2777,7 +2820,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-48.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-49": {
       "title": "The brain's eager surface has headroom",
@@ -3133,6 +3176,1226 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-74.md",
+      "status": "merged"
+    },
+    "X-80": {
+      "title": "`metistry up` mints the recorder's control token",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T8-5"
+      ],
+      "file": "docs/product/tickets/x/x-80.md",
+      "status": "merged"
+    },
+    "X-81": {
+      "title": "Kept recordings have a list route",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-15",
+        "T8-4"
+      ],
+      "file": "docs/product/tickets/x/x-81.md",
+      "status": "todo"
+    },
+    "X-82": {
+      "title": "The Mac's meeting group decodes `group_id`",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T8-7"
+      ],
+      "file": "docs/product/tickets/x/x-82.md",
+      "status": "merged"
+    },
+    "X-83": {
+      "title": "The activity feed's capture subject reads the title only",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T8-6"
+      ],
+      "file": "docs/product/tickets/x/x-83.md",
+      "status": "merged"
+    },
+    "X-84": {
+      "title": "`POST /message` carries a session-turn marker",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T8-6",
+        "T6-15"
+      ],
+      "file": "docs/product/tickets/x/x-84.md",
+      "status": "merged"
+    },
+    "X-85": {
+      "title": "The targets shim comes out",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T4-11"
+      ],
+      "file": "docs/product/tickets/x/x-85.md",
+      "status": "merged"
+    },
+    "X-86": {
+      "title": "The Mac's Secrets pane hides Grant for an owner-door secret",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-41",
+        "T6-14"
+      ],
+      "file": "docs/product/tickets/x/x-86.md",
+      "status": "merged"
+    },
+    "X-87": {
+      "title": "The calendar collectors export `check()`",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-14"
+      ],
+      "file": "docs/product/tickets/x/x-87.md",
+      "status": "merged"
+    },
+    "X-88": {
+      "title": "The workspace test script isolates each package's database",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-88.md",
+      "status": "merged"
+    },
+    "X-89": {
+      "title": "A request raised while the console is down still pushes",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-32"
+      ],
+      "file": "docs/product/tickets/x/x-89.md",
+      "status": "todo"
+    },
+    "X-90": {
+      "title": "The hot-key and accessibility audits see what they miss",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-16"
+      ],
+      "file": "docs/product/tickets/x/x-90.md",
+      "status": "merged"
+    },
+    "X-91": {
+      "title": "The three-pointers test tolerates the device-local keys",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-16",
+        "T6-15"
+      ],
+      "file": "docs/product/tickets/x/x-91.md",
+      "status": "merged"
+    },
+    "X-92": {
+      "title": "Dispatch's `REPO_RE` has a misuse test",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T4-11"
+      ],
+      "file": "docs/product/tickets/x/x-92.md",
+      "status": "merged"
+    },
+    "X-93": {
+      "title": "`socketDestination` keeps IMAP's port",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T4-15"
+      ],
+      "file": "docs/product/tickets/x/x-93.md",
+      "status": "merged"
+    },
+    "X-94": {
+      "title": "The wizard's copy templates the configured name",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-12"
+      ],
+      "file": "docs/product/tickets/x/x-94.md",
+      "status": "merged"
+    },
+    "X-95": {
+      "title": "The Mac's loopback set matches core's",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-13a"
+      ],
+      "file": "docs/product/tickets/x/x-95.md",
+      "status": "merged"
+    },
+    "X-96": {
+      "title": "A connection's detail says who uses it and when it was checked",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-13a"
+      ],
+      "file": "docs/product/tickets/x/x-96.md",
+      "status": "merged"
+    },
+    "X-97": {
+      "title": "Variables: when it was set, the preview an agent sees, and a key's expiry",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-14"
+      ],
+      "file": "docs/product/tickets/x/x-97.md",
+      "status": "todo"
+    },
+    "X-98": {
+      "title": "Agents and Compute: the model line, the key note and the download",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-12",
+        "T6-5"
+      ],
+      "file": "docs/product/tickets/x/x-98.md",
+      "status": "merged"
+    },
+    "X-99": {
+      "title": "The phone's writable rows have controls",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T7-6"
+      ],
+      "file": "docs/product/tickets/x/x-99.md",
+      "status": "merged"
+    },
+    "X-100": {
+      "title": "The \"held to core\" Swift tests cannot drift",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-14",
+        "T6-5"
+      ],
+      "file": "docs/product/tickets/x/x-100.md",
+      "status": "merged"
+    },
+    "X-101": {
+      "title": "Bare `metistry doctor` resolves the product directory it runs from",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-101.md",
+      "status": "merged"
+    },
+    "X-102": {
+      "title": "The recorder leaves no fixed-id rows behind",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-31"
+      ],
+      "file": "docs/product/tickets/x/x-102.md",
+      "status": "merged"
+    },
+    "X-75": {
+      "title": "`metistry enroll` — an enrolment code minted on this Mac",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-75.md",
+      "status": "merged"
+    },
+    "X-76": {
+      "title": "Removing a device revokes its passkey",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-76.md",
+      "status": "merged"
+    },
+    "X-77": {
+      "title": "Settings ▸ Devices and the Add a Phone sheet",
+      "track": "X",
+      "wave": "W5",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-75",
+        "X-76"
+      ],
+      "file": "docs/product/tickets/x/x-77.md",
+      "status": "merged"
+    },
+    "X-78": {
+      "title": "The phone's half: enrol, install, sign in",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-78.md",
+      "status": "merged"
+    },
+    "X-79": {
+      "title": "The phone guide, and the website's copy re-checked",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-75",
+        "X-76",
+        "X-77",
+        "X-78"
+      ],
+      "file": "docs/product/tickets/x/x-79.md",
+      "status": "merged"
+    },
+    "X-103": {
+      "title": "The console's proxy listener — the local owner token never crosses a tunnel",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-103.md",
+      "status": "merged"
+    },
+    "X-104": {
+      "title": "Passkeys per origin — the rpID follows the request",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-104.md",
+      "status": "merged"
+    },
+    "X-105": {
+      "title": "`metistry remote` — the record, the adapter interface, and None",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-103",
+        "X-104"
+      ],
+      "file": "docs/product/tickets/x/x-105.md",
+      "status": "merged"
+    },
+    "X-106": {
+      "title": "The Tailscale adapter — Funnel by default, tailnet as the alternative",
+      "track": "X",
+      "wave": "W5",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-111",
+        "X-112"
+      ],
+      "file": "docs/product/tickets/x/x-106.md",
+      "status": "merged"
+    },
+    "X-107": {
+      "title": "Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access",
+      "track": "X",
+      "wave": "W5",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-106",
+        "X-112",
+        "X-77"
+      ],
+      "file": "docs/product/tickets/x/x-107.md",
+      "status": "merged"
+    },
+    "X-111": {
+      "title": "A console on the internet — rate limits and headers on the proxy listener",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-103"
+      ],
+      "file": "docs/product/tickets/x/x-111.md",
+      "status": "merged"
+    },
+    "X-108": {
+      "title": "The Cloudflare Tunnel adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-111",
+        "X-112"
+      ],
+      "file": "docs/product/tickets/x/x-108.md",
+      "status": "todo"
+    },
+    "X-109": {
+      "title": "The ngrok adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105",
+        "X-111"
+      ],
+      "file": "docs/product/tickets/x/x-109.md",
+      "status": "todo"
+    },
+    "X-110": {
+      "title": "The port-forwarding adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-111"
+      ],
+      "file": "docs/product/tickets/x/x-110.md",
+      "status": "todo"
+    },
+    "X-112": {
+      "title": "Provider tool packs — pinned, signed, fetched on choice",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105"
+      ],
+      "file": "docs/product/tickets/x/x-112.md",
+      "status": "merged"
+    },
+    "X-113": {
+      "title": "The zrok adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105",
+        "X-111",
+        "X-112"
+      ],
+      "file": "docs/product/tickets/x/x-113.md",
+      "status": "todo"
+    },
+    "X-114": {
+      "title": "Add a Phone sees the phone arrive — *Opened on your phone*",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-75",
+        "X-77",
+        "X-103"
+      ],
+      "file": "docs/product/tickets/x/x-114.md",
+      "status": "merged"
+    },
+    "X-115": {
+      "title": "Metistry Relay data plane — the PoC, then the instance",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-112"
+      ],
+      "file": "docs/product/tickets/x/x-115.md",
+      "status": "todo"
+    },
+    "X-116": {
+      "title": "Metistry Relay control plane — CDK, Lambda, DynamoDB, the ACME helper",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-115"
+      ],
+      "file": "docs/product/tickets/x/x-116.md",
+      "status": "todo"
+    },
+    "X-117": {
+      "title": "The Metistry Relay adapter — client, certificate, allowance",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105",
+        "X-111",
+        "X-112",
+        "X-116"
+      ],
+      "file": "docs/product/tickets/x/x-117.md",
+      "status": "todo"
+    },
+    "X-118": {
+      "title": "`u.metistry.app` on the Public Suffix List",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-118.md",
+      "status": "todo"
+    },
+    "X-119": {
+      "title": "Device-only relay addresses — one label per phone",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-75",
+        "X-77",
+        "X-104",
+        "X-116",
+        "X-117"
+      ],
+      "file": "docs/product/tickets/x/x-119.md",
+      "status": "todo"
+    },
+    "X-120": {
+      "title": "App Attest at relay registration — an extra layer",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-116",
+        "X-117"
+      ],
+      "file": "docs/product/tickets/x/x-120.md",
+      "status": "todo"
+    },
+    "X-121": {
+      "title": "The complexity fixtures, generated and blind-relabelled",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T9-3"
+      ],
+      "file": "docs/product/tickets/x/x-121.md",
+      "status": "merged"
+    },
+    "X-122": {
+      "title": "Doctor waits out a job it has just started",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-122.md",
+      "status": "merged"
+    },
+    "X-123": {
+      "title": "`metistry doctor` repairs what it finds",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-122",
+        "X-48"
+      ],
+      "file": "docs/product/tickets/x/x-123.md",
+      "status": "merged"
+    },
+    "X-124": {
+      "title": "`.env` is derived, never hand-edited",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-124.md",
+      "status": "in-review"
+    },
+    "X-125": {
+      "title": "Fix All in the Status window",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-125.md",
+      "status": "merged"
+    },
+    "X-126": {
+      "title": "The policy mirror's rename-revoke test is deterministic",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-126.md",
+      "status": "merged"
+    },
+    "X-127": {
+      "title": "Every terminal read behaves like `secrets set`",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-127.md",
+      "status": "merged"
+    },
+    "X-128": {
+      "title": "A session-start briefing: handles and the owner's text",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-130",
+        "X-131",
+        "X-133"
+      ],
+      "file": "docs/product/tickets/x/x-128.md",
+      "status": "merged"
+    },
+    "X-129": {
+      "title": "Plugins deliver the briefing at session start, on by default",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-128"
+      ],
+      "file": "docs/product/tickets/x/x-129.md",
+      "status": "merged"
+    },
+    "X-130": {
+      "title": "A repository maps to a project page",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-130.md",
+      "status": "merged"
+    },
+    "X-131": {
+      "title": "Last time in this repository",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-130"
+      ],
+      "file": "docs/product/tickets/x/x-131.md",
+      "status": "merged"
+    },
+    "X-132": {
+      "title": "`connections_call` folds a large answer",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-132.md",
+      "status": "merged"
+    },
+    "X-133": {
+      "title": "`connect claude-code` reads as well as writes",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-133.md",
+      "status": "merged"
+    },
+    "X-134": {
+      "title": "`connect --remove`, and a reconnect after a revoke",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-133"
+      ],
+      "file": "docs/product/tickets/x/x-134.md",
+      "status": "blocked"
+    },
+    "X-135": {
+      "title": "The Mac's accessibility text probes read macOS 27",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-135.md",
+      "status": "todo"
+    },
+    "X-136": {
+      "title": "The Mac tests wait on state, never on a count",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-28"
+      ],
+      "file": "docs/product/tickets/x/x-136.md",
+      "status": "todo"
+    },
+    "X-137": {
+      "title": "A fresh install's `up` applies the pending migrations",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-137.md",
+      "status": "todo"
+    },
+    "X-138": {
+      "title": "`init --shape launchd` prints a second instance's own ports",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-138.md",
+      "status": "todo"
+    },
+    "X-139": {
+      "title": "The fixture recorder's fixed work ids advance the sequence",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-139.md",
+      "status": "todo"
+    },
+    "X-140": {
+      "title": "Two DB-backed suites leave their siblings' rows alone",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-25"
+      ],
+      "file": "docs/product/tickets/x/x-140.md",
+      "status": "todo"
+    },
+    "X-141": {
+      "title": "Every capture attempt names its own file",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-141.md",
+      "status": "todo"
+    },
+    "X-142": {
+      "title": "The `.env` render's line hashes are keyed",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-124"
+      ],
+      "file": "docs/product/tickets/x/x-142.md",
+      "status": "todo"
+    },
+    "X-143": {
+      "title": "The hidden read restores the terminal in `finally`, and Ctrl-C is tested on `connect-repo`",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-127"
+      ],
+      "file": "docs/product/tickets/x/x-143.md",
+      "status": "todo"
+    },
+    "X-144": {
+      "title": "No fixture spells the assistant's name",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-144.md",
+      "status": "todo"
+    },
+    "X-145": {
+      "title": "The devices-pane stubs speak `enroll`'s current refusals",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-79"
+      ],
+      "file": "docs/product/tickets/x/x-145.md",
+      "status": "todo"
+    },
+    "X-146": {
+      "title": "`connect --remove`'s help names what it refuses",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-134"
+      ],
+      "file": "docs/product/tickets/x/x-146.md",
+      "status": "todo"
+    },
+    "X-147": {
+      "title": "A reconnected agent starts without its predecessor's declines",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-134"
+      ],
+      "file": "docs/product/tickets/x/x-147.md",
+      "status": "todo"
+    },
+    "X-148": {
+      "title": "An opted-out agent's briefing says so, not `tier: none`",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-128"
+      ],
+      "file": "docs/product/tickets/x/x-148.md",
+      "status": "todo"
+    },
+    "X-149": {
+      "title": "`GET /api/briefing` is bounded per bearer and answered from a short cache",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-128"
+      ],
+      "file": "docs/product/tickets/x/x-149.md",
+      "status": "todo"
+    },
+    "X-150": {
+      "title": "The briefing's marker directory is the user's own",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-129"
+      ],
+      "file": "docs/product/tickets/x/x-150.md",
+      "status": "todo"
+    },
+    "X-151": {
+      "title": "The CLI's slow tests declare their timeouts",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-151.md",
+      "status": "todo"
+    },
+    "X-152": {
+      "title": "M6 admits `doctor` by its exact form, not by prefix",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-123",
+        "X-125"
+      ],
+      "file": "docs/product/tickets/x/x-152.md",
+      "status": "todo"
+    },
+    "X-153": {
+      "title": "Doctor's restart fixer takes the path `metistry restart` takes",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-153.md",
+      "status": "todo"
+    },
+    "X-154": {
+      "title": "Doctor's rules 4, 7 and 9",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-154.md",
+      "status": "todo"
+    },
+    "X-155": {
+      "title": "Connection check stamps survive two writers",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-96"
+      ],
+      "file": "docs/product/tickets/x/x-155.md",
+      "status": "todo"
+    },
+    "X-156": {
+      "title": "`used_by` lists only who can reach a connection",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-96"
+      ],
+      "file": "docs/product/tickets/x/x-156.md",
+      "status": "todo"
+    },
+    "X-157": {
+      "title": "The compose shape carries every proxy-listener variable",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-111"
+      ],
+      "file": "docs/product/tickets/x/x-157.md",
+      "status": "todo"
+    },
+    "X-158": {
+      "title": "Linear's planner test resets what it `SET`",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-26"
+      ],
+      "file": "docs/product/tickets/x/x-158.md",
+      "status": "todo"
+    },
+    "X-159": {
+      "title": "The Add a Phone sheet cancels its code when its window closes",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-77"
+      ],
+      "file": "docs/product/tickets/x/x-159.md",
+      "status": "todo"
+    },
+    "X-160": {
+      "title": "The recorder's refusal of a non-scratch database has a test",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-160.md",
+      "status": "todo"
+    },
+    "X-161": {
+      "title": "The watchdog's all-ok test is deterministic",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-161.md",
+      "status": "todo"
+    },
+    "X-162": {
+      "title": "A namespaced instance's doctor names only its own ports",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-162.md",
       "status": "todo"
     },
     "X-1": {
@@ -3149,13 +4412,13 @@
     }
   },
   "totals": {
-    "tickets": 162,
-    "agent_days": 479.5,
+    "tickets": 205,
+    "agent_days": 555.5,
     "waves": 6,
-    "candidates": 51
+    "candidates": 96
   },
   "critical_path": {
-    "days": 35,
+    "days": 37.5,
     "path": [
       "F-3",
       "T4-1",
@@ -3164,20 +4427,17 @@
       "T4-8b",
       "T4-9",
       "T4-10",
-      "T4-11"
+      "T4-14",
+      "X-87"
     ]
   },
   "candidates": {
     "tickets": [
-      "X-24",
       "X-25",
       "X-26",
       "X-27",
       "X-28",
-      "X-29",
       "X-30",
-      "X-31",
-      "X-32",
       "X-33",
       "X-34",
       "X-35",
@@ -3186,7 +4446,6 @@
       "X-38",
       "X-39",
       "X-40",
-      "X-41",
       "X-42",
       "X-43",
       "X-44",
@@ -3219,9 +4478,59 @@
       "X-71",
       "X-72",
       "X-73",
-      "X-74"
+      "X-74",
+      "X-81",
+      "X-89",
+      "X-108",
+      "X-109",
+      "X-110",
+      "X-113",
+      "X-115",
+      "X-116",
+      "X-117",
+      "X-118",
+      "X-119",
+      "X-120",
+      "X-123",
+      "X-124",
+      "X-125",
+      "X-128",
+      "X-129",
+      "X-130",
+      "X-131",
+      "X-132",
+      "X-133",
+      "X-134",
+      "X-135",
+      "X-136",
+      "X-137",
+      "X-138",
+      "X-139",
+      "X-140",
+      "X-141",
+      "X-142",
+      "X-143",
+      "X-144",
+      "X-145",
+      "X-146",
+      "X-147",
+      "X-148",
+      "X-149",
+      "X-150",
+      "X-151",
+      "X-152",
+      "X-153",
+      "X-154",
+      "X-155",
+      "X-156",
+      "X-157",
+      "X-158",
+      "X-159",
+      "X-160",
+      "X-161",
+      "X-162"
     ],
-    "count": 51,
-    "agent_days": 75
+    "count": 96,
+    "agent_days": 157.5
   }
 }

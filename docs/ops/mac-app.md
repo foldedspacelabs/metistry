@@ -28,23 +28,27 @@ path.
   have landed. So have Work ▸ Board, with the card detail and a task's room
   ("Work ▸ Board" below), Work ▸ Projects and Work ▸ Artifacts.
 - **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
-  Runs `metistry doctor --json` and renders the rows to the design
+  Runs `metistry doctor --check --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
   grey and labelled "not configured", a summary line first ("26 ok · 1 degraded
   · 1 not configured") so the panel answers before it is read. The remediation
-  replaces the probe on any row that is not `ok`.
-- **Settings**, in the `Settings` scene: ⌘, and the app menu, seven panes —
-  Instance, Services, Connections, **Compute**, Secrets, Updates, Advanced.
+  replaces the probe on any row that is not `ok`. **Fix All** (X-125,
+  "Status: Fix All" below) repairs what doctor can fix; a your-hand row says so
+  and has no button.
+- **Settings**, in the `Settings` scene: ⌘, and the app menu, fourteen panes
+  in a grouped sidebar — Instance, Services, **Compute**, Updates · *Access:*
+  Account, Remote Access, Devices, Connections, Secrets, Variables ·
+  *Capture:* Live Capture, Sessions · Keyboard, Advanced.
   Every value on them is one of three things and the pane says which: a pointer
   the app remembers, a read-through of a file or a verb the CLI owns, or a
   labelled "not yet". The table below is the whole contract. Compute is the
   first pane that also **writes** — and it writes the only way anything in this
   product does, by running a `metistry compute` verb ("The Compute pane" below).
-- **The first-launch wizard.** A sheet over the plan's seven steps, shown when
+- **The first-launch wizard.** A sheet over eight steps, shown when
   no instance is selected and re-enterable from **Settings → Instance → Set up
   again…**. Back/Continue/Skip; each choice carries what it gets you and what it
   costs; every step shows the exact argument array *before* running the verb and
-  streams the CLI's own output. **All seven act:**
+  streams the CLI's own output. **All eight act:**
   1. `metistry runtime install --from <bundle> --to <product dir>` when this
      build is running out of its own read-only bundle (below).
   2. `metistry init`, or adopt a folder that already holds a `.metistry/identity.yaml`,
@@ -60,20 +64,23 @@ path.
      disabled until the preview has been on screen** — preview-then-confirm is
      the rule the CLI holds destructive verbs to, and a `--yes` reachable
      without the preview would be the app confirming on the user's behalf.
-  6. The door — **optional, and usually already done**: it opens with this
+  6. **Remote Access** — how a phone reaches this Mac, the guided flow of "Set
+     Up Remote Access" below (`remote status|set|test --json`, M20). It sits
+     between Services and the door because a phone needs somewhere to reach.
+  7. The door — **optional, and usually already done**: it opens with this
      Mac's sign-in state (`metistry console whoami --json`, "Signing in" below)
      and offers the console's enrolment code for a browser or a phone. The
      `ASAuthorization` path is still written and still runs the moment an
      install qualifies; the probe that measures why none does yet moved to
      Settings → Advanced.
-  7. **Compute** — pick a provider template, paste its API key into a secure
+  8. **Compute** — pick a provider template, paste its API key into a secure
      field, name a model, and the app runs `metistry compute providers add
      --from <template> --json` (key on stdin) then `metistry compute assign
      default <provider/model> --json`. "Skip: no engine yet" is a real
      choice, with its consequence on screen.
 
-  Steps 6 and 7 are the two that are **not** a `metistry` verb, so they own
-  their own screens rather than being forced through the generic run row
+  Steps 6, 7 and 8 are the ones that are **not** one `metistry` verb the
+  generic run row can show, so they own their own screens
   (`FirstRunStep.hasOwnScreen`, pinned by a test).
 - **The menu-bar item.** Its glyph is the worst *fault* across components.
   `absent` never drives it — a bridge that was never configured is not a fault,
@@ -110,13 +117,10 @@ path.
 
 | | why | what to do today |
 | --- | --- | --- |
-| **A native passkey** (wizard step 6) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none. **This stopped being step 6's problem on 2026-09-10**: this Mac needs no passkey at all | for a browser or a phone, the step's enrolment code — open the link here, or type it on the phone. Same `passkeys` row either way. The probe is under Settings → Advanced |
+| **A native passkey** (wizard step 7) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none. **This stopped being step 7's problem on 2026-09-10** (it was step 6 until X-107 put Remote Access before it): this Mac needs no passkey at all | for a browser or a phone, **Add a Phone…** — the step's and Settings ▸ Devices' sheet ("Add a Phone" below): a QR and a link, the code minted on this Mac. Same `passkeys` row either way. The probe is under Settings → Advanced |
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
-| **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
-| **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
-| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7), Work ▸ Projects (T6-8), Work ▸ Artifacts (T6-9) and Run detail (T6-10). Still to come: the rest of W3 (T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
-| **Attachments and live capture in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); the owner held audio and screen capture until the designer's floating action bar returns (#253), and the attachment chip, ⌘⇧A and the window's drop target are not built. The Capture menu's Ask · Note · To-do and Start/Stop Recording stay dimmed for the bar (T8) | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
-| **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
+| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen was its own ticket, and a row whose screen has not landed names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7), Work ▸ Projects (T6-8), Work ▸ Artifacts (T6-9), Run detail (T6-10) and Settings (T6-11, "The window" below) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
+| **Attachments in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); live capture is the floating bar's ("The floating bar" below — the #253 hold was lifted 2026-09-30, Q28), and the attachment chip, ⌘⇧A and the window's drop target are not built | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
 
 **Four things left this table on 2026-09-10**, and it is worth saying what
@@ -131,6 +135,11 @@ launchd agents); and "an instance id" (`metistry init` mints one into
 **A fifth left it on 2026-09-17**: registering the install's launchd agent
 through `SMAppService.agent(plistName:)`. The app does that now, and Settings
 has the toggle — "The install's agent, nested under the app" below.
+
+**Two more left it with X-77 (plan §2.22)**: minting an enrolment code and a
+QR code for the phone. `metistry enroll` is the verb (M19, X-75) and the app
+runs it; the QR is CoreImage's `CIQRCodeGenerator`, part of macOS, no
+dependency — "Add a Phone" below.
 
 An empty destination is not listed as a greyed-out placeholder. §3.15's
 distinction holds throughout: *empty* (nothing has happened) and *absent* (never
@@ -158,9 +167,14 @@ header** anywhere. The CLI is the one place that knows where
 `METISTRY_LOCAL_OWNER_TOKEN` lives, and it presents it over loopback without the
 value ever reaching this process — `ConsoleWhoami` has no field a token could
 land in. `apps/macos/tests/kit/console-sign-in-tests.swift` walks
-`apps/macos/sources` and asserts all of that: one file uses `URLSession`, no
-file sets a header other than `content-type`/`cookie`, no file names a Keychain
-API, and no file opens a file at all.
+`apps/macos/sources` and asserts all of that: one file uses `URLSession` for
+the console, no file sets a header toward it other than `content-type`/`cookie`,
+no file names a Keychain API, and no file opens a file at all. The one
+exception is the floating bar's door to the live-capture bridge on this Mac
+("The floating bar" below): two named files — a loopback-only transport that
+presents the recorder's control key, and one read-only Keychain query for that
+key — each held to its own rules by the same walk. The console's local owner
+token is still read by the CLI alone.
 
 **The five states, and what each says on screen.** Told apart by the CLI's exit
 code and by three phrases in its own message — never by the variable's name,
@@ -183,7 +197,7 @@ times: the Status panel's header (under the doctor summary, with `via`),
 Settings ▸ Account (the full card, with the remedy and the exact argument
 array), the menu bar (a second dot beside the `console` row, and the headline
 inside its submenu — a service being *up* and a service *knowing who you are*
-are different questions), and the wizard's step 6, which now leads with it.
+are different questions), and the wizard's door step, which now leads with it.
 
 **What the app can and cannot call.** It can ask who it is, and — since the
 data layer below — it can make any authenticated request the owner surface
@@ -220,7 +234,7 @@ screen that reached past the store would be the bug this section exists to name.
 | `ReachabilityGate` · `ConsoleAct` | `sources/kit/stores/reachability-gate.swift` | **O3 at the tool.** Every store request passes through it: the newest request's answer is recorded as the connection's reachability (a `401`, no process, no token → unreachable; any answer at all → reachable), and a **decision** is refused before it is sent while unreachable. `ConsoleAct` sorts a request by screen-18 §4's one rule per verb: a read always goes; an **append** — capture, tick, defer (the table's `key` rows) and a 👍/👎 — goes and may be kept by its composer; everything else is a decision, including any route the file does not name |
 | `SectionModel<Value>` | `sources/kit/stores/section-model.swift` | One section of a screen built on the §2.16 stores: `Section`'s state machine, the store read that fills it, `refreshIfDue` (a redraw is never a request), `topics` — the `EventTopic`s an event may name to mark it due (`invalidate()`), and while the stream is live a loaded section with topics waits to be told rather than asking on its clock — and registration with its session so an instance switch drops it |
 | `LiveEvents` · `EventTopic` | `sources/kit/stores/events-store.swift` | **The one live-changes subscription** (`ConsoleSession.events`, T5-7): `GET /api/events` held open over the session child, the last id heard (the console's cursor included), each event handed to the watchers of its topics — the catalogue's "the client refetches" column, one topic per store. `off` · `connecting` · `live` · `down(why)` · `unavailable(why)`; reopened on a backoff (3 s doubling to a minute) with `Last-Event-ID`; a `resync`, an unreadable frame, or a subscription with no cursor to resume from marks every watcher due |
-| `CLIManagementRunner` | `sources/kit/stores/management-runner.swift` | §2.2's verbs (M1–M18) as one `metistry` invocation each through `MetistryCLI`: the argument array `plannedArguments` shows is exactly what runs, a value rides stdin and never argv, and a command may not name its own `--product-dir`. **Not behind the gate** — M5 restarts a console that is down |
+| `CLIManagementRunner` | `sources/kit/stores/management-runner.swift` | §2.2's verbs (M1–M19) as one `metistry` invocation each through `MetistryCLI`: the argument array `plannedArguments` shows is exactly what runs, a value rides stdin and never argv, and a command may not name its own `--product-dir`. **Not behind the gate** — M5 restarts a console that is down |
 | `PinnedItem` · `PinnedItems` | `sources/kit/pinned-items.swift` | The sidebar's Pinned area: project · board · page · search · agent, reorderable and removable, filed in app preferences under `pinnedItems.<instance_id>` |
 
 Three rules the layer encodes rather than asks for:
@@ -323,7 +337,7 @@ ceremony, logout and push, all bound to a device session the Mac does not hold,
 and `/mcp` — are listed with their reasons in
 `apps/console/scripts/client-fixtures.mjs`. Two interfaces sit beside the
 stores: `ManagementRunner`, whose `ManagementCommand` can only hold one of
-§2.2's verbs (M1–M18 — the set is closed at the type; `CLIManagementRunner`
+§2.2's verbs (M1–M19 — the set is closed at the type; `CLIManagementRunner`
 runs it, T5-1), and `LiveCaptureClient`
 for the local live-capture bridge (T8). The bridge and its recorder job are
 `metistry up`'s (T8-2b; `docs/ops/cli.md`), not the app's: the app's
@@ -333,8 +347,14 @@ Security), holds the Microphone, Audio Capture and Screen Recording grants —
 and Settings ▸ Services shows the two doctor rows it adds, the recorder's
 `launchd:` job and the bridge's `live-capture` check. A recording's
 transcript reaches the console from the bridge through `POST /capture`, so
-the app sends nothing when a session ends. No capture UI is drawn here; the
-bar is T8-5's.
+the app sends nothing when a session ends. The bar is T8-5's ("The floating
+bar" below). *Window* and *Screen* (T8-3) are chosen in the system picker,
+which the recorder — not the app — presents, so the start the bar sends
+names only the mode and two switches (`{"mode":"window","app_audio":true,
+"microphone":true}`) — `LiveCaptureScope` has no case that could carry a
+window or display id; the bridge's `status` carries `senses` (`display`,
+`app_audio`, `microphone`) — the open streams the rail draws its display
+glyph from.
 
 The routes `ConsoleAPI` already spoke keep their names and typed replies. A
 reply the contract spells out field by field is typed; every other reply is a
@@ -542,7 +562,7 @@ registrars", for the signal and why it is launchd's answer rather than a marker
 file. `metistry doctor` reports the owner on the supervisor's row
 (`meta.registrar`, and in the probe text the Services pane renders).
 
-## Step 7: choosing compute, and what the app never stores
+## Step 8: choosing compute, and what the app never stores
 
 The step is a provider template, a model id and — where the provider needs one
 — an API key. It runs two verbs in order and implements neither
@@ -579,95 +599,260 @@ written down, not as a dead end — and Settings → Compute adds one later.
 
 ## The Compute pane
 
-Step 7 in miniature is the wizard's job. The pane is the rest of it: every
-`metistry compute` verb, with the file it edits never opened by this app.
+Settings ▸ Compute (T6-12; screen-15 §5.3, C130–C133) is one column, in the
+spec's order: **\<the assistant\> Uses** — one model and its effort, no
+fallback · **Providers** — one line each · **Your Models** — memory, disk, the
+search with Refresh, the catalogue · **Spending Limits** · **Advanced ▸ Tiers**
+(Q1). The model is `sources/kit/compute-model.swift`, the view
+`compute-view.swift`. The heading templates the name from `identity.yaml`;
+nothing in either file names the assistant.
 
-**Nine verbs, and no tenth thing.** `compute show`, `providers add|remove|test`,
-`models list|install|load|unload`, `assign`, `budget` — each with `--json`,
-each run as an argument array, each answered by decoding what came back
-(`sources/kit/compute-model.swift` lists them in one comment; the JSON shapes
-are `packages/cli/src/compute.ts`'s exported result types). The CLI writes
-`compute.yaml` as the **user**, through the reconciler, after re-parsing the
-result through core's schema — so a change this pane cannot express is a change
-the pane refuses to make up, and a change the CLI will not accept comes back as
-a refusal naming the field.
+**Reads are the client API, and only what it serves.** `GET /api/compute`
+(the providers with their switch, their one tag and whether the key each names
+is present; the assignments; T4-19's `limits`) and `GET /api/compute/catalogue`
+(every switched-on provider's catalogue, grouped by model — T4-18). The pane
+re-reads on open and on an instance switch; there is no file watcher and no
+cache.
 
-**The pane persists nothing.** There is no `UserDefaults` key for a provider, a
-model list or a budget; the editors are drafts of what is about to become
-arguments, seeded from the last `compute show --json` and re-seeded the moment
-it changes. `compute.yaml` is the record, and it is a §4.7 protected path.
+**Writes go through two doors, and §2.3 decides which.**
 
-**It re-reads on open, and there is no watcher.** The app watches no directory —
-it has no file watcher at all, which is the same rule that keeps the file
-*readers* out (`console-sign-in-tests.swift` walks `sources/` and asserts no
-file is opened anywhere). So a `compute.yaml` edited in a terminal shows up the
-next time the pane is opened or the instance is switched, and **Read Again**
-covers the pane that never closed.
+| Change | Door | How |
+| --- | --- | --- |
+| the assistant's model and effort; a tier's; adding and removing a tier | `POST /api/compute/assign`, `/unassign` | at once — reversible, and a phone may do it too (§2.3) |
+| a spending limit: the instance's, a provider's by the token | `POST /api/compute/budget` | Save on the row; an empty field is left as it stands |
+| a project's daily budget | `PUT /api/projects/:slug` | the same door the Projects pane uses |
+| Test | `POST /api/compute/providers/test` | at once; a 401/403 is *Key rejected* · Replace Key, anything else *Not answering* · Retry |
+| a provider's switch, its gear (base URL, which secret is its key, billing), Remove | `metistry compute providers set\|remove … --json` (M16) | **confirmed with the exact command** before it runs |
+| Install a Model…, Load, Unload | `metistry compute models install\|load\|unload … --json` (M17) | confirmed; disk and memory are said before Install; the CLI's own progress lines stream under *Downloading…* / *Loading into memory…* |
+| Add Provider… | `compute providers add` (key on stdin) — the wizard's step-7 model | the sheet shows both commands before its button runs them |
 
-**The key still only goes to stdin, because it is the same model.** The
-add-a-provider sheet is bound to `ComputeStepModel` — the *wizard's* step 7
-model, with three fields the wizard leaves alone (`--name`, `--base-url`, and
-whether the run also assigns the default). One model owns the key's path to a
-child process, so there is one place to read to know the app never puts it in
-argv, a file or a log. The first provider on an install with no engine assigns
-`default` in the same run; every later one does not, because adding a provider
-is not a decision to run every turn on it.
+A `ManagementCommand` cannot hold `compute assign` or `compute budget`, which
+is the point: inside the boundary is the API, the boundary itself is §2.2.
 
-**Prose and JSON come down the same pipe.** Most of these verbs narrate through
-the same `out()` the `--json` result goes to — `providers add` says where it
-filed the key, `assign` warns about a non-ZDR provider, `budget` says nothing
-enforces it yet, every protected write prints its own step lines — so stdout is
-lines of prose and *then* one pretty-printed object. `JSONValue.parseTrailing`
-is that one fact in one place. It is also why **install progress is real**: the
-GGUF download's byte counts and Ollama's pull lines arrive on stdout as they
-happen and are shown verbatim, rather than a progress bar claiming a percentage
-nobody reported.
+**A model is written one way everywhere.** `ComputeModelLine` — **name**
+maker · provider · tag, price on the right — is built in exactly two ways
+(a catalogue place, or a bare reference the catalogue does not hold) and
+drawn by one view (`ModelLineText`); the dropdowns' menus use the same words.
+`compute-pane-tests.swift`'s first test holds the dropdown, Your Models, a
+search result and a tier to the same line. Tags are *Local*, *Cloud*,
+*Subscription* — there is no *By token* tag.
 
-Belt-and-braces, as of the CLI's `--json` purity fix (`docs/ops/cli.md`):
-`parseTrailing` no longer has anything trailing to skip past — under
-`--json` the CLI itself now keeps every prose line (including the install
-progress above) off stdout and puts it on stderr instead — but the parser
-is left as it is, a second line of defense rather than a removed one.
+**A subscription's window is its limit.** The pane renders `limits` and
+decides none of it: a provider the server sends as `kind: window` shows its
+calls today and this month and no dollar field. Local providers with no limit
+set are left out of the list; they cost nothing.
 
-**Exit codes are not the whole answer.** `providers test` and `models install`
-exit 1 when the thing they tested or installed did not work, having printed a
-perfectly good `{"ok": false, …}`. The pane reads `ok` from the JSON when the
-JSON says, and from the exit code when it does not — otherwise a provider that
-answered 401 would read as "the command broke".
+**The state row (components-03 §2).** Empty: *No models match "zebra"*, and a
+provider that did not answer is named with Retry. Waiting: *Loading into
+memory…* and a download's own lines. Stale: *lmstudio's list is from
+yesterday*, from the catalogue's `read_at`. Failed: *Not answering* · Retry,
+*Key rejected* · Replace Key (which opens Settings ▸ Secrets — a key is one of
+this instance's secrets, never a field here), *Not running* from doctor's
+`local:` row, and disk and memory said before Install.
 
-**The non-ZDR badge, and why it is only a badge.** A provider that is
-`off_machine` and does not claim `zdr: true` is badged on its row and on every
-assignment that uses it. It is never blocked (C13): zero data retention is what
-the *provider* states about itself, copied into `compute.yaml`, and nothing any
-client could run verifies it. The engine records one warning row per run.
+**Drawn and not served (C138: said where it would be, never invented).** A
+model's size and *Fits this Mac*; a download's Cancel (the runner has no
+cancel); a provider's headers and data policy (`providers set` has no flag for
+either); removing a model (`compute models` has no remove verb); *Add* on a
+cloud place (nothing records "your" cloud models). Each is dimmed with its
+reason or said once in the section.
 
-**`assistant: absent` is said where it can be acted on.** Doctor decides that an
-install has no engine — the app does not — and the banner quotes doctor's own
-remediation. With no providers at all the one button opens the sheet; with a
-provider but no `assignments.default` it prepares the default's row and asks
-that provider for its model list. There is a second reason doctor says `absent`
-(a default whose key is unset), and the banner says *that* with **no** button,
-because nothing one click here does would fix it: `providers add` refuses to
-re-declare a provider that already exists, which is the CLI being right.
+**The provider switch is a checkbox.** SwiftUI on the Mac gives a `.switch`
+toggle's AppKit control no accessibility name — its label, `.accessibilityLabel`
+and a string title all leave it empty (measured) — and §2.18.7 fails an
+unlabeled control, so it is the platform checkbox, named for the provider.
 
-**The local models section reads doctor, not the servers.** The four
-`local:lmstudio|ollama|llamaserver|applefm` rows carry the URL probed, what is
-loaded, and the `compute.yaml` provider that dials it — so the pane runs no
-probe of its own (invariant 3). `absent` there is never a failure: a Mac that
-runs no local server is a supported install. Install is offered for the three
-Metistry has a mechanism for (`lms get`, Ollama's pull, a Hugging Face GGUF);
-Apple's Foundation Models get none, because there is nothing to pull.
-Load/unload is offered for LM Studio alone — the other two answer `noop` with
-the sentence about what actually governs their residency, and the pane prints
-that sentence instead of a tick it did not earn.
+**Memory is an estimate and says so every time.** `ProcessInfo.physicalMemory`
+less a reserve (a quarter, never under 4 GB) is labelled an estimate; the disk
+bar is the home volume's own figures (`volumeAvailableCapacityForImportantUsage`),
+where LM Studio, Ollama and the bundled server keep their models.
 
-**RAM headroom is an estimate and says so every time.**
-`ProcessInfo.physicalMemory` is how much memory the machine *has*, not how much
-is free; macOS compresses, caches and swaps, and the honest free figure changes
-second to second. The pane subtracts a reserve — a quarter of physical memory,
-never less than 4 GB — and labels the remainder an estimate, with "Not a
-measurement" in the same sentence. A model larger than it still loads; it is
-just slow, and that is the person's call.
+**`assistant: absent` is said where it can be acted on.** Doctor decides it.
+With no providers the banner's one button opens Add Provider…; with a provider
+the fix is the model dropdown already on the pane, so the banner has none.
+
+## The Connections pane
+
+Settings ▸ Connections (T6-13a, screen-09-resources.md §10.1–§10.4, plan
+§2.6). The model is `sources/kit/connections-model.swift`, the view
+`connections-view.swift`; it replaced the interim pane that listed doctor's
+bridge rows (those stay in `metistry doctor` and Services' problems).
+
+**Four served routes, and nothing else.** The list is `GET /api/connections`
+(with the installed connection types under `types`, T6-13b), one connection
+`GET /api/connections/:name` (its file and its provider's unit join the row),
+*Sent only to*, the grants and presence come from `GET /api/secrets`, and the
+names a `variable` field may pick from `GET /api/variables`. Every one carries names — header, query-parameter,
+environment and secret names — and never a value, so the pane has no field a
+value could live in. Nothing is dialled to draw it; a connection's
+`connection.health` event and a write to `.metistry/connections/`,
+`secrets.yaml` or `scheduled.yaml` (`config.changed`) re-read it while it has
+been opened. What the routes do not serve is not drawn: the last check, and
+the agents a connection is lent to (`used_by` serves syncs; *Nobody yet* is
+then the true answer).
+
+**The list** (§10.1): status · the name with its type's glyph · Type (*MCP ·
+By command*, or the provider for a known service) · Used By, with *Key
+expired* first in the failed ink when a key it names has passed its `expires`
+· a shield when it is offered to agents · a chevron. A row is one button that
+speaks all of it and opens the connection; *All Connections* goes back. The
+empty, failed (*Try Again*, the console's reason verbatim) and not-configured
+(503: no instance directory) states are the shared `StatePanel`.
+
+**One connection** (§10.3): how Metistry reaches it (URL, authentication,
+header and parameter names, timeout — or command, folder, environment names,
+runs on — or path), each secret as `{{ secret.name }}` with where it may be
+sent, each variable as `{{ variable.name }}`; *What it sends*; the offer
+switch; the tools under *Reads · Changes things · Starts an agent* (the CLI's
+`TOOL_GROUP_LABEL`, compared by a test), each with three buttons *Allow · Ask
+First · Never* that say the tool they set; Used By; and Test, with **Replace
+Key** when a key it names has expired or has no Keychain item (components-03
+§2) — which opens Secrets, because a value is typed there and nowhere else.
+
+**What it sends blocks, and never over-promises.** For an HTTP connection the
+destination is worked out exactly as core's `egressDestination` does — the
+host lowercased, and `host:port` unless the port is 443 (so plain http is
+`:80`) — and each secret is judged in the door's order: not on its *Sent only
+to* list (**blocked**, with *Allow <host>…*), plain http off this Mac
+(blocked), not granted to `connection:<name>` (blocked, with *Grant…*), no
+Keychain item (blocked); otherwise *Sent to <host>*, or *after you approve
+each call* for Ask First. A command's environment is *given to this command
+only*, and needs Allow (it is filled once, at start). A secret list that did
+not read, or a host that is a `{{ variable }}`, shows nothing as sent. One
+blocked secret blocks the preview. The preview is a drawing of the door's
+rule, not the rule: the door refuses on its own (`EgressRefused`), whatever
+this pane shows.
+
+**Every change is a §2.2 verb, confirmed.** A tool's mode is `metistry
+connections policy <name> <tool> allow|ask|never`, the offer switch `policy
+<name> --offer on|off`, Test `connections test <name>` (it dials, so its
+confirmation says what it starts), *Allow <host>* `secrets hosts <name>
+<every host on the list> <host>` (the verb replaces the list) and *Grant*
+`secrets grant <name> connection:<c> on` — each a `ManagementCommand` shown in
+`SettingsConfirmation` with its exact command, its answer the CLI's own last
+line in the pane's banner, and the pane re-read after it. No console route
+writes a connection (invariant 10).
+
+### Add Connection, and Configure (T6-13b, screen 9 §10.5)
+
+The editor is `connection-editor-model.swift` (the draft: what is chosen, what
+is still missing, and the one argument array it becomes) and
+`connection-editor-view.swift`; it is shown in the pane in place of the list
+from *Add Connection…*, and over one connection from *Configure…*.
+
+**Type first, then a known service or custom.** The eight types (§10.2) are
+tiles that say what each is. Then the **known services** for that type — the
+connection types `GET /api/connections` now lists under `types` (the product's
+`seed/connection-types/` and the owner's `.metistry/extensions/`, through the
+one registry, §2.7; each tagged *Known service* or *Extension*) — and
+**Custom**, configured by how it is reached (C118): **HTTP** (URL ·
+authentication *None · Bearer · Basic · API Key · OAuth* · headers), a
+**command** (the command line · environment · runs in a container), a **path**
+(folder or file · include and skip patterns), or a **mailbox** over IMAP
+(server · port · username · app password by name). A custom calendar, mail or
+tracker has nothing to run it and the editor says so (core's `NATIVE_REACH`);
+a known service offers only the reach classes and sign-in schemes its manifest
+declares.
+
+**A known service's form is rendered from its fields — no per-service Swift.**
+Each field's closed kind has one drawing: `text` and `url` a text field whose
+prompt is the default or the help; `choice` a picker of its options with the
+default named; `variable` a picker of the names `GET /api/variables` serves;
+**`secret` a picker of the names `GET /api/secrets` serves**, with *New
+Secret…* opening the Secrets sheet (the one place a value is typed, onto the
+CLI's stdin) — never a text field; `oauth` a note — the connection is signed
+in after it is written. The ticket's test loads a type with a field of every
+kind from an extension and checks exactly this.
+
+**What it sends, and the guards, on the draft.** The same `WhatItSends.of`
+that draws the detail draws the draft: a secret headed for a host outside its
+*Sent only to* list shows blocked on its row with *Allow <host>…* (M7,
+confirmed); a secret in the URL or on the command line is flagged (the CLI
+refuses both); a secret in a command's environment is *given to this command
+only*; a mailbox's app password goes to exactly `host:port`.
+
+**The button runs one verb, shown first.** The draft is exactly one argument
+array — `metistry connections add <name> --type … [--provider …] (--url … |
+--path … | --imap … | -- <command…>) [--auth …] [--header K=V]… [--config
+key=value]… [--description …] [--no-discover]`, or `connections set <name> …`
+with only what changed — in a `CommandCard` above *Add Connection* / *Save
+Changes*; the editor is the confirmation, as the Secrets sheet is. A secret
+field rides as `--config KEY=<name>`: a name, which the CLI turns into the
+`{{ secret.name }}` reference and refuses anything else (`docs/ops/cli.md`).
+`add` reaches the server once unless *Reach it once* is off (`--no-discover`;
+a mailbox and an OAuth connection are never dialled on add). A refusal keeps
+the editor open with the CLI's own line; success opens the connection. **Sign
+In…** on an OAuth connection is `metistry connections authorize <name>`,
+confirmed — the browser, one callback on 127.0.0.1, the sign-in into this
+instance's Keychain — and M13's verb table in `management-runner.swift` names
+it.
+
+## The Secrets and Variables panes
+
+Screen 19 and plan §2.14, built as T6-14 (`sources/kit/secrets-model.swift`,
+`secrets-view.swift`, `variables-model.swift`, `variables-view.swift`).
+
+**Read from the console, written through the CLI.** The lists are
+`GET /api/secrets` and `GET /api/variables` — routes that already existed, so
+the panes add no door (invariant 10). Every write is a §2.2 verb run as an
+argument array through the session's `ManagementRunner`: `metistry secrets
+set|replace|remove|hosts|grant` (M7) and `metistry variables set|unset` (M14),
+each with `--instance <dir>` so the command says which instance it changes.
+
+**A secret's value exists in the app for one keystroke's worth of time.** The
+rows the pane draws (`NamedSecret`) mirror the route's row — name, hosts,
+grants, expiry, presence, last used — and have no field a value could go in;
+the Value section is dots. The only place a value is typed is the New Secret /
+Replace sheet's `SecureField`, bound to `SecretDraft.value`. `saveSecret()`
+copies it into the command's standard input and clears the draft **before**
+the process starts; the command is a local that goes out of scope when the CLI
+returns. It is never an argument (the CLI takes it from stdin only), never in
+an outcome, a log line or a confirmation, and `SecretDraft` and
+`ManagementCommand` print, dump and interpolate as `<redacted>`. A refused
+save reopens the sheet with the name, hosts and expiry kept and the value
+field **empty** — the owner pastes it again rather than the app holding it
+across a failure. `secrets-variables-tests.swift` asserts all of it, and walks
+the pane's accessibility tree, every secret opened up, for the value.
+
+**Confirmed, naming the cost.** New Secret and Replace are confirmed by their
+sheet, which shows the exact command before its button runs it (an alert over
+a closing sheet is not reliably presented on the Mac). Save Hosts…, a grant and
+Delete… use the window's confirmation. **Delete… runs `secrets remove <name>
+--json` first** — without `--yes` it deletes nothing and names every file
+under `.metistry/` that references `{{ secret.<name> }}` — and the
+confirmation says what stops: each file as what it is (*the github connection
+(.metistry/connections/github.yaml)*, *agent triage (…)*), then anyone still
+granted it that no file named (*agent devin, granted Ask*).
+
+**A refused grant reads on its own row.** The pane checks no name, host or
+grantee — the CLI does. When it refuses a grant (X-41 will refuse a
+`connection:` or `agent:` grantee for a secret an owner door holds), its words,
+without the `metistry secrets grant:` prefix, sit under that grantee's On ·
+Ask · Off, which stays where the file has it; the next accepted change there
+clears them. Grantees are this instance's connections and agents (the
+assistant's own row and revoked ones left out) plus anyone the file grants —
+`provider:<name>` included, shown as spelled.
+
+**A key-shaped variable is refused with Store as Secret — and nothing else.**
+Screen 19 §2 drew *Save as Variable* beside it; the plan and T4-4's CLI refuse
+the value outright, and the plan wins, so no override is drawn. The app checks
+**first**, with `KeyShape` — core's `looksLikeKey`, pattern for pattern, held
+to core's own examples by a test that reads the file core's test reads
+(`packages/core/test/held-to-core/key-shape.json`) — because a value that reaches `variables
+set` is in that process's argv. While the value looks like a key the sheet
+draws no command at all; Save shows *This looks like a key. Variables can be
+read by agents.* with **Store as Secret**, which moves the name and value into
+New Secret and runs nothing until that sheet's own button. A key the copy
+misses is still the CLI's to refuse, and the sheet reads the same. The CLI's
+other refusals (a schedule or a time — ruling 2; a secret's name; a value
+equal to one of this instance's secrets) reopen the sheet in its words.
+
+**Not here yet:** *Preview as the agent sees it* (screen 19 §2) belongs with
+an agent's instructions; the Value section's *when set* has no field on the
+route to read it from; the *Devin's key expired* request (§1.2) is a Needs You
+body. *Metistry's own* is names only: rotating one is `metistry secrets` in
+Terminal, because §2.2's M7 lists `set`, `replace`, `remove`, `hosts` and
+`grant`, not `mint` or `sync`.
 
 ## Settings: persisted vs read-through
 
@@ -679,6 +864,7 @@ the CLI owns. The app persists three POINTERS and no configuration.
 | Active instance | `activeInstance` | Which install the app is looking at. Reaches every verb as `METISTRY_INSTANCE_DIR`. |
 | Recents | `recentInstances` | The eight it looked at before, most recent first. |
 | Developer runtime override | `developerProductDirectory` | A product checkout, for a build with no runtime bundled inside it. Settings → Advanced only. |
+| Shortcuts in any app | `anyAppShortcuts` | The one exception, and not a pointer: the switch and the five keys of Settings ▸ Keyboard (T6-16). Plan §2.2 makes global hot keys device-local — "no CLI and no API" — so there is no file for them to front. Written only when the owner changes one. |
 
 Sparkle's own preferences (`SUEnableAutomaticChecks`, `SULastCheckTime`) and
 AppKit's window frames live in the same domain and are *theirs*: the app keeps no
@@ -693,7 +879,7 @@ does not — and should not — see.
 
 **The window (T6-11, screen-15).** Settings is its own window, never a pane
 in the main one: a sidebar in four groups — *Instance · Services · Compute ·
-Updates*, **Access** (*Account · Connections · Secrets · Variables*),
+Updates*, **Access** (*Account · Remote Access · Devices · Connections · Secrets · Variables*),
 **Capture** (*Live Capture · Sessions*), *Keyboard · Advanced* — at a fixed
 **840 × 600** (a 200 pt sidebar, a 640 pt pane; the owner ruled it is not
 resizable, and the scene takes the view's size). Every pane is a vertical
@@ -732,37 +918,59 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Instance | the assistant: name, mention, mark, instance ID | `metistry identity --json` |
 | Instance | Edit… (name, mention, mark) | `metistry identity set --name --mention --mark` (M10, T2-16), only the fields that changed, **confirmed with the exact command** — a protected write through the reconciler, shown in Activity as a `config_write` run |
 | Instance | this instance: path, Choose…, Open in Finder, Set Up Again… | the persisted pointers above; Set Up Again re-enters the wizard |
-| Instance | namespace and ports | `doctor --json` → the `deployment` row's `meta.namespace` (`state/ports.yaml`); none said is the default labels and ports, which the app does not copy |
+| Instance | namespace and ports | `doctor --check --json` → the `deployment` row's `meta.namespace` (`state/ports.yaml`); none said is the default labels and ports, which the app does not copy |
 | Instance | Recent (up to eight, Forget) | the persisted pointers above |
 | Instance | History: the sync policy in force, branch, ahead and behind, the last commit, the last push and pull, any conflict | `GET /api/vault/status` (T10-2), **read only** — the policy is `deployment.yaml`'s `vault:` block, changed with `metistry vault settings` (M18); the pane names the verb and offers no field |
 | Instance | History: Roll Back… (the last commit, one commit, or a day) | `POST /api/vault/rollback` (T10-6) — raises a Needs You request with the preview and changes nothing; the sheet names what Approve would undo. Reach `local`: drawn and sent only while `GET /api/whoami`'s `via` is `local_owner_token` (ruling 7) |
 | Instance | linked instances: name, origin, capabilities, last seen — *Not seen for 3 days* past a day | `GET /api/instances` |
 | Instance | Link an Instance…, Refresh / Check Now, Remove | `metistry instances add <origin>` / `refresh` / `remove <id>` (M11) — add and remove confirmed; `instances.yaml` is a protected path |
-| Services | Doctor: Run Doctor, each problem with its fix, checks passed | `doctor --json` — a failed or degraded row, or a not-configured one that carries an `action` (T4-21). The fix is the row's `action`: open Secrets, open System Settings, open a `logs` verb in the Log window, or run a §2.2 verb **after a confirmation naming it**; any other argv is shown with Copy |
-| Services | the supervisor (launchd or Docker Compose), Restart All, Stop All | `doctor --json` → the `supervisor` / `compose` row; `metistry restart\|stop --json` (M5), both confirmed |
+| Services | Doctor: Run Doctor, each problem with its fix, checks passed | `doctor --check --json` — a failed or degraded row, or a not-configured one that carries an `action` (T4-21). The fix is the row's `action`: open Secrets, open System Settings, open a `logs` verb in the Log window, or run a §2.2 verb **after a confirmation naming it**; any other argv is shown with Copy |
+| Services | the supervisor (launchd or Docker Compose), Restart All, Stop All | `doctor --check --json` → the `supervisor` / `compose` row; `metistry restart\|stop --json` (M5), both confirmed |
 | Services | one line per service: state, uptime or reason, port; Restart · Stop · Log | the `deployment` row's plan, matched to the `child:`, `compose:`, `launchd:…` and manifest rows by name — the worst state, `meta.uptime_sec`, the remediation verbatim; `metistry restart\|start <svc> --json` at once, `stop <svc>` confirmed, `logs <svc>` in the Log window |
 | Services | Start at Login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
 | Services | Run in the Background | `SMAppService.agent(plistName:)` on the plist sealed in this bundle — the install's ONE background item; macOS keeps this registration too (above) |
 | Services | Keep this Mac Awake; Allow sleep on battery; Allow sleep when the lid is closed | `metistry deployment --json` → `keep_awake_setting` (the object form, T4-20); whether it holds and whether the lid half is in effect from doctor's `keep-awake` row (`lid_closed`) |
 | Services | changing a switch | `metistry deployment set-keep-awake --enabled\|--sleep-on-battery\|--sleep-lid-closed true\|false --yes` (M4), confirmed with what the value it becomes costs. Turning the lid switch off opens **the lid dialog, which runs nothing** (below) |
-| Compute | providers, their base URL, locality, ZDR claim and whether the key each NAMES is present | `metistry compute show --json` |
+| Compute | the assistant's model and effort, the tiers, the providers (switch, tag, key present), spending limits (instance, provider, project) | `GET /api/compute` — `limits` from T4-19 |
+| Compute | Your Models, the search grouped by model, Refresh | `GET /api/compute/catalogue[?q=…][&refresh=true]` (T4-18) |
+| Compute | the model and effort, a tier, a spending limit, Test | `POST /api/compute/assign\|unassign\|budget\|providers/test`, at once (§2.3); a project's budget `PUT /api/projects/:slug` |
+| Compute | a provider's switch, gear, Remove | `metistry compute providers set\|remove <name> … --json` (M16), **confirmed with the exact command** |
 | Compute | Add Provider… (template, name, base URL, key) | `metistry compute providers add --from <t> [--name] [--base-url] --json`, **key on stdin** |
-| Compute | Test / Remove, per provider | `metistry compute providers test\|remove <name> --json` |
-| Compute | assignments: default, each tier, each `crew:<name>` — provider, model, effort | `metistry compute assign <target> <provider/model> --effort <e> --json`; the model picker is `metistry compute models list --provider <name> --json` |
-| Compute | budgets: the instance's and each provider's — daily, monthly, action | `metistry compute budget <instance\|provider:<name>> [--daily] [--monthly] --action … --json` |
-| Compute | the local model servers, with what each has loaded | `doctor --json` → the `local:lmstudio\|ollama\|llamaserver\|applefm` rows |
-| Compute | install a model; load / unload (LM Studio only) | `metistry compute models install\|load\|unload <provider/model> --json` |
-| Compute | RAM headroom | `ProcessInfo.physicalMemory` minus a documented reserve, **labelled an estimate** — nothing here reads free memory |
+| Compute | Install a Model…, Load, Unload (LM Studio only) | `metistry compute models install\|load\|unload <provider/model> --json` (M17), confirmed; disk and memory said first |
+| Compute | the local model servers and whether each is running | `doctor --check --json` → the `local:lmstudio\|ollama\|llamaserver\|applefm` rows |
+| Compute | memory and disk | `ProcessInfo.physicalMemory` less a documented reserve, **labelled an estimate**; the home volume's own capacity figures |
 | Account | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
-| Account | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
-| Connections | bridges | `doctor --json` → the `bridge` rows, until T6-13a's pane |
-| Secrets | names, scope, and the account each was found under | `metistry secrets list --json` — names only; the verb has no code path that can print a value, and neither has the pane |
-| Variables, Live Capture, Sessions | what the pane will hold, and the verb that does it today | not built yet (T6-14, T6-15): a sentence, never a dead end (C138) |
+| Account | instance repo status, HEAD, queue depth | `doctor --check --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
+| Remote Access | the choice and mode, the address, `METISTRY_ORIGIN`, the provider's doctor rows with *Checked <when>* | `metistry remote status --json` (M20, plan §2.23) through the management runner — the `remote:` record, the rendered origins, the chooser's rows and doctor's `remote` rows in one read ("Set Up Remote Access" below) |
+| Remote Access | Change… | the guided flow as this window's sheet — `remote set <provider> [flags] --json` for the preview, `… --yes --json` for the ceremony, `remote test --json` for the check; its Add a Phone… closes the sheet and opens Devices' |
+| Remote Access | Test | `metistry remote test --json` — step 6, said as *answers from this Mac* |
+| Remote Access | Turn Off | `metistry remote off --json` first (the preview: what the provider's revoke would undo, what is left for you at the provider, which phones stop signing in), shown as the confirm's costs (C136); only Turn Off runs `remote off --yes --json` |
+| Devices | the devices: a passkey each — label, added, last seen, *This device*, its sessions and whether notifications are on; *Added for old.example.com. Remove it and add this phone again.* on a passkey whose `rp_id` is not a configured origin's host (X-107) | `GET /api/devices` (§2.22, X-76), refetched on `run.finished` events of kind `auth`; the configured hosts are the Remote Access pane's one `remote status --json` read |
+| Devices | Remove | `POST /api/devices/:id/revoke` with the route's default scope (`{}`): the passkey and every session under it, their push subscriptions dropped — **confirmed, naming the device** (C136); a removed phone is set up again as a new device |
+| Devices | Sign Out Everywhere | the same door with `{scope: "sessions"}` once per signed-in device, the caller's own last; passkeys kept — confirmed, listing the devices. Off, with its reason, when no device is signed in |
+| Devices | Add a Phone… | the sheet ("Add a Phone" below): `metistry enroll --json` (M19) through the management runner, the QR drawn here; `metistry enroll --status <code_id> --json` for *Opened on your phone* (X-114); `metistry enroll --cancel <code_id>` when the sheet closes or Make a New Code is pressed. **No console route mints a code** |
+| Connections | the list: status, name and type, Used By (*Nobody yet*), *Key expired*, the offer shield | `GET /api/connections` and `GET /api/secrets` — names, never a value ("The Connections pane" above) |
+| Connections | one connection: how it is reached, its secrets with *Sent only to*, *What it sends*, the tools by group, Used By | `GET /api/connections/:name` and `GET /api/secrets`; *What it sends* is worked out from them as core's egress door would, and nothing is dialled |
+| Connections | a tool's mode, the offer switch, Test | `metistry connections policy <name> <tool> allow\|ask\|never`, `policy <name> --offer on\|off`, `connections test <name>` (M13), each **confirmed with the exact command** |
+| Connections | *Allow <host>*, *Grant* on a secret's row; Replace Key | `metistry secrets hosts <name> <hosts…>` / `secrets grant <name> connection:<c> on` (M7), confirmed; Replace Key opens Secrets |
+| Connections | Add Connection…: the type, a known service (its fields, rendered from its manifest) or custom (HTTP · command · path · mailbox), *What it sends* | `GET /api/connections` → `types` (the installed connection types, fields by kind), `GET /api/secrets` and `GET /api/variables` for the names a field may pick; then `metistry connections add … [--config KEY=VALUE]…` (M13), the whole command shown before the button runs it ("Add Connection, and Configure" above) |
+| Connections | Configure…, Sign In… | `metistry connections set <name> …` with only what changed; `connections authorize <name>` (M13), confirmed |
+| Secrets | name · Used by · Sent only to · last used or *Expired*; per secret its Value (dots), Sent Only To and Who May Use It | `GET /api/secrets` — never a value; the grantees offered are `GET /api/connections` and `GET /api/agents` plus whoever the file already grants ("The Secrets and Variables panes" below) |
+| Secrets | New Secret…, Replace…, Save Hosts…, a grant's On · Ask · Off, Delete… | `metistry secrets set\|replace <name>` with the value **on stdin**, `secrets hosts\|grant\|remove` (M7) — each shown with its exact command first |
+| Secrets | *Metistry's own* (collapsed): names, scope, and the account each was found under | `metistry secrets list --json` — names only; rotating one is a Terminal step, not an M7 verb |
+| Variables | name · value · used in; New Variable…, Edit…, Remove… | `GET /api/variables`; `metistry variables set\|unset` (M14), shown with its exact command first |
+| Live Capture | Show the floating bar; which edge (left or right, drawn); which display | `CaptureBarPreferences` — device-local, like Keyboard's shortcuts (`captureBar` in the app's defaults; docs/ops/client-api.md "Device-local"). The bar's window reads it: the rail sits on that edge of that display and panels open toward the screen; **off means no bar**, whatever the bridge says. Absent, not off, without the bridge: the bar's own client says `.absent` and the pane is the absent state — no switch, no grants, no count |
+| Live Capture | Microphone · Audio Capture · Screen Recording — *Approved*, *Not yet asked*, *Not approved*, *Not yet verified* | the recorder's own `check()` words through the bar's client (`LiveCaptureClient.grants`, bridge `GET /check`); **whether, not when**, and a read-through — Open System Settings is the only control, and it grants nothing. A bridge that refuses this Mac's key is present, and the pane says so in the client's words (which name the fix) |
+| Live Capture | What the assistant keeps: audio, transcript, notes | the rulings (plan §2.15, Q7, C91), templated with the assistant's name; **no path** |
+| Live Capture | the recordings and the amount kept; Purge Now | the transcripts under `Journal/Transcripts/` (`GET /api/knowledge/pages?prefix=…`) name the recordings; `GET /api/recordings/:id` (T8-4) says of each whether the audio is kept, how much and until when. Purge Now confirms first, naming each recording (C136), then sends the bridge's `POST /recording/purge` once per kept recording through `LiveCaptureClient.purge` — the sixth `LiveCaptureRoute`, the control credential, the one route the bar itself never sends. Off, with the client's reason, while the recorder cannot be asked |
+| Sessions | Let the assistant learn from them | `GET /api/scheduled/routines/session-fold`'s `paused`, flipped with `POST …/pause` and `…/resume` at once — reversible (C136) |
+| Sessions | Keep sessions | `GET /api/scheduled/routines/session-purge` → `config.retention_days` with its origin (*30 days (default)*); no client door writes a routine's config, so the row says where it is set (the routine's own configuration) and offers no field |
+| Sessions | Purge Now, with the count beside it | `POST /api/sessions/purge` (T3-9, reach `local`): `{confirm: false}` on open and after every act — the count (*2 sessions · 3 turns*, *1 not folded yet*) and the unfolded sessions; pressing Purge Now opens a `CostConfirmView` that **lists the unfolded sessions and offers Fold First** (C136) — Fold First is `POST /api/scheduled/routines/session-fold/run` then the preview again; only Purge Now sends `{confirm: true, as_of: <the preview's>}`, so exactly what was counted is deleted. Off, with its reason, for a client that is not the Mac |
 | Updates | this app: version, channel, automatic checks, Check Now | Sparkle, which owns those preferences itself |
 | Updates | the runtime: running version, channel, instance pin | `metistry version --json` → `product_version`, `lock.channel`, `lock.version` |
 | Updates | a newer runtime | `release.available` on `GET /api/events` (T2-18), heard while the app is open — nothing serves it otherwise, so the row says *none announced since the app opened* |
 | Updates | Update Runtime…, Roll Back… | `metistry update` / `metistry update --rollback` (M2), confirmed; Roll Back only on the release channel, which keeps the previous release. A failure is the CLI's own last line, with View Log |
-| Keyboard | Shortcuts in any app, and the five | components-02 §2's suggestions, **off and dimmed** until T6-16 registers them — nothing is registered; Show All opens Help ▸ Keyboard Shortcuts (⌘/) |
+| Keyboard | Shortcuts in any app, and the five | the app's own `anyAppShortcuts` default — device-local (plan §2.2), off until the owner turns it on; each row a recorder, checked as it is set, and registered with `RegisterEventHotKey` only once every row is clear ("Hot keys and the audit" below). Show All opens Help ▸ Keyboard Shortcuts (⌘/) |
 | Advanced | runtime from (Releases · Git checkout), located, command, product folder | the pin's channel, and the runtime locator (below) |
 | Advanced | product and runtime-pack versions, instance pin | `metistry version --json` |
 | Advanced | developer override | the persisted pointer |
@@ -797,6 +1005,111 @@ and `SecretListing` in `packages/cli/src/secrets.ts` is camelCase (`inKeychain`,
 `foundUnder`). The readers accept both spellings of a two-word key rather than
 guessing one and blanking a pane over a convention. That is a reader-side
 tolerance, not a wire contract: the shape is the CLI's.
+
+## Set Up Remote Access
+
+The wizard's step 6, **Remote Access** (between Services and Door), and
+Settings ▸ Remote Access ▸ **Change…** present one flow
+(`sources/kit/remote-access-flow.swift` over `remote-access-model.swift`; plan
+§2.23, X-107) — the plan's seven steps: choose · get the tool · sign in ·
+approve · expose · check · Add a Phone. The app runs **three verbs and nothing
+else**, each through the management runner's M20 row:
+
+| the flow | runs | shows |
+| --- | --- | --- |
+| 1. Choose | `metistry remote status --json` | *How should your phone reach this Mac?* — the CLI's `choices` in the plan's order, **None** preselected, *Tailscale — Any browser (Funnel) — Recommended*; a provider whose adapter has not shipped is listed and says *Not yet available*. Tailscale adds its mode (*Any browser (Funnel)* · *Only my devices (tailnet)*) and *Use the Tailscale app already on this Mac* (`--use-app`). Each change of choice re-runs the preview below |
+| the preview | `metistry remote set <provider> [flags] --json` (no `--yes`: read-only on the CLI side — `detect`, and a dry `revoke` of the old provider) | whether the tool is here and signed in, the address, *Set-up would:* the CLI's `would_change` lines, and — for a switch — the CLI's `stranding` sentence and what the old provider's revoke would undo. The one button is the act: **Set Up Tailscale**, or **Switch to Tailscale** |
+| 2–5. Get the tool, sign in, approve, expose | `metistry remote set <provider> [flags] --yes --json`, streamed, cancellable (the process ends with the task) | where the CLI is, read from the lines it prints to stderr under `--json` (`RemoteFlowProgress`): *fetched Metistry's Tailscale pack* → get the tool; *sign in to Tailscale at: <url>* → sign in; *Tailscale asks you to approve Funnel … one click at: <url>* → approve; *Waiting for <name> to appear on the internet* and *waiting for <origin> to answer from this Mac* → expose. Every link the CLI printed is offered to open again. The CLI opened the browser itself; completion (`BackendState` reaching `Running`) is the CLI's reading, never the app's |
+| 6. Check | `metistry remote test --json` | the rows, and *<origin> answers from this Mac* — **never worded as reaching the phone** (§2.23: a Mac on the same tailnet may reach a Funnel name over the tailnet); tailnet mode adds *Your phone must be signed in to the same Tailscale account.* A failed row shows its doctor sentence; a failed `set` shows the CLI's last line and the not-ok rows of `remote status --json` |
+| 7. Add a Phone | — | **Add a Phone…** is offered only once the check passed: the wizard opens step 7's sheet; the pane's sheet closes and Devices' opens |
+
+**The switch confirms, naming the cost (C136).** Choosing a provider while
+another is in place puts a `CostConfirmation` in front of `--yes`: the
+preview's `stranding` sentence first (*phones added under <old origin> stop
+working once this changes…*), then what the old provider's revoke would undo
+and what is left for the owner at the provider — the CLI's words, never the
+app's. A first set-up from None runs on its button; the preview card was the
+informed half. The switching ceremony itself — configure, wait for the new
+origin to answer from this Mac, the protected write, revoke the old — is the
+CLI's (`docs/ops/remote-access.md`, "Switching"); the app drives and shows it.
+
+**The door is a closed grammar (invariant 10).** `ManagementRow.remoteAccess`
+(M20) does not accept "anything starting with `remote`":
+`RemoteAccessArgv.accepts` names the exact shapes — `remote status --json`,
+`remote test --json`, `remote off [--yes] --json`, `remote set <provider>
+[that provider's flags] [--yes] --json` — no wider than what the app runs:
+each flag at most once, each value from a known list or a bare name, nothing
+positional after the provider, `--json` always. `remote authorize` is not
+admitted (the flow does not run it; X-106's `configure` signs in), so
+doctor's *Sign in to Tailscale* action is shown in Services with Copy, like
+any argv outside the door. **A pasted token never reaches argv**:
+`RemoteSetPlan` writes it to the command's standard input with `--token` as
+the bare switch, and `--token <value>`, `--token=<value>` and a value after
+the provider's name are refused by the type. `tests/kit/remote-access-tests.swift`
+holds the whole flow to it: None preselected and Continue satisfies the step;
+Add a Phone is not offered before the check passes; the check is never worded
+as reaching the phone; a pasted token never reaches argv; Turn Off's confirm
+names what revoke undoes; each step's failure shows its doctor sentence; and
+every `remote` argv outside the grammar is refused.
+
+**Satisfying the wizard's step.** Continuing with None satisfies it — an
+install that exposes nothing is correct — as does a provider the flow set up
+here. A provider chosen but not set up leaves the step optional: Continue and
+Skip both stay open, as for the door and compute.
+
+## Add a Phone
+
+Settings ▸ Devices ▸ **Add a Phone…**, and the wizard's step 7, open one sheet
+(`sources/kit/add-phone-sheet.swift` over `add-phone-model.swift`; plan §2.22,
+X-77). It runs `metistry enroll --json` — M19, a `ManagementCommand` through
+the session's `ManagementRunner`, like every other management verb — because
+**no HTTP route mints an enrolment code**: shell access to this Mac is the
+root of trust for a first passkey (plan §4.2), and the app never asks the
+console for one. The sheet's states, in order:
+
+1. **Checking** — the verb is running.
+2. **Refused** — the CLI refused *before* minting (a loopback host, which is
+   every install's default; `http:`; an IP literal; an origin this Mac cannot
+   reach or that names another instance): its own words, the fix it names,
+   **Learn How** (the phone guide), and **no QR**. Nothing was minted, so
+   closing cancels nothing.
+3. **Ready** — the QR, the URL (selectable, **Copy Link**), *Your phone must
+   be able to open <host>*, and *Expires in 9:41* counting down; **Make a New
+   Code** cancels the old one first.
+4. **Opened on your phone** (X-114) — `metistry enroll --status <code_id>
+   --json` says the console saw this code's `POST /auth/enroll/start` arrive
+   **through the proxy listener**: *Your phone reached this Mac through
+   <provider>*. Only `proxy` counts — a `main` stamp is the owner opening the
+   link on this Mac and never shows. The code is still live (it is not used
+   until the phone adds itself).
+5. **Expired** — the QR is replaced, not dimmed, by *This code expired*; if no
+   phone ever reached the proxy listener it adds *Your phone didn't reach
+   <origin>. Open it in Safari on your phone with Wi-Fi off to see what it
+   says.*
+6. **Added** — `GET /api/devices` shows a passkey that was not there when the
+   sheet opened: *“iPhone” was added*, with the label the phone chose.
+
+Both reads — the devices list and the code's status — are made on `run.finished`
+events of kind `auth` (the console audits the stamp as one) and by a fallback
+poll that wakes every 5 s, does nothing while the stream is live, and ends with
+the sheet (`close()` cancels it and waits for it). The poll's sleep and the
+stream's liveness are injectable, so its tests step it with no clock.
+
+**Closing the sheet in any state cancels a code that is still live**
+(`metistry enroll --cancel <code_id> --json` — the id, never the code), so a
+QR left on screen or in a screenshot is dead the moment the owner is done.
+That includes the Settings window or the wizard closing under the open sheet:
+the sheet's view going away asks the presenter to close it, as Done does. (A
+quit of the whole app with a sheet open is not covered; the code dies at its
+ten minutes.)
+The QR is CoreImage's `CIQRCodeGenerator` (error correction M), scaled by an
+integer factor with nearest-neighbour sampling so the modules stay sharp, a
+four-module quiet zone in the bitmap, dark on light in both appearances;
+VoiceOver reads it as *QR code for adding a phone* with the URL as its value.
+`tests/kit/devices-pane-tests.swift` holds the sheet to all of it: a refused
+origin draws no QR, closing in every state cancels a live code, the QR
+decodes (`CIDetector`) to exactly the verb's URL, and the countdown reaches
+Expired on an injected clock.
 
 ## The shell
 
@@ -951,6 +1264,55 @@ publishes `shellListFocus()`** — a bare key in the main menu is taken before a
 text field sees it, and even a dimmed item swallows its key, so the key is not
 there at all otherwise.
 
+**Hot keys and the audit (T6-16, `hotkeys.swift`).** Every key the app binds
+is a row of one closed table. The menus are `ShellCommand`; components-02 §1's
+per-screen table is `ScreenKeys`, and each of its keys says how it is bound —
+a menu item, a focused view's handler in a named file, macOS itself — or that
+it is **not bound, and why**: Any list's *Space select* (Space is Item ▸
+Complete), Today's Space, ⇧⌘P and ⌘C, Activity's ⌘R, and Agents' ⌘S and ⌘⌫
+(W2 ruling 24). Help ▸ Keyboard Shortcuts prints that reason under the row,
+so a documented key never silently does nothing; it also lists *Everywhere*
+(↩ and Esc in a sheet, ⌘↩ in New Capture, ← → on a row that folds, ⌘, and ⌘Q
+in the menu bar item) and *In Any App* (the five as they stand).
+`KeyTable.sites` is every `.keyboardShortcut(`, `.onKeyPress(`,
+`.onExitCommand` and `RegisterEventHotKey(` in `sources/`, and
+`hotkeys-tests.swift` scans the sources — comments and string literals
+blanked — and fails on a binding the table does not list, or a row nothing
+binds. Event monitors and event taps are not in the table, so they cannot
+land. The audit removed one key: Chat's bare `/` (screen 1 §6) is not in
+components-02's table, so it is not bound.
+
+*Shortcuts in any app* (C120, C127) is Settings ▸ Keyboard: one switch, off by
+default, and the five — Ask, Note, To-do, Start Recording, Stop Recording —
+suggested on ⌃⌥⌘ A N T R S. Each row is a recorder (*Record Shortcut* ·
+*Press a shortcut…* · the keys with ×; Esc cancels). A row is checked as it
+is set: it needs two of ⌃ ⌥ ⌘ (⌘ alone is every app's menus), it must not be
+one of this app's menu keys or another row's, it must not be one of macOS's
+own (the `com.apple.symbolichotkeys` domain, read and never written, over
+macOS's defaults — *macOS uses this to …*, a warning), and then it is
+registered: `RegisterEventHotKey`'s `eventHotKeyExistsErr` is *Another app
+already uses this. Pick another.* **Nothing registers until every row is
+clear** — a pass that meets a refusal takes back every key it registered —
+and off, or a row recording, means nothing is registered at all. A press runs
+the Capture item through `ShellModel.perform`, so a hot key can light nothing
+the menu could not; a row whose item nothing answers now (the capture bar
+lights them only while the live-capture bridge answers) says so on the pane
+and beeps. The Carbon call is the app target's
+(`sources/app/carbon-hot-keys.swift`); the decision is the kit's
+(`AnyAppShortcutsModel`), tested through a fake registrar. The switch and the
+keys are the app's one device-local setting (`AppPreference.anyAppShortcuts`,
+written only when the owner changes one): plan §2.2 lists global hot keys as
+"no CLI and no API", so there is no file for them to front. A hot key is
+registered by key position, so on a layout other than US the letter printed is
+the US one at that position.
+
+**Every view is probed.** `accessibility-audit-tests.swift` names, for every
+file under `sources/kit/` that declares a view, the test that puts it in a
+window and walks its accessibility tree, and fails on a view file with none;
+it probes the ones no screen's tests reached — the Status and log windows, the
+menu bar's menu, every wizard step, the CLI cards, every shared component's
+samples and Settings ▸ Keyboard.
+
 **Words.** Labels template the configured name from `GET /api/identity`; with
 no name known yet, *Ask* stands alone. No label anywhere says "assistant" —
 `shell-commands-tests.swift` checks every label the shell can produce and every
@@ -964,6 +1326,172 @@ never "unlabeled" to VoiceOver — the system names it for its glyph, so `plus`
 says *Add* — which is why the shell's glyph controls are held to their exact
 names, not merely to saying something. macOS's text size is the system's: the
 shell uses semantic text styles only and fixes no height a label must fit in.
+
+## The floating bar
+
+Screen 11 §2–§7 (T8-5; the #253 hold lifted by Q28, 2026-09-30). Metistry's
+second interface: a 34pt glass rail on a screen edge (the right edge of the main display until Settings ▸ Live Capture says otherwise) —
+the mark, then **Ask · Note · To-do**, then **Record** — drawn **only while
+the live-capture bridge answers on this Mac**. No bridge, no bar, and the
+Capture menu's bar items stay dimmed (screen 11 §8, "absent, not off").
+`capture-bar-model.swift` decides, `capture-bar-view.swift` draws, and
+`sources/app/capture-bar-panel.swift` is the window: a floating,
+non-activating panel on every Space and over full-screen apps, exactly the
+size of what it shows and anchored at its top-right corner, so a panel
+opening beside the rail grows leftward and nothing transparent sits over the
+desktop catching clicks. The edge and the display are Settings ▸ Live
+Capture's (screen 11 §8, T6-15): the window reads `CaptureBarPreferences`
+and re-anchors on change — the rail on the chosen edge of the chosen
+display, panels opening toward the screen — and the pane's switch off is no
+panel at all; *Hide Capture Bar* hides it for this launch.
+
+| | what it does |
+| --- | --- |
+| **Note · To-do** | a field beside the rail, already focused; Return saves and closes, Esc closes and keeps the words; a one-second *Noted 1:02 PM* (or *Queued …*), then nothing. Each jot is `CaptureComposerModel.jot` — the composer's `POST /capture`, one `Idempotency-Key` minted once, the same offline queue. A refused jot keeps its words in the bar's field with the console's reason; the composer's own draft is never touched |
+| **Ask** | the tail of **the** conversation — `ChatModel`, the same thread and the same draft as the window's Chat — at 328pt; a reply past four lines is drawn to four with **Open in Chat** (the window, on Chat). While recording, one line counts the session's jots |
+| **Record** | the sheet: *Screen · Window · Audio only*, then the audio switch (*App audio* for a window, *System audio* otherwise) and *Your microphone — your side only*, both on by default. A picture mode says, once, that macOS picks the window and the permission is not per-window (§6); *Audio only* lists the running apps. The start is `LiveCaptureStart.body`: a mode and two switches, or `audio_only` with bundle ids. A picture start that fails with the Screen Recording grant not given says *Metistry can't see your screen yet* with **Open System Settings** and **Audio Only** |
+| **Stop · Keep Going** | Record becomes Stop in the same place while a session runs; the two-hour reminder (*Still recording · 2 hours*) offers Keep Going; *Disk low* is said under 10 GB; a session that ended by itself (`picture_lost`, the ten-hour stop, the disk, a crash) is said once, with **Record Again** |
+
+**Live.** The mark breathes — 2.6 s, ease-in-out, scale 1 → 1.5, opacity
+0.85 → 0.12, one `agent` ring at 1.5pt — and stays filled throughout, so the
+state never depends on the animation; under Reduce Motion the ring holds at
+its widest (1.5, 0.4), still (`CaptureBarBreath`). The senses under it are
+the recorder's `senses` — a display while a picture is taken, a microphone
+while the owner is heard — never what was asked for (P5). The status is read
+every 2 s while a session runs, every 15 s at rest, and every 60 s while no
+bridge answers.
+
+**Glass at the measured floors (§7).** The platform's behind-window blur, a
+`surface` scrim that never dips under its floor — 0.75 on the rail (marks
+only; `text-tertiary` needs 0.81, so the rail carries no words), 0.86 on
+every panel (text) — a 0.5pt edge with a 1pt specular highlight, and a
+contact shadow under a wide soft one. After ten idle seconds only the
+decoration fades (highlight and shadows), never while recording.
+
+**The control key, and why it never reaches an agent.** The bridge admits
+start, stop and Keep Going only on `METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`
+(T8-2a); its bridge token — the one any tool caller presents — reaches
+`check` and `status` only. Plan §2.2 puts "controlling a recording" in the
+device-local column (no CLI verb, no console route), so the app presents the
+control key itself, and it is kept exactly where every install variable is:
+the login Keychain, service `metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`,
+account = the instance's `instance_id` — the item `metistry secrets mint
+METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` writes beside `.env`, which is what the
+bridge is started with. One value, so the two cannot drift without the
+bridge saying so. What holds it (each a test that reads the source or drives
+a fake):
+
+- `live-capture-key.swift` is the one file that touches the Keychain: one
+  read-only `SecItemCopyMatching` for that one service; no add, update or
+  delete; it names no other credential. The console's local owner token is
+  still read by the CLI alone.
+- `live-capture-transport.swift` is the one file that sets an
+  `Authorization` header: loopback `127.0.0.1:7815` only (the manifest's
+  port), a route from a closed enum, redirects refused, an ephemeral session.
+  The console client never touches the key.
+- The key lives in memory for the instance it was read for, is dropped on an
+  instance switch, and prints as `<live-capture control key>` everywhere.
+  Nothing sends it through the console, a `metistry` verb's argv, a
+  preference, a file or a log line — so no agent, no model and no tool call
+  can see it.
+- The bar never holds the bridge's tool token: no source names it. If the
+  item filed as the control key held a read-only key, the bridge answers a
+  start `403` and the bar turns Record off with the reason — once, never
+  retried.
+
+**When the key is wrong, the bar says so.** Record stays pressable and opens
+the sheet with the reason and **Try Again**; Ask, Note and To-do keep
+working (they go through the console, not the recorder). Nothing is polled
+or retried until the owner acts.
+
+| state | what it says |
+| --- | --- |
+| no item for this instance | *This Mac has no key for the recorder, so it can't start or stop a recording. Run `metistry secrets mint METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`, then `metistry restart live-capture`.* |
+| the bridge answers `401` (read afresh once) | *The recorder refused this Mac's key — it was started with a different one. Run `metistry restart live-capture`.* |
+| the bridge answers a start `403` | *The key filed for the recorder only reads it; …* and the same two verbs |
+| the Keychain declines | *The Keychain did not give the recorder's key (…)* |
+
+The first read may show macOS's own *"Metistry wants to use … in your
+keychain"* sheet, because `security` made the item: that is the Keychain's
+access list, answered once with *Always Allow* — not a permission the app
+asks for.
+
+**Jots during a session (C77).** At rest a Note is its words and a To-do is
+`- [ ] <words>` — the inbox drain's explicit cue. During a recording both
+carry the anchor T8-7 promotes on Approve: frontmatter `kind: "jot"`, `jot:
+"note"|"todo"`, a `title`, `capture_session` and `offset_s` (seconds from
+Record) — `docs/ops/inbox.md`, "Jots from the floating bar".
+
+**Not drawn, and why.** Screen 11 §4 has the Ask panel say *staying on this
+Mac* while recording. The assistant routes a turn to the private tier only
+when its message names the capture session (`meta.capture_session`), and
+`POST /message` has no field that lets the bar say so — so the line would be
+a claim nothing enforces (§9.2). It is left out until the route can carry
+the session.
+
+**Accessibility (§2.18).** The bar is one group, *Metistry capture bar*;
+each glyph-only control speaks its name (*Ask <name>*, *Note*, *To-do*,
+*Start recording. Window and microphone*, *Stop recording*) and its
+shortcut when one is on (T6-16's `shortcut` hook); the live mark speaks
+*Recording, 4 minutes. Window and microphone*, announced once per session;
+the sheet's switches are drawn buttons that say their name and *on/off*
+(AppKit's switch is a platform view SwiftUI cannot name). Panels have fixed
+widths — 270, 328, 360 — and grow longer at the largest text.
+`tests/kit/capture-bar-tests.swift`.
+
+## Status: Fix All
+
+*(X-125; the owner's ruling of 2026-10-04: "regardless of the problems found, the
+user only needs to run `metistry doctor` to fix it".)* The Status window's
+header gains **Fix All** beside Check again — the app half of `metistry doctor`'s
+repair contract (`docs/ops/cli.md`, X-123). It is the window's one mutating act,
+and a closed set of one (invariant 10): the CLI door `doctor --fix --yes --json`
+(§2.2 M6), nothing else.
+
+**What it is made of.** Only the rows doctor itself classified: `fix: "fixable"`
+with a `repair` (a closed-table id, what it does, whether it asks). The app never
+reads a remediation sentence to decide, never names a fix of its own and never
+maps a repair id to anything to run; it displays `repair.does` and the CLI's
+table runs its own function. A row doctor calls `hand` shows the remediation —
+which names the exact step — and the tag *your hand*, and runs nothing; an `info`
+row is a fact and says nothing. A CLI older than the contract sends no classes,
+and the window then offers no Fix All and draws no tag (P5: state is reported,
+never inferred).
+
+**The ask.** The button re-reads first (`doctor --check --json`), because the
+preview must be of what is wrong now. If no fix in the plan moves files or
+restarts a running service (`repair.confirm`) it runs at once. If any does, a
+`CostConfirmation` sheet names *every* fix — the ones that ask marked — and
+**Fix All** in it is the only thing that sends `--yes`; Cancel, Esc and
+dismissing the sheet send nothing, and Return is Cancel. `--yes` is never the
+default. The CLI re-reads inside the run, so a fix that began asking between the
+preview and the run would run unpreviewed: the app cannot prevent that without a
+flag the CLI does not have, and says so afterwards (*Ran without being in the
+preview you confirmed*) rather than staying quiet.
+
+**The door is pinned.** `ManagementRow.doctor` admits exactly two argvs, not a
+prefix — `["doctor", "--check", "--json"]` and `["doctor", "--fix", "--yes",
+"--json"]` — so the app cannot be made to pass `doctor` anything else
+(`ManagementRow.exactShapes`; misuse tests refuse a bare `doctor`, `--json`
+alone, `--fix` without `--yes` or `--json`, reordered flags, extra flags, a
+`--product-dir`, and the repair argv on any other row). `MetistryCLI.doctor()`
+— the read every surface shares — runs `--check` explicitly, so the read is
+read-only whether or not a terminal is attached.
+
+**The answer.** `--fix --json` prints the re-check's rows (each with `fixed`) and
+`fixes[]`; the window replaces its report with it and draws a card: one line
+(*2 fixed · 1 ran, still failing*), then each fix — what it did, its outcome,
+the statuses either side of the re-check (`child:reconciler failed → ok`), the
+error if it threw, and the CLI's own `$` ledger, selectable. Each row carries
+*fixed* or *still failing*. Exit 1 is not "the repair broke" (something is still
+failing, as with the read); a document with no `mode: "fix"` is a CLI that
+ignored `--fix`, and the window says so instead of "nothing needed fixing". While
+a repair runs, Check again and the menu bar's re-read both wait.
+
+**§2.18.** Fix All and Check again wrap rather than clip at the largest text; the
+button speaks *Fix All: have metistry doctor fix what it can*; every row speaks
+what Fix All will do for it; each fix in the card is one spoken sentence; the
+sheet is `CostConfirmView`. Tests: `tests/kit/fix-all-tests.swift`.
 
 ## The menu bar
 
@@ -980,7 +1508,7 @@ count and the resolved shape are checks, not processes, and the menu does not
 invent a control the CLI has no verb for.
 
 **Refresh:** doctor is re-run when the menu opens and every 30s while it stays
-open — never continuously. `doctor --json` is a full sweep (every bridge over
+open — never continuously. `doctor --check --json` is a full sweep (every bridge over
 HTTP, `docker compose ps`), far too heavy to poll; the watchdog already keeps a
 liveness view of the same components, and its feed is the intended faster source
 once the app has a read path to it (a management-API query, not a database
@@ -1535,8 +2063,10 @@ with `agent`, and `GET /api/compute` for the model dropdown. No route was added.
   sent; a record that moved sends nothing and offers the edit again. A
   narrowing goes at once. A widening confirms first, listing core's
   `autonomyWidenings` strings verbatim — `AgentAutonomy.widenings` is that
-  function carried over, held to core's own test cases and to the recorded
-  PUT's `widened` — plus reach added in the same `key a → b` shape; the button
+  function carried over, held to the cases core's own test runs (read from
+  `packages/core/test/held-to-core/autonomy-widenings.json`, so a changed case
+  fails the Swift copy before it merges; `ops/scripts/check-held-to-core.mjs`)
+  and to the recorded PUT's `widened` — plus reach added in the same `key a → b` shape; the button
   says **Widen**. Revoke and Rotate confirm, naming the cascade.
 - **Run Now** (C138) runs the agent's one routine (Item ▸ Run Now ⌘R); with
   none it is dimmed with *Nothing is scheduled for <id>.* beside **Give It

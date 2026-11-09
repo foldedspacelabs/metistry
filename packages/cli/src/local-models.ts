@@ -237,26 +237,46 @@ export interface LocalServerRow {
   provider?: string;
   /** set when the server answered and nothing in `compute.yaml` points at it */
   hint?: string;
+  /** the default port was NOT dialled: compute.yaml names this instance's own local server(s), so a scan of the others is someone else's port (X-123) */
+  skipped?: true;
 }
 
 /**
  * Probe every known local server, at the URL `compute.yaml` gives when it
  * gives one and at the server's default port otherwise. In parallel: four
  * connection refusals in series is four timeouts a person waits for.
+ *
+ * The default-port scan is DISCOVERY — "there is a model server on this Mac
+ * and nothing is using it" — and it runs only while `compute.yaml` names no
+ * on-machine provider at all. Once the instance has its own local server, the
+ * other defaults (LM Studio's 1234, Ollama's 11434) belong to whatever else
+ * runs on this Mac — another instance's, the owner's live one — and doctor has
+ * no business dialling them: those rows read `absent`, not probed (X-123).
  */
-export async function probeLocalServers(opts: { compute?: Compute | undefined; fetchFn?: typeof fetch | undefined; timeoutMs?: number | undefined; env?: NodeJS.ProcessEnv | undefined }): Promise<LocalServerRow[]> {
+export async function probeLocalServers(opts: {
+  compute?: Compute | undefined;
+  fetchFn?: typeof fetch | undefined;
+  timeoutMs?: number | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  /** dial the default ports even when compute.yaml names an on-machine provider — `compute models list`'s discovery, an owner's explicit ask; doctor never passes it */
+  scanDefaults?: boolean | undefined;
+}): Promise<LocalServerRow[]> {
   const providers = Object.entries(opts.compute?.providers ?? {}).filter(([, p]) => p.locality === "on_machine");
   const byServer = new Map<LocalServerName, { name: string; provider: Provider }>();
   for (const [name, provider] of providers) {
     const s = serverOf(name, provider);
     if (s && !byServer.has(s)) byServer.set(s, { name, provider });
   }
+  const own = [...byServer.values()].map((x) => x.name);
   const env = opts.env ?? process.env;
   return Promise.all(
     LOCAL_SERVER_NAMES.map(async (server): Promise<LocalServerRow> => {
       const spec = LOCAL_SERVERS[server];
       const configured = byServer.get(server);
       const url = apiRoot(configured?.provider.base_url ?? spec.defaultBaseUrl);
+      if (!configured && own.length > 0 && opts.scanDefaults !== true) {
+        return { server, label: spec.label, url, ok: false, models: [], detail: `${url} not dialled — compute.yaml names this instance's own local server (${own.join(", ")})`, skipped: true };
+      }
       // The provider's own `auth.secret` when it declares one, the server's
       // conventional variable when it does not: a bridge answers 401 without
       // a bearer, and reporting that as "not running" would be a lie. Read
@@ -293,6 +313,13 @@ export async function localServerRows(opts: { compute?: Compute | undefined; fet
     rows.map(async (r) => ({
       kind: "local-model",
       ...(await runCheck(`local:${r.server}`, `${r.url}/models answers`, async () => {
+        if (r.skipped) {
+          return {
+            status: "absent" as const,
+            remediation: `${r.label} was not probed: ${r.detail.slice(r.detail.indexOf("— ") + 2)} — \`metistry compute providers add --from ${LOCAL_SERVERS[r.server].template}\` if you run it too`,
+            meta: { url: r.url, probed: false },
+          };
+        }
         if (!r.ok) {
           return {
             status: "absent" as const,

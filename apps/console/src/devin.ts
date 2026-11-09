@@ -31,14 +31,17 @@
  * kinds (`task`, `review`) and github-state owns the rest, so a third would
  * ripple through claiming, the fold and the reconciler for no gain. The
  * purpose selects a preamble and lands on the runs row and the work row.
+ *
+ * The purposes are not a list in this file any more (plan §2.7, T4-11): they
+ * are the Devin connection type's (`seed/connection-types/devin/manifest.yaml`,
+ * `dispatch.purposes`), each with its preamble, and an owner's overlay of
+ * that type may add or reword one. What stays here is the answer contract —
+ * the structured output and the words that ask for it — because that is a
+ * control, not a manifest line.
  */
-export const DEVIN_PURPOSES = ["work", "knowledge_research"] as const;
-export type DevinPurpose = (typeof DEVIN_PURPOSES)[number];
+export type DevinPurpose = string;
+/** What a dispatch records as its purpose when its target takes none (a GitHub issue). */
 export const DEFAULT_PURPOSE: DevinPurpose = "work";
-
-export function isDevinPurpose(v: unknown): v is DevinPurpose {
-  return typeof v === "string" && (DEVIN_PURPOSES as readonly string[]).includes(v);
-}
 
 /** Default ACU ceiling when neither the manifest nor the caller names one. Small on purpose. */
 export const DEFAULT_MAX_ACU = 5;  // limit: fixed — the floor when nothing names one; the manifest and the caller both override it
@@ -147,30 +150,13 @@ const COMMON = [
   "an empty `answer` is not.",
 ];
 
-const PREAMBLE: Record<DevinPurpose, string[]> = {
-  // "what does X know about Y" — read, do not change anything.
-  knowledge_research: [
-    "**Knowledge research.** Answer the question below from what you already know and can read.",
-    "",
-    "Do not open a pull request, push a branch, or modify any repository: this is a research request",
-    "and its whole output is the structured answer. Prefer what you can cite over what you can infer,",
-    "and say so in `confidence` when you are inferring.",
-    ...COMMON,
-  ],
-  work: [
-    "**Work brief.** Do the work described below, then report on it.",
-    "",
-    "Follow the repository's own conventions. If the brief is ambiguous, do the smaller reading of it",
-    "and put the ambiguity in `open_questions` rather than guessing wide.",
-    ...COMMON,
-  ],
-};
-
 export interface PromptInput {
   brief: string;
   taskId: number;
   target: string;
   purpose: DevinPurpose;
+  /** the purpose's preamble, from the target's connection type (`dispatch.purposes.<purpose>.preamble`) */
+  preamble: string;
 }
 
 /**
@@ -187,7 +173,7 @@ export function devinFooter(taskId: number, target: string): string {
 }
 
 export function devinPrompt(input: PromptInput): string {
-  return `${PREAMBLE[input.purpose].join("\n")}\n\n---\n\n${input.brief.trimEnd()}\n\n${devinFooter(input.taskId, input.target)}\n`;
+  return `${[input.preamble.trimEnd(), ...COMMON].join("\n")}\n\n---\n\n${input.brief.trimEnd()}\n\n${devinFooter(input.taskId, input.target)}\n`;
 }
 
 // --- the request body ------------------------------------------------------------

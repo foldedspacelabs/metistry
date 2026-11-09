@@ -2,6 +2,7 @@
 // what these functions REFUSE is the whole of their value, because everything
 // downstream — the bridge's tool, the console's executor, the CLI — takes
 // their word for it.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   ACTION_DEFAULTS,
@@ -237,7 +238,29 @@ describe("effectiveActionsDetailed — the same table, with why (C46/C47)", () =
   });
 });
 
+/**
+ * The autonomy arithmetic as cases (held-to-core/autonomy-widenings.json). The
+ * Mac app carries `autonomyWidenings` and `effectiveActions` over by hand
+ * (`AgentAutonomy`); its tests read the same file, so a case changed here is
+ * a case changed there — a core change cannot pass until the copy is updated.
+ */
+const AUTONOMY_CASES = JSON.parse(readFileSync(new URL("./held-to-core/autonomy-widenings.json", import.meta.url), "utf8")) as {
+  kinds: string[];
+  modes: string[];
+  levels: string[];
+  widenings: { why: string; prev: never; next: never; expect: string[] }[];
+  effective: { why: string; record: never; expect: Record<string, string> }[];
+};
+
 describe("autonomyWidenings — what the owner's hand is required for", () => {
+  it("is exactly the cases both core and the Mac app are held to", () => {
+    expect(AUTONOMY_CASES.kinds).toEqual([...ACTION_KINDS]);
+    expect(AUTONOMY_CASES.modes).toEqual([...ACTION_MODES]);
+    expect(AUTONOMY_CASES.levels).toEqual([...AUTONOMY_LEVELS]);
+    for (const c of AUTONOMY_CASES.widenings) expect(autonomyWidenings(c.prev, c.next), c.why).toEqual(c.expect);
+    for (const c of AUTONOMY_CASES.effective) expect(effectiveActions(c.record), c.why).toEqual(c.expect);
+  });
+
   it("sees a level raise and every kind whose EFFECTIVE mode rises", () => {
     expect(autonomyWidenings({}, { level: "propose" })).toEqual([
       "level observe → propose",
@@ -246,24 +269,6 @@ describe("autonomyWidenings — what the owner's hand is required for", () => {
       "actions.comment deny → propose",
       "actions.capture deny → propose",
     ]);
-    expect(autonomyWidenings({ level: "propose" }, { level: "act_within_scope", actions: { dispatch: "allow" } })).toEqual([
-      "level propose → act_within_scope",
-      "actions.dispatch propose → allow",
-      "actions.task_update propose → allow",
-      "actions.comment propose → allow",
-      "actions.capture propose → allow",
-    ]);
-  });
-
-  it("is empty for a narrowing, a no-op, or a raise the ceiling swallows", () => {
-    expect(autonomyWidenings({ level: "act_within_scope" }, { level: "propose" })).toEqual([]);
-    expect(autonomyWidenings({ level: "propose" }, { level: "propose" })).toEqual([]);
-    expect(autonomyWidenings({ level: "act_within_scope" }, { level: "act_within_scope", actions: { comment: "deny" } })).toEqual([]);
-    // an entry raised under a ceiling that refuses it changes nothing, so it
-    // is not a widening — the test is on the EFFECTIVE table, not the record
-    expect(autonomyWidenings({ level: "propose" }, { level: "propose", actions: { comment: "allow" } })).toEqual([]);
-    // the §4.21 keys are not this function's business either way
-    expect(autonomyWidenings({ max_open_bundles: 1 } as never, { max_open_bundles: 99 } as never)).toEqual([]);
   });
 });
 

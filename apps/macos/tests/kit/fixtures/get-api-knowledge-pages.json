@@ -17,8 +17,8 @@
         "title": "Design",
         "description": "the store interface",
         "status": "clean",
-        "modified": "2026-09-26T22:54:15.071Z",
-        "indexed_at": "2026-09-26T22:54:15.071Z"
+        "modified": "2026-09-30T04:49:51.757Z",
+        "indexed_at": "2026-09-30T04:49:51.757Z"
       },
       {
         "path": "Projects/Metistry/Roadmap.md",
@@ -26,14 +26,14 @@
         "title": "Roadmap",
         "description": "what ships next",
         "status": "clean",
-        "modified": "2026-09-26T22:54:15.071Z",
-        "indexed_at": "2026-09-26T22:54:15.071Z"
+        "modified": "2026-09-30T04:49:51.757Z",
+        "indexed_at": "2026-09-30T04:49:51.757Z"
       }
     ],
     "area": null,
     "prefix": "Projects",
     "limit": 100,
     "offset": 0,
-    "as_of": "2026-09-26T22:54:15.138Z"
+    "as_of": "2026-09-30T04:49:51.872Z"
   }
 }

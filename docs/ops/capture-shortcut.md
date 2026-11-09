@@ -17,9 +17,10 @@ docker compose exec -e METISTRY_ORIGIN=https://<your-origin> console node script
 ```
 
 Store it once in the Shortcut (step 3). The live-capture bridge takes one
-of its own the same way — mint a second, labelled `live-capture`, and set it
-as `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` (`packages/mcp-live-capture/README.md`)
-— so revoking one never silences the other. It is an **owner token**: capture
+of its own — labelled `live-capture`, and kept as `METISTRY_LIVE_CAPTURE_INBOX_TOKEN`
+(`packages/mcp-live-capture/README.md`) — so revoking one never silences the
+other. On a Metistry install you do not mint it: `metistry up` (or bare
+`metistry secrets mint`) does, once `METISTRY_LIVE_CAPTURE_URL` is set. It is an **owner token**: capture
 and messages only — it cannot manage devices or answer requests (CRIT-7), so a
 lost phone leaks capture ability, not control. Revoke from the Studio:
 `UPDATE owner_tokens SET revoked_at = now() WHERE label = 'iphone-shortcut'`.

@@ -57,6 +57,17 @@ import { percentile } from "./intents.js";
 export const COMPLEXITY_TRAPS = ["none", "long_simple", "short_demanding"] as const;
 export type ComplexityTrap = (typeof COMPLEXITY_TRAPS)[number];
 
+/**
+ * Who wrote the item. `owner` — the owner's own message, labelled by hand
+ * (§7.2's rule). `generated` — written by a non-Claude model and relabelled
+ * blind by a second one (`metistry-eval generate-complexity`, X-121). Absent
+ * reads as `owner`. The two sets are held to the bar SEPARATELY, so a
+ * generated set can never carry the owner's, nor the other way round.
+ */
+export const FIXTURE_SOURCES = ["owner", "generated"] as const;
+export type FixtureSource = (typeof FIXTURE_SOURCES)[number];
+export const sourceOf = (f: { source?: FixtureSource | undefined }): FixtureSource => f.source ?? "owner";
+
 /** §7.2: a long-simple trap is a `simple` item of more than 40 words. */
 export const LONG_SIMPLE_MIN_WORDS = 41; // limit: fixed — §7.2's "> 40 words"
 /** §7.2: a short-demanding trap is a `demanding` item of 8 words or fewer. */
@@ -90,6 +101,8 @@ export const ComplexityFixture = z
     /** a D08-class item: terse, operational replanning under several constraints */
     d08: z.boolean().optional(),
     id: z.string().min(1).optional(),
+    /** absent means the owner wrote and labelled it; `generated` marks the generator's rows */
+    source: z.enum(FIXTURE_SOURCES).optional(),
     notes: z.string().optional(),
   })
   .superRefine((f, ctx) => {
@@ -796,6 +809,17 @@ export interface DeepMiss {
   outcome: PlannerAnswer["outcome"];
 }
 
+/** One source's rows — the owner's or the generated — held to the bar on their own. */
+export interface SourceSetReport {
+  source: FixtureSource;
+  n: number;
+  fixture_set: FixtureSetSummary;
+  bar: BarRow[];
+  verdict: { pass: boolean; line: string };
+  confusion: Record<Complexity, Record<Complexity, number>>;
+  deep_misses: DeepMiss[];
+}
+
 export interface ComplexityReport {
   run: {
     at: string;
@@ -814,6 +838,8 @@ export interface ComplexityReport {
   deep_misses: DeepMiss[];
   /** gold → served class → n, at the threshold */
   confusion: Record<Complexity, Record<Complexity, number>>;
+  /** owner-written and generated rows, each against the bar on its own — one entry per source present, owner first */
+  sets: SourceSetReport[];
   guarded: number;
   unavailable: number;
   latency: { p50_ms: number; p95_ms: number; over_served_deadline: number; served_deadline_ms: number; cold_start_ms: number | null };
@@ -839,16 +865,14 @@ export interface BuildComplexityReportOptions {
 
 const pct = (v: number | null): string => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
 
-export function buildComplexityReport(result: ComplexityRunResult, opts: BuildComplexityReportOptions): ComplexityReport {
-  const rows = result.rows;
+/** The bar, the verdict, the confusion matrix and the deep misses over one set of rows — the whole file, or one source's part of it. */
+function evaluateRows(rows: readonly ComplexityRow[], opts: BuildComplexityReportOptions): Omit<SourceSetReport, "source" | "n"> & { identical: number; unavailable: number; latencies: number[]; p95: number } {
   const set = checkFixtureSet(rows.map((r) => r.fixture));
   const at = measureAt(rows, opts.threshold);
   const identical = rows.filter((r) => sameAnswer(r.answer, r.repeat)).length;
   const unavailable = rows.filter((r) => r.answer.outcome === "unavailable" || r.repeat.outcome === "unavailable").length;
-  const guarded = rows.filter((r) => r.answer.outcome === "guarded").length;
   const latencies = rows.flatMap((r) => [r.answer, r.repeat]).filter((a) => a.outcome === "scored").map((a) => a.latency_ms ?? 0);
   const p95 = percentile(latencies, 0.95);
-  const servedDeadline = scorerTimeoutMs(opts.timeoutMs);
   const B = COMPLEXITY_BAR;
   const ge = (v: number | null, bar: number): boolean => v !== null && v >= bar;
 
@@ -890,6 +914,45 @@ export function buildComplexityReport(result: ComplexityRunResult, opts: BuildCo
       outcome: r.answer.outcome,
     }));
 
+  return { fixture_set: set, bar, verdict: { pass, line }, confusion, deep_misses, identical, unavailable, latencies, p95 };
+}
+
+/**
+ * The report over every row, and — when the file mixes owner-written and
+ * generated rows — each source held to the bar on its own. A mixed file
+ * passes only if the whole AND each part pass: a generated set that clears
+ * the bar can never carry an owner set that does not, nor the other way round
+ * (X-121; the Routr review's lesson, #492).
+ */
+export function buildComplexityReport(result: ComplexityRunResult, opts: BuildComplexityReportOptions): ComplexityReport {
+  const rows = result.rows;
+  const whole = evaluateRows(rows, opts);
+  const guarded = rows.filter((r) => r.answer.outcome === "guarded").length;
+  const servedDeadline = scorerTimeoutMs(opts.timeoutMs);
+  const sets: SourceSetReport[] = FIXTURE_SOURCES.filter((src) => rows.some((r) => sourceOf(r.fixture) === src)).map((source) => {
+    const part = rows.filter((r) => sourceOf(r.fixture) === source);
+    const e = evaluateRows(part, opts);
+    return { source, n: part.length, fixture_set: e.fixture_set, bar: e.bar, verdict: e.verdict, confusion: e.confusion, deep_misses: e.deep_misses };
+  });
+  // One source: the file's verdict is the set's. Two: there is no blended
+  // verdict — each set stands alone, a set too small to qualify is a
+  // non-result (T9-3's own rule: no result on it can pass), and the run passes
+  // only if at least one set qualifies and every qualifying set passes.
+  let verdict = whole.verdict;
+  if (sets.length > 1) {
+    const qualifying = sets.filter((s) => s.fixture_set.qualifies);
+    const pass = qualifying.length > 0 && qualifying.every((s) => s.verdict.pass);
+    const each = sets.map((s) => `${s.source} ${s.fixture_set.qualifies ? (s.verdict.pass ? "PASS" : "FAIL") : "NOT QUALIFYING (no result)"} (${s.n})`).join(" · ");
+    verdict = {
+      pass,
+      line: pass
+        ? `PASS — held separately, every qualifying set clears the bar at complexity.min_confidence ${opts.threshold.toFixed(2)}: ${each}.`
+        : qualifying.length === 0
+          ? `NOT A QUALIFYING RUN — neither set meets §7.2's requirements on its own, and the two are never blended: ${each}.`
+          : `FAIL — held separately: ${each}.`,
+    };
+  }
+
   return {
     run: {
       at: (opts.at ?? new Date()).toISOString(),
@@ -902,17 +965,18 @@ export function buildComplexityReport(result: ComplexityRunResult, opts: BuildCo
       timeout_ms: opts.timeoutMs,
       timeout_source: opts.timeoutSource,
     },
-    fixture_set: set,
-    bar,
-    verdict: { pass, line },
-    deep_misses,
-    confusion,
+    fixture_set: whole.fixture_set,
+    bar: whole.bar,
+    verdict,
+    deep_misses: whole.deep_misses,
+    confusion: whole.confusion,
+    sets,
     guarded,
-    unavailable,
+    unavailable: whole.unavailable,
     latency: {
-      p50_ms: percentile(latencies, 0.5),
-      p95_ms: p95,
-      over_served_deadline: latencies.filter((l) => l > servedDeadline).length,
+      p50_ms: percentile(whole.latencies, 0.5),
+      p95_ms: whole.p95,
+      over_served_deadline: whole.latencies.filter((l) => l > servedDeadline).length,
       served_deadline_ms: servedDeadline,
       cold_start_ms: result.cold_start_ms,
     },
@@ -931,9 +995,10 @@ export function renderComplexityReport(r: ComplexityReport): string {
   const out: string[] = [];
   out.push("# The confirmatory eval — the router's planner");
   out.push("");
-  out.push(
-    `${r.run.at} · planner ${r.run.model ?? "(unknown)"}${r.run.replay ? " · **replayed from a recording** — latency is the recorded one" : ""} · ${r.fixture_set.n} owner-labelled item(s), each scored twice`,
-  );
+  const generated = r.sets.find((s) => s.source === "generated")?.n ?? 0;
+  const owner = r.fixture_set.n - generated;
+  const who = generated === 0 ? "owner-labelled item(s)" : owner === 0 ? "generated item(s) (`source: generated`; none owner-written)" : `item(s) — ${owner} owner-labelled, ${generated} generated`;
+  out.push(`${r.run.at} · planner ${r.run.model ?? "(unknown)"}${r.run.replay ? " · **replayed from a recording** — latency is the recorded one" : ""} · ${r.fixture_set.n} ${who}, each scored twice`);
   out.push(`Planner wording sha256 \`${r.run.wording_sha256.slice(0, 16)}\` · bar sha256 \`${r.run.bar_sha256.slice(0, 16)}\` — a change to either after this run voids it.`);
   out.push("");
   out.push("## The bar, pre-registered (docs/ops/dynamic-router.md §7.2)");
@@ -942,18 +1007,43 @@ export function renderComplexityReport(r: ComplexityReport): string {
   out.push("| --- | --- | --- |");
   for (const b of BAR_TABLE) out.push(`| ${cell(b.row)} | ${cell(b.bar)} | ${cell(b.from)} |`);
   out.push("");
-  out.push("## The fixture set (§7.2)");
-  out.push("");
-  out.push("| Requirement | Needed | Have | |");
-  out.push("| --- | --- | --- | --- |");
-  for (const q of r.fixture_set.requirements) out.push(`| ${cell(q.requirement)} | ${q.needed} | ${q.have} | ${q.pass ? "PASS" : "FAIL"} |`);
-  out.push("");
-  out.push(`## Result — at complexity.min_confidence ${r.run.threshold.toFixed(2)} (${r.run.threshold_source})`);
-  out.push("");
-  out.push("| | Bar | Result | |");
-  out.push("| --- | --- | --- | --- |");
-  for (const b of r.bar) out.push(`| ${b.row} | ${b.bar} | ${b.result} | ${b.pass ? "PASS" : "FAIL"} |`);
-  out.push("");
+  const requirements = (set: FixtureSetSummary): void => {
+    out.push("| Requirement | Needed | Have | |");
+    out.push("| --- | --- | --- | --- |");
+    for (const q of set.requirements) out.push(`| ${cell(q.requirement)} | ${q.needed} | ${q.have} | ${q.pass ? "PASS" : "FAIL"} |`);
+  };
+  const results = (bar: readonly BarRow[]): void => {
+    out.push("| | Bar | Result | |");
+    out.push("| --- | --- | --- | --- |");
+    for (const b of bar) out.push(`| ${b.row} | ${b.bar} | ${b.result} | ${b.pass ? "PASS" : "FAIL"} |`);
+  };
+  if (r.sets.length <= 1) {
+    out.push("## The fixture set (§7.2)");
+    out.push("");
+    requirements(r.fixture_set);
+    out.push("");
+    out.push(`## Result — at complexity.min_confidence ${r.run.threshold.toFixed(2)} (${r.run.threshold_source})`);
+    out.push("");
+    results(r.bar);
+    out.push("");
+  } else {
+    out.push(`## Owner-written and generated fixtures, held to the bar separately — at complexity.min_confidence ${r.run.threshold.toFixed(2)} (${r.run.threshold_source})`);
+    out.push("");
+    out.push(
+      "A generated set is written by a non-Claude model and relabelled blind by a second one (`metistry-eval generate-complexity`); it never stands in for your own. Each set is checked against §7.2 and the bar on its own, the two are never blended, and a set too small to qualify is a non-result.",
+    );
+    for (const set of r.sets) {
+      out.push("");
+      out.push(`### ${set.source} — ${set.n} item(s)`);
+      out.push("");
+      requirements(set.fixture_set);
+      out.push("");
+      results(set.bar);
+      out.push("");
+      out.push(`${set.verdict.line}`);
+    }
+    out.push("");
+  }
   out.push(`**${r.verdict.line}**`);
   out.push("");
   const notes: string[] = [];
@@ -973,7 +1063,7 @@ export function renderComplexityReport(r: ComplexityReport): string {
     out.push(`- ${m.id ? `\`${m.id}\` ` : ""}served **${m.served}** (${why}): "${cell(m.text)}"`);
   }
   out.push("");
-  out.push("## Confusion matrix — your label ↓, served class →");
+  out.push(`## Confusion matrix — your label ↓, served class →${r.sets.length > 1 ? " (every row, both sources)" : ""}`);
   out.push("");
   out.push(`| | ${COMPLEXITY_NAMES.join(" | ")} |`);
   out.push(`| --- | ${COMPLEXITY_NAMES.map(() => "---:").join(" | ")} |`);

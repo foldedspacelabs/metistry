@@ -12,11 +12,11 @@ shorthand for `node packages/cli/dist/main.js`, run from the product checkout (s
 
 ## 1. Install
 
-**Not yet available: the signed DMG.** The Mac app is the intended installer
-(`docs/ops/mac-app.md`) — its first-run wizard runs `metistry runtime install --from <bundle>`
-for you. But the next release, v0.8.0, is the **first one carrying the compute changes this
-guide depends on, and it has not been cut yet** (§4b W2). Until it exists, this Mac gets
-`metistry` from a checkout:
+**The Mac app is the intended installer** (`docs/ops/mac-app.md`): download
+`Metistry-<version>.dmg` from the GitHub Releases page, open it, and the first-launch wizard runs
+`metistry runtime install --from <bundle>` and the steps below for you, with the same verbs this
+guide types. The terminal path is identical and stays first-class; it needs `metistry` from a
+checkout or from the runtime pack (`docs/ops/bundled-runtime.md`):
 
 ```sh
 git clone <the metistry product repo> ~/metistry && cd ~/metistry
@@ -134,7 +134,7 @@ node plugins/cursor/install.mjs           # the sessionEnd hook, for dev-session
 export METISTRY_CAPTURE_ON_STOP=1
 node packages/cli/dist/main.js connect opencode
 node plugins/opencode/install.mjs
-node packages/cli/dist/main.js connect claude-code   # mints the token, prints its export lines — does NOT install the plugin; which dev tool this instance settles on stays open (§4b)
+node packages/cli/dist/main.js connect claude-code   # registers /mcp with Claude Code (`claude mcp add --scope user`) and prints the plugin's export lines — does NOT install the plugin; which dev tool this instance settles on stays open (§4b)
 node packages/cli/dist/main.js connect devin         # prints name/url/Authorization to paste at Devin → Customize → MCPs
 node packages/cli/dist/main.js connect --list
 ```
@@ -142,7 +142,8 @@ node packages/cli/dist/main.js connect --list
 `connect devin` prints `http://127.0.0.1:8080/mcp` — **loopback**: enough for a Devin CLI
 session on this Mac, and reachable from none of Devin's cloud. That is the 2026-09-15 Exposure
 ruling — no inbound path is assumed for this instance, so cloud Devin as an MCP *client* needs
-a per-instance tunnel nobody has chosen yet, deferred until one is
+a per-instance tunnel. `metistry remote` (§9) can now provide one for the phone; pointing Devin
+at it is not ruled, so the loopback shape stays
 (`docs/plan-refresh-2026-09-13.md` §4b, "Exposure").
 
 There is no `doctor` row for an agent — it walks manifests, not the `agents` table. Check with
@@ -152,52 +153,43 @@ Cursor's MCP pane, `opencode mcp list`, Devin's **Test listing tools** button.
 ## 7. Devin knowledge-in
 
 The pull half — Devin's notes and repo wikis land in the inbox as captures
-(`docs/ops/devin.md`, "Knowledge in"):
-
-```
-# <instance>/.metistry/state/.env
-METISTRY_DEVIN_API_KEY=cog_…
-METISTRY_DEVIN_ORG_ID=org-…
-METISTRY_DEVIN_REPOS=org/repo-a,org/repo-b   # optional: the wiki half
-```
+(`docs/ops/devin.md`, "Knowledge in"). Both halves read one **`devin` agent
+connection** (since 0.17.0 `METISTRY_DEVIN_API_KEY` and `METISTRY_DEVIN_ORG_ID`
+in `.env` are not read):
 
 ```sh
-node packages/cli/dist/main.js secrets sync --to keychain
+node packages/cli/dist/main.js secrets set devin_api_key          # the cog_ key, on stdin
+node packages/cli/dist/main.js secrets hosts devin_api_key api.devin.ai mcp.devin.ai
+node packages/cli/dist/main.js secrets grant devin_api_key connection:devin on
+node packages/cli/dist/main.js connections add devin --type agent --provider devin \
+    --url https://api.devin.ai --auth bearer --secret devin_api_key \
+    --config org=org-… --config repos=org/repo-a,org/repo-b --no-discover   # repos: optional, the wiki half
+node packages/cli/dist/main.js secrets sync --to env
 node packages/cli/dist/main.js restart console
 ```
 
 **The PAT-policy caveat:** an enterprise PAT policy is disabled by default at Devin — confirm
 it is enabled for this key's organisation, or the key answers 401 and looks like a bad one.
 
-`doctor` picks up the collector by its manifest: `devin-knowledge` reads `absent` (naming
-`METISTRY_DEVIN_API_KEY`/`ORG_ID`) until both are set, then `ok` after its next `@hourly` run.
+`doctor` picks up the collector by its manifest: `devin-knowledge` reads `absent` (naming the
+missing connection) until it is added, then `ok` after its next `@hourly` run.
 
 ## 8. Devin as a target
 
 The push half — a work row dispatched as a Devin session, the answer returned as a triaged
-proposal (`docs/ops/devin.md`, "Dispatch out"). The product's manifest ships an **empty**
-`allow` list (a third party whose default is "may train on your data"); widen it in this
-instance's own overlay, never the product file (`docs/ops/targets.md`):
-
-```
-# <instance>/.metistry/state/.env — METISTRY_DEVIN_ORG_ID: required for dispatch, not just knowledge-in
-METISTRY_TARGETS_DIRS=targets:$METISTRY_INSTANCE_DIR/.metistry/targets
-METISTRY_DEVIN_ORG_ID=org-…
-```
+proposal (`docs/ops/devin.md`, "Dispatch out"). It is the same `devin` connection as §7: nothing
+more to add. The Devin connection type ships an **empty** `allow` list (a third party whose
+default is "may train on your data"); widen it in this instance's own overlay of the type, never
+the product file (`docs/ops/targets.md`):
 
 ```yaml
-# <instance>/.metistry/targets/devin-sessions/manifest.yaml — the WHOLE file (D4: last one wins)
-name: devin-sessions
-type: target
-transport: http
-submit: { max_acu: 5 }
-result: { via: report_queue, status_via: collectors/devin-sessions }
-auth: env:METISTRY_DEVIN_API_KEY
-cost: { per_run_estimate_usd: 0 }
-data_policy:
-  allow: [Projects]        # this instance's own areas
-  deny_sources: [comms, devin]       # devin's own knowledge must not round-trip
-  max_brief_bytes: 65536
+# <instance>/.metistry/extensions/devin/manifest.yaml — the WHOLE file (D4: last one wins);
+# start from seed/connection-types/devin/manifest.yaml and change only dispatch.data_policy
+dispatch:
+  data_policy:
+    allow: [Projects]        # this instance's own areas
+    deny_sources: [comms, devin]       # devin's own knowledge must not round-trip
+    max_brief_bytes: 65536
 ```
 
 `node packages/cli/dist/main.js restart console`, then a first knowledge-research dispatch — a
@@ -207,24 +199,35 @@ cookie:
 
 ```sh
 metistry console call POST /api/tasks/<id>/dispatch --body - <<'JSON'
-{"target":"devin-sessions","purpose":"knowledge_research","max_acu":3,"brief":"…"}
+{"target":"devin","purpose":"knowledge_research","max_acu":3,"brief":"…"}
 JSON
 ```
 
-`doctor` walks `targets/` too: `devin-sessions` reads `absent` naming `METISTRY_DEVIN_ORG_ID`
-until set, `ok` once the target's `check()` resolves.
+`GET /api/targets` lists `devin` with its `check()`: `ok` once the connection's key is delivered
+and the probe resolves, `failed` naming `config.org` when the connection lacks it.
 
 ## 9. The phone
 
-No native app exists yet (an iOS target is "not started", `docs/ops/mac-app.md`; the offline
-outbox `docs/research/2026-09-11-multi-instance-and-offline-client.md` designs for is
-unbuilt). What is real: `GET /api/identity` (unauthenticated, `{instance_id, name, icon,
-capabilities}`) is what any client — the future app, or the PWA today — uses to tell this
-instance apart from the first one, keyed by `instance_id` since an origin can move. Once this
-instance is reachable at some origin, the **first** instance's `metistry instances add
-<origin>` records it in `instances.yaml` (`docs/ops/instances.md`); with no inbound path
-chosen yet (step 6), use the console's PWA — "Add to Dock" in Safari — against whatever
-reaches this Mac meanwhile.
+There is still no native iOS app (an iOS target is "not started", `docs/ops/mac-app.md`). The
+phone is the web app on its Home Screen with a passkey of its own; `docs/ops/phone.md` is the
+owner's guide. It needs an HTTPS origin with a stable name, which a fresh instance does not
+have — it answers on this Mac only — so choose how the phone reaches this one first, in
+**Settings ▸ Remote Access** or in a terminal:
+
+```sh
+node packages/cli/dist/main.js remote                        # the choices, and what this instance has
+node packages/cli/dist/main.js remote set tailscale --yes    # Funnel by default; preview first without --yes
+node packages/cli/dist/main.js up                            # renders the new origin into METISTRY_ORIGIN
+```
+
+(`docs/ops/remote-access.md` lists every provider, what it costs and who can read the traffic.)
+Then **Add a Phone…** in Settings ▸ Devices, or `metistry enroll` (`docs/ops/auth.md`).
+`GET /api/identity` (unauthenticated, `{instance_id, name, icon, capabilities}`) is what any
+client uses to tell this instance apart from the first one, keyed by `instance_id` since an
+origin can move. Once this instance is reachable at an origin, the **first** instance's
+`metistry instances add <origin>` records it in `instances.yaml` (`docs/ops/instances.md`).
+The offline outbox `docs/research/2026-09-11-multi-instance-and-offline-client.md` designs for
+is unbuilt.
 
 ## 10. Daily use
 
@@ -249,14 +252,13 @@ reaches this Mac meanwhile.
 node packages/cli/dist/main.js update            # pull/build, migrate, restart what changed, pin, doctor
 node packages/cli/dist/main.js migrate-layout --dry-run   # only if this instance predates the 2026-09-17 flat layout; says so and changes nothing otherwise
 node packages/cli/dist/main.js migrate-layout            # carries a pre-2026-09-16 bare inbox/ up as well, so migrate-inbox is optional
-node packages/cli/dist/main.js doctor             # weekly; a `degraded` row is a finding even at exit 0
+node packages/cli/dist/main.js doctor             # weekly; in a terminal it applies the fixes it can, then re-checks (`--check` only reads) — a `degraded` row is a finding even at exit 0
 ```
 
 ## What is not there yet
 
-- **A native iOS app** — step 9 is a placeholder for it.
-- **Cloud Devin as an MCP client** — needs the inbound tunnel nobody has chosen (step 6); the
-  local-CLI shape is what exists today.
+- **A native iOS app** — step 9 is the web app until it exists.
+- **Cloud Devin as an MCP client** — an inbound path now exists (step 9), but nobody has ruled
+  that Devin uses it; the local-CLI shape is what exists today.
 - **The bake-off verdict** (`docs/plan-refresh-2026-09-13.md` §3) — which local model earns
   tier assignments beyond "it answers" is still running, on both machines.
-- **v0.8.0 has not been cut** — this whole guide runs from a checkout (step 1) until it is.

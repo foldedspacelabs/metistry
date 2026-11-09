@@ -295,3 +295,124 @@ export function renderSessionNote(summary: SessionSummary, extra: { source?: str
     "",
   ].join("\n");
 }
+
+// ---- reading a session note back (research 2026-10-04 CM-4) ----------------
+//
+// The reconciler's walk turns every captured `kind: "session"` note under
+// `Inbox/` into one `vault_sessions` row, and `seed/queries/recent_sessions.yaml`
+// serves those rows back to the next session in the same repository as
+// HANDLES: date, tool, files, turns, and the owner's first prompt, clipped.
+// This is the reader for the note the three plugins and `import-sessions`
+// write (`renderSessionNote` above; `plugins/*/scripts/lib.mjs` render the
+// same headings), and it is deliberately partial:
+//
+//   * **it never reads `## Last response`.** That section is the agent's own
+//     words. The ruling (2026-10-04) keeps an agent's reply out of what any
+//     other agent is handed, so the section is not parsed, not stored, and
+//     cannot leak by a later query widening — there is no column for it.
+//   * the first prompt ENDS at the next `## ` heading after its own, whatever
+//     that heading is. A prompt that itself contains a line starting `## `
+//     is cut short there, which errs in the safe direction: the parse can
+//     never run on into the response that follows.
+//   * the frontmatter is read line by line as the doors wrote it — JSON string
+//     literals, bare numbers, `null` — with a bare scalar tolerated for a
+//     note the owner has edited in Obsidian. Bad or missing frontmatter, or
+//     a `kind` that is not `session`, is no session note at all (null).
+
+/** What `vault_sessions` keeps of one note — every field a HANDLE, nothing a model wrote. */
+export interface SessionNoteFacts {
+  sessionId: string | null;
+  /** The capturing tool, from frontmatter `source:` (`claude-code`, `cursor`, `opencode`, …). */
+  tool: string;
+  /** Checkout basename, as the capture saw it (`repoNameFromPath`). */
+  repo: string | null;
+  /** The session's working directory. */
+  cwd: string | null;
+  branch: string | null;
+  /** ISO 8601, or null when the frontmatter had none that parses. */
+  started: string | null;
+  ended: string | null;
+  turns: number | null;
+  /** From `## Files touched`, in the note's order, capped at MAX_FILES. */
+  files: string[];
+  /** From `## First prompt`, clipped to FIRST_PROMPT_CHARS. Empty when the note had none. */
+  firstPrompt: string;
+}
+
+const NOTE_FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+
+/** One frontmatter scalar as the doors wrote it: a JSON string literal, `null`, a bare number, or (an edited note) a bare word. */
+function noteScalar(raw: string): string | null {
+  const v = raw.trim();
+  if (v === "" || v === "null" || v === "~") return null;
+  if (v.startsWith('"')) {
+    try {
+      const parsed = JSON.parse(v);
+      return typeof parsed === "string" ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  if (v.startsWith("'") && v.endsWith("'") && v.length >= 2) return v.slice(1, -1);
+  return v;
+}
+
+/** A timestamp the frontmatter carried, kept only when it is one `Date` can read; a value that is not a date is null, not a guess. */
+function noteDate(v: string | null): string | null {
+  if (v === null) return null;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
+/** The body of one `## <heading>` section: from the heading's own line to the next `## ` line or the end. Only the FIRST such heading counts. */
+function noteSection(body: string, heading: string): string | null {
+  const lines = body.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trimEnd() === `## ${heading}`);
+  if (start === -1) return null;
+  let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+  if (end === -1) end = lines.length;
+  return lines.slice(start + 1, end).join("\n").trim();
+}
+
+/**
+ * Read a captured session note back into handles, or null when the text is
+ * not a `kind: "session"` note. Deterministic and total: no input throws.
+ */
+export function parseSessionNote(text: string): SessionNoteFacts | null {
+  const m = NOTE_FRONTMATTER_RE.exec(text);
+  if (!m) return null;
+  const fm = new Map<string, string | null>();
+  for (const line of m[1]!.split(/\r?\n/)) {
+    const kv = /^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/.exec(line);
+    if (kv?.[1]) fm.set(kv[1], noteScalar(kv[2] ?? ""));
+  }
+  if (fm.get("kind") !== "session") return null;
+  const body = text.slice(m[0].length);
+
+  const files: string[] = [];
+  const filesSection = noteSection(body, "Files touched");
+  if (filesSection !== null) {
+    for (const line of filesSection.split("\n")) {
+      const f = /^- `([^`\n]+)`\s*$/.exec(line);
+      if (!f?.[1] || files.includes(f[1])) continue; // the `…more (capped at N)` line is not a file
+      if (files.length >= MAX_FILES) break;
+      files.push(f[1]);
+    }
+  }
+
+  const turnsRaw = fm.get("turns");
+  const turns = turnsRaw !== null && turnsRaw !== undefined && /^\d+$/.test(turnsRaw) ? Number.parseInt(turnsRaw, 10) : null;
+
+  return {
+    sessionId: fm.get("session_id") ?? null,
+    tool: fm.get("source") ?? "unknown",
+    repo: fm.get("repo") ?? null,
+    cwd: fm.get("project") ?? null,
+    branch: fm.get("branch") ?? null,
+    started: noteDate(fm.get("started") ?? null),
+    ended: noteDate(fm.get("ended") ?? null),
+    turns,
+    files,
+    firstPrompt: clip(noteSection(body, "First prompt") ?? "", FIRST_PROMPT_CHARS),
+  };
+}

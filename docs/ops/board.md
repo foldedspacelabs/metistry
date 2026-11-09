@@ -15,9 +15,10 @@ the view, the panel, and the drags.
 | The cards | `seed/queries/board.yaml` (`GET /api/q/board`) |
 | The cross-project counts | `seed/queries/board_projects.yaml` (`GET /api/q/board_projects`) |
 | The panel | Work ▸ **Board** in `apps/console/web` (`work.js`) |
+| The Mac view | Work ▸ **Board** in `apps/macos` (`board-view.swift`, `board-model.swift`; `docs/ops/mac-app.md`, "Work ▸ Board, the card, and a task's room") — the same two queries and the same routes, drawn natively |
 | The write routes | `apps/console/src/task-routes.ts` (`docs/ops/console-api.md`) |
 | The service the routes adapt | `packages/tasks` (`update`'s two arms, `claim`, `release`, `heartbeat`) |
-| The tests | `apps/console/test/seed-queries.test.ts`, `apps/console/test/pwa.integration.test.ts`, `apps/console/test/task-routes.integration.test.ts`, `packages/tasks/test/` |
+| The tests | `apps/console/test/seed-queries.test.ts`, `apps/console/test/pwa.integration.test.ts`, `apps/console/test/task-routes.integration.test.ts`, `packages/tasks/test/`, `apps/macos/tests/kit/board-view-tests.swift` |
 
 Invariant 3 holds: the panel calls `/api/q/<name>` and nothing else. The
 columns are decided **server-side**, so the Mac app renders the same rows with

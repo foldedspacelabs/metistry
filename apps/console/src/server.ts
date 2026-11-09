@@ -18,9 +18,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, ACKNOWLEDGED, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, CLIENT_API, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, ACKNOWLEDGED, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal, type ToolGroup, type ToolMode } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
-import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type ConnectionLimits, type ConnectionsProxy, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type ConnectionFold, type ConnectionLimits, type ConnectionsProxy, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
@@ -31,22 +31,24 @@ import * as agents from "./agents.js";
 import * as actors from "./actors.js";
 import type { AssistantDefinitionSource } from "./actors.js";
 import type { SessionPolicy } from "./session-policy.js";
-import { parseCookies, readBody, readJson, sendError, sendJson, sendRefusal, sendUnrouted, sessionCookie } from "./http-util.js";
+import { parseCookies, readBody, readJson, sendError, sendJson, sendRateLimited, sendRefusal, sendUnrouted, sessionCookie, setProxySecurityHeaders } from "./http-util.js";
+import { BRIEFING_ROUTE, briefingRoute } from "./briefing-route.js";
 import * as wa from "./webauthn.js";
-import { checkLocalOwner, type LocalOwnerConfig } from "./local-owner.js";
+import { checkLocalOwner, type Listener, type LocalOwnerConfig } from "./local-owner.js";
+import { hostAllowed, remoteHostsOf } from "./proxy-listener.js";
+import { clientKeyOf, DEFAULT_PROXY_LIMITS, RateLimiter, Toll, type ProxyLimits, type Verdict } from "./rate-limit.js";
 import { serveStatic } from "./static.js";
 import { capabilitiesOf, type PublicIdentity } from "./identity.js";
 import { loadInstances } from "./instances.js";
 import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-route.js";
 import { listVariables, VARIABLES_NOT_AVAILABLE, type VariablesView } from "./variables-route.js";
-import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, listConnections, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
+import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, connectionGrants, connectionsListing, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
 import { VAULT_STATUS_NOT_AVAILABLE, VaultStatusUnavailable, type VaultStatusReader } from "./vault-status.js";
 import { applyRollback, carriesRollback, parseRollbackAsk, raiseRollback, rollbackOf, type VaultReverter } from "./vault-rollback.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
 import { consultRoute, route as routeMessage, servedKindOf, serveRoute, threadFactsOf, type RoutePolicy, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
-import { DEVIN_PURPOSES, isDevinPurpose } from "./devin.js";
 import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
 import { applyImprovement } from "./prompt-overlay.js";
 import { SCHEDULED_PATH, applyMeEdit, meEditOf } from "./profile-tidy.js";
@@ -68,14 +70,32 @@ import { isMeetingNoteRoute, meetingNoteRoute, MeetingNotes } from "./meeting-no
 import { CALENDAR_SYNC, isMeetingMoveRoute, meetingMoveRoute, type EventkitDoor } from "./meeting-move-route.js";
 import { githubPullRoute, isGithubPullRoute } from "./github-pulls-route.js";
 import { isTrackerCompleteRoute, trackerCompleteRoute } from "./tracker-complete-route.js";
-import type { TrackerOpener } from "@metistry-apps/collectors";
+import type { DraftBinding, RespondBinding, RsvpOpener, TrackerOpener } from "@metistry-apps/collectors";
+import type { ImapSyncOpener } from "@foldedspacelabs/metistry-connections";
+import { ConfirmTokens } from "./door-confirm.js";
+import { invitationRespondRoute, isInvitationRespondRoute } from "./invitation-respond-route.js";
+import { isMailDraftRoute, mailDraftRoute } from "./mail-draft-route.js";
 import type { GithubWriteClient } from "./github-write.js";
 import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
 import type { EventHub } from "./events.js";
 import { createRequire } from "node:module";
+import { RECORDING_ID_RE, RECORDING_ROUTE, TRANSCRIPT_PRINCIPAL, recordCaptureSession, recordingRoute, transcriptOf, transcriptPath } from "./recordings.js";
+import { meetingAnchorOf, promoteMeetingJots, type AnchorReceipt } from "./meeting-anchors.js";
 
 const require_ = createRequire(import.meta.url);
+
+/**
+ * What `makeServer` returns: the MAIN listener (`METISTRY_CONSOLE_HOST:
+ * METISTRY_CONSOLE_PORT`, where the local owner door lives), plus a factory
+ * for the PROXY listener (proxy-listener.ts) — a fresh `http.Server` over the
+ * same routes, on which every request is remote by construction. A factory
+ * rather than one server because `net.Server.listen` binds one endpoint, and
+ * the proxy listener has two: the Unix socket and the loopback TCP port.
+ */
+export interface ConsoleServer extends Server {
+  proxyListener(): Server;
+}
 
 export interface ConsoleConfig {
   origin: string; // canonical HTTPS origin (§4.2)
@@ -83,6 +103,14 @@ export interface ConsoleConfig {
   origins?: string | undefined;
   /** METISTRY_LOCAL_OWNER_TOKEN + the peer addresses that count as this machine (local-owner.ts). Absent = no local owner door at all. */
   localOwner?: LocalOwnerConfig | undefined;
+  /**
+   * The PROXY listener's rate limits (plan §2.23, X-111; rate-limit.ts):
+   * how often a client — by the provider's client-address header — and the
+   * listener as a whole may be answered without a session, per window.
+   * Absent fields take rate-limit.ts's defaults (`METISTRY_CONSOLE_PROXY_*`,
+   * main.ts). The main listener is never limited.
+   */
+  proxyLimits?: Partial<ProxyLimits> | undefined;
   /** Fallback capture directory when no sink is injected (tests, and a console with no vault bridge). */
   inboxDir: string;
   /** Where captures land: `vaultSink(vault)` — `Inbox/` through the reconciler's bridge (docs/ops/inbox.md). Absent → `dirSink(inboxDir)`. */
@@ -195,6 +223,20 @@ export interface ConsoleConfig {
    */
   trackers?: TrackerOpener | undefined;
   /**
+   * Respond to an invitation (invitation-respond-route.ts, T4-17): opens a
+   * calendar connection by name when its provider can answer (`rsvp`),
+   * through the egress door the CalDAV sync reads through. Absent = the door
+   * answers 503 with Open in Calendar.
+   */
+  calendars?: RsvpOpener | undefined;
+  /**
+   * Draft Reply (mail-draft-route.ts, T4-17): opens a mail connection by
+   * name — the IMAP provider's session, whose host guard sends the app
+   * password to its host:port or nowhere, and which cannot send. Absent =
+   * the door answers 503.
+   */
+  mail?: ImapSyncOpener | undefined;
+  /**
    * The pooled client behind the connections proxy (plan §2.6): handed to
    * `/mcp` as `connections_list` / `connections_call`'s proxy, and to the
    * action executor, which runs an Ask First `connection_call` on the owner's
@@ -203,6 +245,8 @@ export interface ConsoleConfig {
   connectionsProxy?: ConnectionsProxy | undefined;
   /** The proxy's confirm-token lifetime and hourly limits (`METISTRY_CONNECTION_*`, main.ts). Absent = mcp-brain's defaults. */
   connectionLimits?: ConnectionLimits | undefined;
+  /** The proxy's fold settings (X-132). Absent → the bridge's defaults. */
+  connectionFold?: ConnectionFold | undefined;
   /**
    * The live-changes hub `GET /api/events` streams from (events.ts, §2.20):
    * `main.ts` builds it and starts the one `LISTEN` that feeds it. Absent =
@@ -229,6 +273,8 @@ export interface ConsoleConfig {
    * bridge, and the route answers 503.
    */
   vaultRevert?: VaultReverter | undefined;
+  /** The session-start briefing (X-128): the owner's budget in tokens (METISTRY_BRIEFING_TOKENS). Absent = core's default. */
+  briefing?: { budgetTokens?: number | undefined } | undefined;
 }
 
 // ----- since-cursors (docs/ops/client-api.md) -----
@@ -447,7 +493,7 @@ const SUBJECT_COLUMN_NAMES = ["subject_work_updated_at", "subject_work_title", "
  * was raised.
  */
 const PROPOSAL_FOR_DECISION_SQL = `
-  SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.source, p.decision, p.feedback, p.decided_at, p.work_id, p.snoozed_until,
+  SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.source, p.group_id, p.decision, p.feedback, p.decided_at, p.work_id, p.snoozed_until,
          greatest(
            p.ts,
            coalesce(p.decided_at, p.ts),
@@ -598,8 +644,40 @@ export async function namedQueryDoor(res: ServerResponse, queries: QueryStore, n
   }
 }
 
-export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
+/**
+ * The `421 misdirected` message (R3: a refusal names what would permit it).
+ * It echoes only what the caller sent — truncated, so a header is never a
+ * way to write a kilobyte into a response — and names the variable, never
+ * the hosts it holds: those are public names, but the one asking has no
+ * business learning them from here.
+ */
+function misdirectedMessage(host: string | string[] | undefined, configured: boolean): string {
+  const named = typeof host === "string" && host.trim() !== "" ? `named ${JSON.stringify(host.trim().slice(0, 100))}` : "named no host";
+  const why = configured
+    ? "the proxy listener answers only for the remote host METISTRY_ORIGIN names — point the provider at this console with that name"
+    : "METISTRY_ORIGIN names no host beyond this Mac, so the proxy listener answers nothing yet — choose how your phone reaches this Mac in Settings ▸ Remote Access (`metistry remote set`)";
+  return `the request ${named}; ${why} (docs/ops/auth.md, "The proxy listener")`;
+}
+
+export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): ConsoleServer {
   const rp = wa.rpFromOrigin(cfg.origins ?? cfg.origin);
+  /**
+   * The hosts the proxy listener answers for: every non-loopback host in
+   * METISTRY_ORIGIN (plan §2.23 — the remote origin first, the loopback one
+   * `init` wrote second). Empty on a loopback-only install, so the proxy
+   * listener refuses every request there is no provider to carry yet.
+   */
+  const remoteHosts = remoteHostsOf(cfg.origins ?? cfg.origin);
+  /**
+   * The proxy listener's limiter (plan §2.23, X-111): one per console, so
+   * the TCP port and the Unix socket share every count — a client is one
+   * client however the provider dialled in. Nothing on the main listener
+   * ever touches it.
+   */
+  const { now: limiterClock, ...limitOverrides } = cfg.proxyLimits ?? {};
+  const limiter = new RateLimiter({ ...DEFAULT_PROXY_LIMITS, ...limitOverrides }, limiterClock);
+  /** The routes that answer without a session, read off the client API table — a `public` row added there is limited here with no second list. */
+  const publicKeys = new Set(CLIENT_API.filter((r) => r.reach.includes("public")).map(routeKey));
   // ONE capture sink for every door: POST /capture, the `/note` fast path,
   // the bridge's `capture` tool (docs/ops/inbox.md).
   const inbox = cfg.inbox ?? dirSink(cfg.inboxDir);
@@ -610,6 +688,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   /** `Idempotency-Key` replays for the vault-task doors — per server, in memory (vault-task-routes.ts says why that is enough). */
   const vaultTaskReplays = new ReplayCache();
   const trackerSends = new Map<string, Promise<CreateIssueResult>>();
+  /** Respond's and Draft Reply's single-use confirm tokens — per server, in memory (door-confirm.ts says why that is enough). */
+  const respondTokens = new ConfirmTokens<RespondBinding>(cfg.now ? () => cfg.now!().getTime() : Date.now);
+  const draftTokens = new ConfirmTokens<DraftBinding>(cfg.now ? () => cfg.now!().getTime() : Date.now);
   /** The meeting-note door's per-event queue and the notes it wrote ahead of the walk — per server, in memory (meeting-note-route.ts says why that is enough). */
   const meetingNotes = new MeetingNotes();
   /** The services one action may reach. Read per call: `cfg.targets` and the vault bridge are hot-reloaded, and an action must follow the file rather than the process's startup. */
@@ -650,13 +731,14 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // connections_list / connections_call (plan §2.6): the same pooled client an Approve runs a connection call through
     ...(cfg.connectionsProxy ? { connections: cfg.connectionsProxy } : {}),
     ...(cfg.connectionLimits ? { connectionLimits: cfg.connectionLimits } : {}),
+    ...(cfg.connectionFold ? { connectionFold: cfg.connectionFold } : {}),
     // propose_action at mode `allow` (docs/ops/actions.md): the bridge asks,
     // this console runs it — through the same service call the owner's own
     // click goes through, never a second implementation.
     actions: { execute: (action, actionCtx) => runAction(actionServices(), action, actionCtx) },
   });
 
-  async function authenticate(req: IncomingMessage): Promise<Auth> {
+  async function authenticate(req: IncomingMessage, listener: Listener): Promise<Auth> {
     const cookie = parseCookies(req)["metistry_session"];
     if (cookie) {
       const s = await store.checkSession(db, cookie, cfg.policy);
@@ -666,10 +748,17 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // process's environment, so it costs no query, and its refusal from a
     // non-local address must be recorded even though the caller is told
     // nothing (the response below is the same 401 an unknown token gets).
-    const local = checkLocalOwner(req, cfg.localOwner);
+    // On the proxy listener it is refused from EVERY peer (plan §2.23,
+    // X-103): a provider's agent dials from 127.0.0.1, and the only thing
+    // a loopback peer there proves is that a tunnel carried the request.
+    const local = checkLocalOwner(req, cfg.localOwner, listener);
     if (local.verdict === "ok") return { kind: "local_owner" };
     if (local.verdict === "remote") {
-      await audit("auth", "owner_token_remote", false, { remote: local.peer, reason: "the local owner token is loopback-only" });
+      await audit("auth", "owner_token_remote", false, {
+        remote: local.peer,
+        listener,
+        reason: listener === "proxy" ? "the local owner token never crosses a tunnel: the proxy listener refuses it from every peer" : "the local owner token is loopback-only",
+      });
     }
     const m = /^Bearer\s+(\S+)$/.exec(req.headers.authorization ?? "");
     if (m?.[1] && (await store.checkOwnerToken(db, m[1]))) return { kind: "owner_token" };
@@ -678,15 +767,19 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     return null;
   }
 
-  return createServer((req, res) => {
-    route(req, res).catch((err) => {
+  // Which listener a request arrived on is decided HERE, from the server
+  // that accepted the connection — never from a header, an address or
+  // anything else the caller writes (proxy-listener.ts).
+  const handlerFor = (listener: Listener) => (req: IncomingMessage, res: ServerResponse) => {
+    route(req, res, listener).catch((err) => {
       // uniform internal error; detail stays server-side (runs/log)
       console.error(err);
       if (!res.headersSent) sendError(res, "internal");
     });
-  });
+  };
+  return Object.assign(createServer(handlerFor("main")), { proxyListener: () => createServer(handlerFor("proxy")) });
 
-  async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async function route(req: IncomingMessage, res: ServerResponse, listener: Listener): Promise<void> {
     const url = new URL(req.url ?? "/", cfg.origin);
     const key = `${req.method} ${url.pathname}`;
     // Every answer says which contract it speaks (docs/ops/client-api.md
@@ -695,8 +788,57 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // sentence rather than a decode failure.
     res.setHeader(API_VERSION_HEADER, String(API_VERSION));
 
+    // ----- the proxy listener is on the internet (plan §2.23, X-111) -----
+    // Two things are decided here, before the Host gate, so that every
+    // answer the listener gives — a 421, a 429, the shell, a 500 from the
+    // handler's catch — carries them:
+    //
+    //   * the security headers (http-util.ts `PROXY_SECURITY_HEADERS`);
+    //   * the request's TOLL: whether answering it WITHOUT a session is
+    //     still within what its client, and this listener, may draw this
+    //     window. The client is the address the provider wrote into its
+    //     client-address header, read here and nowhere else, for this and
+    //     nothing else (rate-limit.ts). A session is never limited — the
+    //     toll is taken only where a request is about to be answered with
+    //     no credential: the Host gate, the shell, the public routes, and
+    //     the 401 that ends anything else.
+    //
+    // The main listener has no toll and no headers: loopback, plain HTTP, the
+    // Mac app and the CLI — every forwarded-address header it receives is
+    // ignored, as it always was.
+    if (listener === "proxy") setProxySecurityHeaders(res);
+    const toll = listener === "proxy" ? new Toll(limiter, clientKeyOf(req.headers, limiter.limits.clientHeader, req.socket.remoteAddress)) : undefined;
+    /** Charge this request as answered without a session. The FIRST refusal of a burst writes the one `runs` row the burst gets. */
+    const charge = async (): Promise<Verdict> => {
+      const v = toll!.take();
+      if (!v.ok && v.first) await audit("auth", "rate_limited", false, { listener, scope: v.scope, client: toll!.key, route: key, limit: v.limit, window_s: limiter.limits.windowMs / 1000 });
+      return v;
+    };
+    /** On the proxy listener, charge — and if the limit refuses, answer 429 (true = answered; the caller returns). The main listener: never. */
+    const refusedByLimit = async (): Promise<boolean> => {
+      if (!toll) return false;
+      const v = await charge();
+      if (v.ok) return false;
+      sendRateLimited(res, v.retryAfterS, v.scope);
+      return true;
+    };
+
+    // ----- the proxy listener answers for the configured remote host alone (plan §2.23, X-103) -----
+    // Before anything — the shell, the ceremonies, /health — because a
+    // request through a tunnel for a host this console is not configured
+    // for is a misconfigured proxy (or a scanner on the provider's
+    // address), and nothing here is for it. Not audited per request on
+    // purpose: a refused burst is one row (X-111, `charge` above), and a
+    // row per probe would make the audit table the thing a scanner fills.
+    // The main listener never asks about Host.
+    if (listener === "proxy" && !hostAllowed(req.headers.host, remoteHosts)) {
+      if (await refusedByLimit()) return;
+      return sendError(res, "misdirected", misdirectedMessage(req.headers.host, remoteHosts.length > 0));
+    }
+
     // ----- public: the PWA shell (login page must render unauthenticated) -----
     if (req.method === "GET" && cfg.webRoot && !url.pathname.startsWith("/api/") && url.pathname !== "/health") {
+      if (await refusedByLimit()) return; // a GET that is not a file falls through below, already charged: one request, one toll
       if (url.pathname === "/vendor/simplewebauthn.js") {
         // exports map hides subpaths; resolve the entry, walk to the UMD bundle
         const entry = require_.resolve("@simplewebauthn/browser");
@@ -716,6 +858,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // `capabilities` (S1) is coarse tool-GROUP names derived from this
     // console's own wiring (identity.ts capabilitiesOf) — never tool names,
     // never counts. The full `tools/list` on /mcp stays token-gated.
+    //
+    // Every `public` row of the client API table — identity, health, the four
+    // ceremonies — is answered without a session, so on the proxy listener
+    // each takes the toll first (X-111). A ceremony's own 401 for a wrong
+    // code is still one answer: the toll was taken here, once.
+    if (publicKeys.has(key) && (await refusedByLimit())) return;
     if (key === "GET /api/identity") {
       if (!cfg.identity) return sendError(res, "not_available", "no identity is configured in this deployment — METISTRY_IDENTITY_FILES names the files to read (default seed/identity.yaml plus the instance's own)");
       return sendJson(res, 200, {
@@ -744,10 +892,28 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       }
     }
 
+    // The passkey ceremonies' rpID follows the request (§2.23, X-104): a
+    // `start` answers for the configured origin it came from, and only for
+    // one — a request from an origin outside METISTRY_ORIGIN is refused here,
+    // naming both sides, as the `finish` steps already did.
     if (key === "POST /auth/enroll/start") {
       const body = (await readJson(req)) as { code?: string };
       if (!body.code || !(await store.peekEnrollmentCode(db, body.code))) return sendError(res, "unauthenticated");
-      const options = await wa.registrationOptions(rp);
+      // The phone reached this console with a live code (§2.23 step 7, X-114):
+      // stamp which listener answered. `proxy` is the proof from outside the
+      // sheet shows as *Opened on your phone*; `main` is recorded and never
+      // offered as it. Stamping is not using — the code is untouched — and it
+      // is audited once, when a stamp was actually written. The code itself is
+      // never in the record, only its row id.
+      const stamped = await store.stampEnrollmentOpened(db, body.code, listener);
+      if (stamped !== undefined) await audit("auth", "enroll_opened", true, { code_id: stamped, listener });
+      const from = wa.requestOrigin(rp, req.headers);
+      if (!from) {
+        const err = wa.unconfiguredOrigin(rp, req.headers);
+        await audit("auth", "enroll", false, { refused: err.reason });
+        return sendJson(res, 401, errorEnvelope("unauthenticated", err.reason));
+      }
+      const options = await wa.registrationOptions(rp, wa.rpIDOf(from));
       challenges.put(`enroll:${body.code}`, options.challenge);
       return sendJson(res, 200, { options });
     }
@@ -773,17 +939,24 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         publicKey: cred.publicKey,
         signCount: cred.signCount,
         transports: cred.transports,
-        origin: cfg.origin,
+        origin: cred.origin,
         label: (body.label ?? "device").slice(0, 80),
+        rpId: cred.rpID,
       });
       const token = await store.issueSession(db, cred.id, cfg.policy);
-      await audit("auth", "enroll", true, { passkey: cred.id });
+      await audit("auth", "enroll", true, { passkey: cred.id, rp_id: cred.rpID });
       res.setHeader("set-cookie", sessionCookie(token, cfg.policy.maxDays * 86400, cfg.secureCookies));
       return sendJson(res, 200, { ok: true });
     }
 
     if (key === "POST /auth/login/start") {
-      const options = await wa.authenticationOptions(rp);
+      const from = wa.requestOrigin(rp, req.headers);
+      if (!from) {
+        const err = wa.unconfiguredOrigin(rp, req.headers);
+        await audit("auth", "login", false, { refused: err.reason });
+        return sendJson(res, 401, errorEnvelope("unauthenticated", err.reason));
+      }
+      const options = await wa.authenticationOptions(rp, wa.rpIDOf(from));
       const k = randomUUID();
       challenges.put(`login:${k}`, options.challenge);
       return sendJson(res, 200, { key: k, options });
@@ -816,11 +989,31 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // Agent bearer only; the bridge does its own 401 envelope and owns the
     // body (the MCP transport reads it), so this sits before the console's
     // authenticate/readJson. Owner credentials are not agent principals.
-    if (url.pathname === "/mcp") return brain.handle(req, res);
+    if (url.pathname === "/mcp") {
+      if (toll) {
+        // The bridge checks the bearer itself, after it has the body, so the
+        // toll cannot wait for its verdict the way it does for `authenticate`
+        // below: a client already past its limit is answered 429 here, bearer
+        // or not — an agent sharing an exhausted address waits one window —
+        // and a 401 the bridge sends is charged as it ends, so a bearer
+        // guessed at /mcp spends the same allowance as one guessed anywhere.
+        if (toll.exhausted() && (await refusedByLimit())) return;
+        res.on("finish", () => {
+          if (res.statusCode === 401 && !toll.charged) void charge().catch((err) => console.error(err));
+        });
+      }
+      return brain.handle(req, res);
+    }
 
     // ----- everything below authenticates -----
-    const auth = await authenticate(req);
-    if (!auth) return sendError(res, "unauthenticated");
+    const auth = await authenticate(req, listener);
+    if (!auth) {
+      // The credential is checked FIRST, then the toll: a session or a bearer
+      // this console accepts is never limited, however busy the address it
+      // shares; what is bounded is how often an address may be told 401.
+      if (await refusedByLimit()) return;
+      return sendError(res, "unauthenticated");
+    }
 
     if (key === "POST /capture") {
       // Tier 0 (§4.11): a capture-only agent needs nothing more than this
@@ -851,8 +1044,15 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         // An owner credential (a passkey session or the local owner token — the Mac app and the PWA) is
         // captured "from the apps" (T2-1); the Shortcut's owner_token and an agent bearer are unchanged.
         const source = isUser(auth) ? "app" : "http";
-        const r = await captureToInbox(db, inbox, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source, sourceAgent, idempotency });
-        await finishRun(db, runId, { ok: true, meta: { inbox_id: r.id, bytes: bytes.length, ...(r.replayed ? { replayed: true } : {}) } });
+        // A recording's transcript (T8-4, Q29): an OWNER credential's capture
+        // that declares one is filed at Journal/Transcripts/, in the owner's
+        // name — decided here from the credential, never from the body. An
+        // agent bearer's lands in Inbox/ like any capture (recordings.ts).
+        const transcript = sourceAgent === null ? transcriptOf(note) : undefined;
+        const place = transcript ? { path: transcriptPath(transcript, cfg.timeZone), principal: TRANSCRIPT_PRINCIPAL } : undefined;
+        const r = await captureToInbox(db, inbox, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source, sourceAgent, idempotency, ...(place ? { place } : {}) });
+        if (transcript) await recordCaptureSession(db, transcript, { captureId: r.id, path: r.path });
+        await finishRun(db, runId, { ok: true, meta: { inbox_id: r.id, bytes: bytes.length, ...(transcript ? { capture_session: transcript.session } : {}), ...(r.replayed ? { replayed: true } : {}) } });
         // a replay is the ORIGINAL response — same status, same id — with one header saying so
         if (r.replayed) res.setHeader("idempotency-replayed", "true");
         return sendJson(res, 201, { id: r.id, path: r.path, sha256: r.sha256 });
@@ -860,6 +1060,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         await finishRun(db, runId, { ok: false, error: String(err) });
         throw err;
       }
+    }
+
+    // ----- the session-start briefing (X-128): agent bearers only, under their grant -----
+    // The table files it under reach `agent` with `agent` as its one
+    // principal: an owner credential is not an agent principal here, exactly
+    // as at `/mcp`, so a session, the local owner token and the capture token
+    // all get the uniform `forbidden` before the door is reached. The role
+    // among agent bearers (`agent` served; the assistant and a crew not) is
+    // `may`'s, inside the route.
+    if (key === BRIEFING_ROUTE) {
+      if (auth.kind !== "agent") return sendError(res, "forbidden");
+      return briefingRoute({ db, queries, budgetTokens: cfg.briefing?.budgetTokens, now: cfg.now ?? (() => new Date()) }, res, url, auth.agent, principalOf(auth));
     }
 
     // ----- agent tokens stop here: uniform 403 on everything else, never 404 -----
@@ -883,15 +1095,19 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // Read off the same row, before any handler: a route the table files
     // under `local` (minting a bearer, today) refuses a passkey session —
     // even one from 127.0.0.1 — with `403 local_only` naming the Mac app.
-    // The local owner token got here only from a loopback peer
-    // (`checkLocalOwner`); from anywhere else it was already the uniform 401.
-    // Owner credentials only, deliberately: the capture token and agent
-    // bearers keep the uniform `forbidden` of the gates they meet, so this
-    // answer tells no one but the owner which routes are served. Audited,
-    // because a passkey session reaching for a credential mint is exactly
-    // what a stolen session would do.
-    if (row && isLocalRoute(row) && auth.kind !== "local_owner") {
-      await audit("auth", "local_only", false, { route: routeKey(row), via: auth.kind, reason: "a `local` route admits the local owner token alone" });
+    // The local owner token got here only from a loopback peer on the MAIN
+    // listener (`checkLocalOwner`); from anywhere else it was already the
+    // uniform 401. On the proxy listener no `local` route answers at all
+    // (plan §2.23, X-103) — said here by the listener, not left to the fact
+    // that `local_owner` cannot arise there, so the rule survives any later
+    // change to how that credential is checked. Owner credentials only,
+    // deliberately: the capture token and agent bearers keep the uniform
+    // `forbidden` of the gates they meet, so this answer tells no one but
+    // the owner which routes are served. Audited, because a passkey session
+    // reaching for a credential mint is exactly what a stolen session would
+    // do.
+    if (row && isLocalRoute(row) && (listener === "proxy" || auth.kind !== "local_owner")) {
+      await audit("auth", "local_only", false, { route: routeKey(row), via: auth.kind, listener, reason: listener === "proxy" ? "a `local` route never answers on the proxy listener" : "a `local` route admits the local owner token alone" });
       return sendError(res, "local_only", localOnlyMessage(row));
     }
 
@@ -917,9 +1133,43 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // where the message would otherwise take the default tier — a command or
       // a fast path still wins, so picking "deep" never turns `/note` into a
       // model turn. An unknown name is ignored, not invented.
-      const body = (await readJson(req)) as { thread_id?: string; text?: string; tier?: string };
+      //
+      // `capture_session` is the session-turn marker (X-84, ruled 2026-10-04;
+      // screen 11 §4 "staying on this Mac"; plan §2.15): the recorder's id of
+      // the recording a turn is asked inside, set by the bar's Ask panel. A
+      // marked turn is held to the private tier by the drain — core's
+      // `turnTier()` puts `private` over whatever the rules or the picker
+      // chose, and `private` resolves on this Mac or refuses the turn
+      // (`PrivateTierUnavailable`), never falling back — so the marker can
+      // only ever make a turn MORE private, never less. It is checked here
+      // against what the console knows of the session: the id's shape, and
+      // that the recording has not ended. The console learns of a session
+      // when its transcript is delivered (`POST /capture` writes the
+      // `capture_sessions` row at the recording's end), so a session it
+      // holds an ended row for is refused `409 stale`; one it holds no row
+      // for is the recording in progress, which only the Mac can see. An
+      // agent bearer never reaches this handler (the `console_agent` gate
+      // above), so the field is refused from one with everything else: the
+      // uniform 403, and no row. Every unmarked turn is routed as before.
+      const body = (await readJson(req)) as { thread_id?: string; text?: string; tier?: string; capture_session?: unknown };
       if (!body.text) return sendError(res, "invalid_request");
       const thread = body.thread_id ?? "default";
+      let captureSession: string | undefined;
+      if (body.capture_session !== undefined && body.capture_session !== null) {
+        if (typeof body.capture_session !== "string" || !RECORDING_ID_RE.test(body.capture_session)) {
+          await audit("message", "capture_session", false, { thread, reason: "not a recorder session id" });
+          return sendError(res, "invalid_request", "capture_session is a recorder session id: lowercase letters, digits and hyphens");
+        }
+        captureSession = body.capture_session;
+        const ended = await db.query(`SELECT 1 FROM capture_sessions WHERE id = $1 AND (ended_at IS NOT NULL OR transcript_path IS NOT NULL)`, [captureSession]);
+        if (ended.rows.length > 0) {
+          await audit("message", "capture_session", false, { thread, capture_session: captureSession, reason: "the recording has ended" });
+          return sendJson(res, statusFor("conflict"), {
+            ...errorEnvelope("conflict", `capture_session ${captureSession} names a recording that has ended; the turn was not sent`),
+            reason: "stale",
+          });
+        }
+      }
       let decision = cfg.rules ? routeMessage(cfg.rules, body.text, body.tier) : null;
       const decidedAt = new Date();
       const phase = cfg.routePolicy?.mode ?? "shadow";
@@ -929,9 +1179,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // written first; its choice is the route only once it is on the record
       // (`serveRoute`). The message's id is reserved first so that row names
       // it. Every other rule — /note, a fast path, /model, /deep, the picker
-      // — is served exactly as in shadow, and consulted after the 202.
+      // — is served exactly as in shadow, and consulted after the 202. So is
+      // a turn marked with a capture session: it is pinned to the private
+      // tier before any choice is made (X-84; `consultRoute`'s `pinned`), so
+      // the policy has no choice to serve and is not waited for.
       let reservedId: number | undefined;
-      if (decision && cfg.rules && cfg.routePolicy && phase === "serve" && servedKindOf(decision) === "default") {
+      if (decision && cfg.rules && cfg.routePolicy && phase === "serve" && captureSession === undefined && servedKindOf(decision) === "default") {
         const rules = cfg.rules;
         const idRow = await db.query(`SELECT nextval(pg_get_serial_sequence('inbound_messages', 'id'))::bigint AS id`);
         const id = Number(idRow.rows[0]?.id);
@@ -945,6 +1198,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
             thread,
             messageId: id,
             policy: cfg.routePolicy,
+            captureSession: false,
             // `exclude_id` 0 at serve (§2): the message is not written yet
             loadFacts: async () => threadFactsOf((await queries.run("route_features", { thread, exclude_id: 0 })).rows[0]),
             at: decidedAt,
@@ -963,11 +1217,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           },
         );
       }
-      // Durable BEFORE the 202 (SHOULD-7). Routing decision rides in meta.
+      // Durable BEFORE the 202 (SHOULD-7). Routing decision rides in meta, and
+      // so does the session marker — `meta.capture_session` is what the
+      // drain's `captureSessionInScope` reads (docs/ops/compute.md, "The
+      // private tier"). The route itself is recorded as the rules decided it
+      // (or, at serve on the fall-through, as the policy's recorded choice);
+      // the tier a marked turn RUNS on is the drain's to resolve, and it is
+      // private.
+      const meta = JSON.stringify({ ...(decision ? { route: decision } : {}), ...(captureSession !== undefined ? { capture_session: captureSession } : {}) });
       const { rows } =
         reservedId === undefined
-          ? await db.query(`INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, $3) RETURNING id`, [thread, body.text, JSON.stringify(decision ? { route: decision } : {})])
-          : await db.query(`INSERT INTO inbound_messages (id, thread, text, meta) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4) RETURNING id`, [reservedId, thread, body.text, JSON.stringify(decision ? { route: decision } : {})]);
+          ? await db.query(`INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, $3) RETURNING id`, [thread, body.text, meta])
+          : await db.query(`INSERT INTO inbound_messages (id, thread, text, meta) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4) RETURNING id`, [reservedId, thread, body.text, meta]);
       const messageId = rows[0]?.id;
       // The route record (docs/ops/dynamic-router.md §6, T9-1): one `runs` row
       // of kind `route` per message the rules routed. IN SHADOW it is called
@@ -995,6 +1256,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
             thread,
             messageId: Number(messageId),
             policy: cfg.routePolicy,
+            captureSession: captureSession !== undefined,
             loadFacts: async () => threadFactsOf((await queries.run("route_features", { thread, exclude_id: Number(messageId) })).rows[0]),
             at: decidedAt,
             phase,
@@ -1073,7 +1335,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           // fall through: leave for the assistant rather than dropping the turn
         }
       }
-      await audit("message", "inbound", true, { message_id: messageId });
+      await audit("message", "inbound", true, { message_id: messageId, ...(captureSession !== undefined ? { capture_session: captureSession } : {}) });
       sendJson(res, 202, { message_id: messageId });
       return recordRoute();
     }
@@ -1087,7 +1349,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const c = since === null ? null : MESSAGES_CURSOR_RE.exec(since);
       if (since !== null && !c) return sendError(res, "invalid_request");
       // `tier` is the name the router (or a routine) put on the row — what
-      // the composer chips show, so a turn's tier is visible in the thread
+      // the composer chips show, so a turn's tier is visible in the thread —
+      // except a model turn marked with a capture session (X-84), which
+      // reads `private`: that is the tier the drain holds it to whatever the
+      // router chose (core `turnTier`), by the same any-value-but-null test
+      // the drain's `captureSessionInScope` applies, so the thread never
+      // shows a tier the turn did not run on (a marked /note or fast path ran
+      // on no model, and keeps reading none)
       // rather than only in `runs`. `changed_at` is the cursor column: an
       // outbound row moves when its feedback does, so a rating given from
       // the Mac resurfaces on the phone's next `since` pull.
@@ -1104,7 +1372,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const { rows } = await db.query(
         `SELECT id, ts, thread, text, status, direction, feedback, tier, turn_id, changed_at::text || '|' || direction || '|' || id AS cursor FROM (
            SELECT id, ts, thread, text, status, 'in'  AS direction, NULL::jsonb AS feedback,
-                  coalesce(meta->'route'->>'tier', meta->>'tier') AS tier, NULL::text AS turn_id, ts AS changed_at
+                  CASE WHEN (meta->>'capture_session' IS NOT NULL OR meta->'route'->>'capture_session' IS NOT NULL)
+                             AND coalesce(meta->'route'->>'kind', 'model') = 'model' THEN 'private'
+                       ELSE coalesce(meta->'route'->>'tier', meta->>'tier') END AS tier, NULL::text AS turn_id, ts AS changed_at
            FROM inbound_messages
            UNION ALL
            SELECT o.id, o.ts, o.thread, o.text, o.kind, 'out' AS direction,
@@ -1141,11 +1411,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         return sendJson(res, 200, { ok: true });
       }
       if (key === "POST /api/push/test") {
-        const result = await sendToSession(db, cfg.push, auth.sessionId, {
-          title: "Metistry",
-          body: "push works — this device is reachable",
-          url: "/",
-        });
+        // fixed words, no body: a test push carries what every push carries (X-32)
+        const result = await sendToSession(db, cfg.push, auth.sessionId, { type: "Metistry", title: "This device is reachable", url: "/" });
         return sendJson(res, 200, { result });
       }
     }
@@ -1172,16 +1439,20 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const body = (await readJson(req)) as { target?: unknown; brief?: unknown; sources?: unknown; purpose?: unknown; max_acu?: unknown };
       if (typeof body.target !== "string" || typeof body.brief !== "string") return sendError(res, "invalid_request", "target and brief are required: target is a name from GET /api/targets, brief is the instruction sent to it (docs/ops/targets.md)");
       const sources = Array.isArray(body.sources) ? body.sources.filter((s): s is string => typeof s === "string") : [];
-      // `purpose` is the W6 knowledge-research brief kind (apps/console/src/devin.ts):
-      // an unknown one is a refusal, not a silent fallback to `work`.
-      if (body.purpose !== undefined && !isDevinPurpose(body.purpose)) return sendError(res, "invalid_request", `purpose must be one of ${DEVIN_PURPOSES.join(" | ")} — an unknown one is refused, never a silent fallback to work`);
+      // `purpose` is the W6 knowledge-research brief kind — the purposes are the
+      // targets' connection types' (plan §2.7, T4-11: the Devin type's): an
+      // unknown one is a refusal, not a silent fallback to `work`.
+      const purposes = body.purpose !== undefined && cfg.targets ? await cfg.targets.purposes() : [];
+      if (body.purpose !== undefined && (typeof body.purpose !== "string" || (cfg.targets && !purposes.includes(body.purpose)))) {
+        return sendError(res, "invalid_request", `purpose must be one of ${purposes.join(" | ") || "(none — no target takes a purpose)"} — an unknown one is refused, never a silent fallback to work`);
+      }
       if (body.max_acu !== undefined && !(Number.isInteger(body.max_acu) && (body.max_acu as number) > 0)) return sendError(res, "invalid_request", "max_acu must be a positive integer — the ACU ceiling for this dispatch; omit it to take the target manifest's");
       if (!cfg.targets) return sendError(res, "not_found", "no compute targets are registered in this deployment — METISTRY_TARGETS_DIRS names the directories to load (default targets/, docs/ops/targets.md)");
       const taskId = Number(DISPATCH_ROUTE.exec(key)![1]);
       // principal is the credential class, never the body (§4.19); the data
       // policy and the runs row are dispatch()'s — nothing is decided here
       const r = await dispatch(db, cfg.targets, taskId, body.target, body.brief, "owner", sources, {
-        ...(body.purpose !== undefined ? { purpose: body.purpose } : {}),
+        ...(typeof body.purpose === "string" ? { purpose: body.purpose } : {}),
         ...(body.max_acu !== undefined ? { max_acu: body.max_acu as number } : {}),
       });
       if (r.ok) return sendJson(res, 201, { ok: true, ref: r.ref, url: r.url, run_id: r.run_id });
@@ -1228,6 +1499,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/variables" ||
         key === "GET /api/connections" ||
         CONNECTION_ROUTE.test(key) ||
+        // a recording's retention state: when the owner recorded whom (T8-4)
+        RECORDING_ROUTE.test(key) ||
         key === "GET /api/vault/status" ||
         // a rollback of the vault's history: the local owner's hand alone (T10-6)
         key === "POST /api/vault/rollback" ||
@@ -1260,6 +1533,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         isTrackerIssueRoute(key) ||
         // Close in Linear changes the owner's issue in their tracker, with their key (T4-26)
         isTrackerCompleteRoute(key) ||
+        // answering an invitation replies to its organizer as the owner (T4-17)
+        isInvitationRespondRoute(key) ||
+        // …and Draft Reply writes into the owner's Drafts, with their app password (T4-17)
+        isMailDraftRoute(key) ||
         // Today reads the owner's own day — their notes' task lines, their calendar — and stores their order
         isTodayRoute(key)
       ) {
@@ -1315,17 +1592,19 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // ----- the Connections list (§2.6): names, reach, tools and modes — never a value -----
     // Read-only and dial-free: every write is `metistry connections` on the
     // Mac (M13), and whether a server answers is `metistry connections test`
-    // (connections-route.ts).
+    // (connections-route.ts). `types` are the installed connection types —
+    // what Add Connection offers and the fields it renders (T6-13b); kinds, never a value.
     if (key === "GET /api/connections") {
       if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
-      return sendJson(res, 200, { connections: await listConnections(cfg.connections), as_of: new Date().toISOString() });
+      const { connections, types } = await connectionsListing(cfg.connections, connectionGrants(await agents.listAgents(db)));
+      return sendJson(res, 200, { connections, types, as_of: new Date().toISOString() });
     }
     const connectionOf = CONNECTION_ROUTE.exec(key);
     if (connectionOf) {
       if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
       const name = connectionOf[1]!; // a kebab name has nothing to percent-decode; anything else is not a connection
       if (!validConnectionName(name)) return sendError(res, "not_found", "no such connection");
-      const connection = await oneConnection(cfg.connections, name);
+      const connection = await oneConnection(cfg.connections, name, connectionGrants(await agents.listAgents(db)));
       if (!connection) return sendError(res, "not_found", "no such connection");
       return sendJson(res, 200, { connection, as_of: new Date().toISOString() });
     }
@@ -1472,6 +1751,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       return sendJson(res, 200, { session_id: sessionDetail[1], turns: result.rows, as_of: result.as_of.toISOString() });
     }
 
+    // ----- one recording's retention state (T8-4, §2.15): the owner's read, through `recording_state` -----
+    const recording = RECORDING_ROUTE.exec(key);
+    if (recording) return recordingRoute(res, queries, decodeURIComponent(recording[1]!));
+
     // ----- live changes (§2.20, T2-18): what changed, as ids — the owner's, and nobody else's -----
     // Past the management gate, so an agent bearer and the capture token have
     // already had their uniform 403. The stream carries ids and counts only
@@ -1485,7 +1768,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const lastEventId = req.headers["last-event-id"];
       return cfg.events.serve(req, res, {
         lastEventId: typeof lastEventId === "string" ? lastEventId : undefined,
-        stillAllowed: async () => isUser(await authenticate(req)),
+        stillAllowed: async () => isUser(await authenticate(req, listener)), // the same listener the stream was opened on: a token refused at open is refused at every heartbeat
       });
     }
 
@@ -1595,6 +1878,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // The line is linked by the other door (`POST /api/vault-tasks/:task_key/link`); this one writes nothing of the owner's.
     if (isTrackerIssueRoute(key)) return trackerIssueRoute(req, res, key, { queries, vault: cfg.vault, openTracker: cfg.openTracker, audit, inflight: trackerSends, now: cfg.now });
     if (isTrackerCompleteRoute(key)) return trackerCompleteRoute(req, res, key, { db, audit, open: cfg.trackers });
+    // ----- Respond to an invitation and Draft Reply: preview → confirm through the connection that can; nothing sends mail (T4-17) -----
+    if (isInvitationRespondRoute(key)) return invitationRespondRoute(req, res, key, { db, audit, open: cfg.calendars, tokens: respondTokens });
+    if (isMailDraftRoute(key)) return mailDraftRoute(req, res, key, { db, audit, open: cfg.mail, tokens: draftTokens });
 
     // ----- Close the Day (§2.11, §2.13; T2-8) -----
     // The daily note's section through the reconciler's section operation as
@@ -1629,11 +1915,11 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // judged against.
       const { rows } = await db.query(
         since === null
-          ? `SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.decided_at, p.work_id, p.snoozed_until, ${SUBJECT_COLUMNS},
+          ? `SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.decided_at, p.work_id, p.snoozed_until, p.group_id, ${SUBJECT_COLUMNS},
                     p.ts::text || '|' || p.id AS cursor
              FROM proposals p ${SUBJECT_JOINS}
              WHERE p.decision = 'pending' AND (p.snoozed_until IS NULL OR p.snoozed_until <= now()) ORDER BY p.ts DESC, p.id DESC LIMIT $1`
-          : `SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.decided_at, p.work_id, p.snoozed_until, ${SUBJECT_COLUMNS},
+          : `SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.decided_at, p.work_id, p.snoozed_until, p.group_id, ${SUBJECT_COLUMNS},
                     greatest(p.ts, p.decided_at)::text || '|' || p.id AS cursor
              FROM proposals p ${SUBJECT_JOINS}
              WHERE (greatest(p.ts, p.decided_at), p.id) > ($2::timestamptz, $3::bigint) ORDER BY greatest(p.ts, p.decided_at) ASC, p.id ASC LIMIT $1`,
@@ -1753,7 +2039,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       return sendJson(res, 200, { ok: true, feedback: rows[0] });
     }
 
-    if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db) });
+    // A device per passkey, its sessions under it; each with its passkey's rpID
+    // resolved (§2.23), and the caller's own row saying `this_device` (§2.22).
+    // The local owner token has no device: every row false.
+    if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db, rp.rpIDs[0]!, auth.kind === "session" ? auth.sessionId : null) });
 
     // ----- external-agent registry (§4.2 management surface; owner session only) -----
     // The registry, plus what has been ASKED for (ruled 2026-09-19): the
@@ -1797,13 +2086,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (key === "POST /api/agents") {
       const body = (await readJson(req)) as { id?: unknown; display_name?: unknown; kind?: unknown; remote?: unknown };
       try {
-        const { id, token, pending } = await agents.createAgent(db, body);
+        const { id, token, pending, revived } = await agents.createAgent(db, body);
         // S2: a remote enrolment starts pending and asks the owner, in the
         // one queue that needs the user (D7). The token is returned here
         // all the same — the console shows a token exactly once — and it
         // authenticates nothing until the answer arrives.
         const proposalId = pending ? await agents.enrollmentProposal(db, { id, display_name: String(body.display_name) }) : undefined;
-        await audit("agent_admin", "mint", true, { agent: id, op: "mint", remote: pending, ...(proposalId ? { proposal: proposalId } : {}) });
+        await audit("agent_admin", "mint", true, { agent: id, op: "mint", remote: pending, ...(revived ? { revived: true } : {}), ...(proposalId ? { proposal: proposalId } : {}) });
         return sendJson(res, 201, { id, token, pending, ...(proposalId ? { proposal_id: proposalId } : {}) }); // the ONE time the token crosses the wire
       } catch (err) {
         if (err instanceof agents.AgentError) return sendError(res, err.code, err.message); // the validator already named the field; do not throw that away
@@ -1875,11 +2164,29 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       }
     }
 
+    // Remove a device (§2.22), named by one of its session ids. The default
+    // scope — `{}` or no body, what the Mac and the PWA's Remove send — revokes
+    // the passkey, so the device never signs in again, and every session under
+    // it, each losing its push subscription. `{scope: "sessions"}` is Sign Out
+    // Everywhere's door: the sessions end, the passkey stays. Both land in
+    // `runs` (`auth`, `revoke`) with the scope on the record.
     const revoke = /^POST \/api\/devices\/(\d+)\/revoke$/.exec(key);
     if (revoke) {
-      const ok = await store.revokeSession(db, Number(revoke[1]));
-      await audit("auth", "revoke", ok, { session: revoke[1] });
-      return ok ? sendJson(res, 200, { revoked: true }) : sendError(res, "not_found");
+      const raw = (await readBody(req)).toString("utf8").trim();
+      let body: unknown = {};
+      if (raw !== "") {
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          return sendError(res, "invalid_request", "the body is not JSON");
+        }
+      }
+      if (body === null || typeof body !== "object" || Array.isArray(body)) return sendError(res, "invalid_request", "the body is a JSON object: `{}` or `{scope: \"device\" | \"sessions\"}`");
+      const scope = (body as { scope?: unknown }).scope ?? "device";
+      if (!(store.REVOKE_SCOPES as readonly unknown[]).includes(scope)) return sendError(res, "invalid_request", `scope is "device" (the default) or "sessions", not ${JSON.stringify(scope)}`);
+      const done = await store.revokeDevice(db, Number(revoke[1]), scope as store.RevokeScope);
+      await audit("auth", "revoke", done !== null, { session: revoke[1], scope, ...(done ?? {}) });
+      return done ? sendJson(res, 200, { revoked: true, scope, sessions: done.sessions }) : sendError(res, "not_found");
     }
 
     if (key === "POST /auth/logout") {
@@ -1909,7 +2216,23 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       assistant: cfg.assistantDefinition ? await cfg.assistantDefinition() : { identity: undefined, files: [] },
       compute: cfg.compute?.(),
       routineGrants: await routineGrantsNow(),
+      connections: await connectionsForActors(),
     });
+  }
+
+  /**
+   * Every connection with its tools and the offer switch (T4-10), from the
+   * proxy's own listing — `describePermissions` draws those each actor
+   * reaches as rows *reached through Metistry*. A listing that fails is no
+   * rows, never a failed request: the table is then only what the scope says.
+   */
+  async function connectionsForActors(): Promise<{ name: string; offered: boolean; tools: { name: string; group: ToolGroup; mode: ToolMode }[] }[]> {
+    if (!cfg.connectionsProxy) return [];
+    try {
+      return (await cfg.connectionsProxy.list()).map((c) => ({ name: c.name, offered: c.offer_to_agents, tools: c.tools.map((t) => ({ name: t.name, group: t.group, mode: t.mode })) }));
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -2147,10 +2470,17 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // an `until`. It leaves the queue, it comes back on its own, and nothing
     // downstream ever sees a decision the user did not make.
     if (verb === "later") {
+      // An injected clock (`cfg.now`: the fixture recorder, tests) stamps
+      // `snoozed_until` from it too — the response hands this value straight
+      // back (`POST /api/proposals/batch`'s `results[].snoozed_until`), so
+      // Postgres's wall clock left it moving on every re-record, the same
+      // way #451 found for audit rows. Absent (every install) = the wall
+      // clock, which `now()` already wrote.
+      const snoozedUntil = cfg.now ? new Date(cfg.now().getTime() + SNOOZE_HOURS * 3_600_000).toISOString() : null;
       const { rows } = await db.query(
-        `UPDATE proposals SET snoozed_until = now() + make_interval(hours => $2)
+        `UPDATE proposals SET snoozed_until = coalesce($3::timestamptz, now() + make_interval(hours => $2))
          WHERE id = $1 AND decision = 'pending' RETURNING snoozed_until`,
-        [id, SNOOZE_HOURS],
+        [id, SNOOZE_HOURS, snoozedUntil],
       );
       await audit("triage", "later", rows.length === 1, { proposal: row.id, kind: row.kind, hours: SNOOZE_HOURS });
       if (rows.length === 1) return { status: 200, body: { ok: true, snoozed_until: rows[0]!.snoozed_until } };
@@ -2312,6 +2642,33 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         }
         return failedAnswer(id, verb, err);
       }
+    }
+
+    // A meeting's transcript (T8-7, C77 and C81; meeting-anchors.ts): the
+    // owner's Approve is where the jots they made during the recording move
+    // from (session, offset) to the transcript's path in Journal/Transcripts/.
+    // Only on a card the inbox drain raised from the owner's own door — an
+    // agent's row with the same group promotes nothing — and before the row
+    // is settled, so a vault that cannot be reached leaves it pending (C45).
+    // Accept All is one of these per row, in order, never a batch: the batch
+    // refuses `allow` because this is exactly the kind of per-row consequence
+    // it cannot carry.
+    let anchored: AnchorReceipt | undefined;
+    const meetingAnchor = verb === "allow" ? meetingAnchorOf(row) : undefined;
+    if (meetingAnchor) {
+      try {
+        anchored = await promoteMeetingJots(db, cfg.vault, meetingAnchor, Number(row.id));
+      } catch (err) {
+        if (err instanceof VaultError) {
+          await audit("triage", "meeting_anchors", false, { proposal: row.id, session: meetingAnchor.session, error: err.code });
+          return refuseAnswer(id, verb, err.code, err.message);
+        }
+        return failedAnswer(id, verb, err);
+      }
+      await db.query(`UPDATE proposals SET payload = payload || jsonb_build_object('anchored', $2::jsonb) WHERE id = $1 AND decision = 'pending'`, [
+        id,
+        JSON.stringify({ ...anchored, at: new Date().toISOString(), by: "user" }),
+      ]);
     }
 
     // Allowing an `action` is the second executable verb (ADOPT 6,
@@ -2548,9 +2905,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       ...(acted ? { action: acted.kind } : {}),
       ...(granted ? { granted: granted.area, agent: granted.agent } : {}),
       ...(rolledBack ? { rolled_back: rolledBack.runs_in === "console" ? rolledBack.sha : "runs_in_cli" } : {}),
+      ...(anchored ? { meeting: anchored.session, anchored: anchored.promoted.length } : {}),
     });
     if (rows.length === 1) {
-      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(restored ? { restored } : {}), ...(rolledBack ? { rolled_back: rolledBack } : {}), ...(scheduledApplied ? { scheduled: scheduledApplied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}) } };
+      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(restored ? { restored } : {}), ...(rolledBack ? { rolled_back: rolledBack } : {}), ...(scheduledApplied ? { scheduled: scheduledApplied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}), ...(anchored ? { anchored } : {}) } };
     }
     // lost the race between the read above and this update: someone else decided it
     const now = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];

@@ -159,6 +159,12 @@ private func stepModel(_ runner: RecordingRunner) -> ComputeStepModel {
     // so `providers add` finds it in the environment and asks for nothing.
     #expect(!ComputeTemplate.applefm.needsKey)
     #expect(ComputeStepModel.keyNote.contains("standard input"))
+    // T4-18: the key is one of THIS instance's secrets, referenced from
+    // compute.yaml — not the per-user Keychain item every instance shared
+    #expect(ComputeStepModel.keyNote.contains("this instance\u{2019}s own secrets"))
+    #expect(ComputeStepModel.keyNote.contains("only a reference"))
+    #expect(!ComputeStepModel.keyNote.contains("every instance on this Mac shares it"))
+    #expect(!ComputeStepModel.keyNote.contains("under your user account"))
 }
 
 /// Records what each call was handed, and answers a scripted list.

@@ -8,7 +8,7 @@
 // lacks a verb the app says so instead of growing a second implementation.
 //
 // REFRESH. Doctor is re-run when the menu opens and every 30s while it stays
-// open. `doctor --json` is a full sweep — it probes every bridge over HTTP and
+// open. `doctor --check --json` is a full sweep — it probes every bridge over HTTP and
 // runs `docker compose ps` — so it is far too heavy to poll continuously; the
 // watchdog already keeps a liveness view of the same components, and its feed is
 // the intended faster source once the app has a read path to it (a management

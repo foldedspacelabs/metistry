@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/routines",
   "private": true,
-  "version": "0.15.1",
+  "version": "0.17.2",
   "description": "Scheduled behaviors (invariant 5: directory + manifest each). Executed by the console's routine runner; silence-default — a routine with nothing to say emits nothing.",
   "license": "Apache-2.0",
   "type": "module",
@@ -19,10 +19,10 @@
   },
   "devDependencies": {
     "@foldedspacelabs/metistry-queries": "workspace:*",
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
-    "pg": "^8.23.0",
+    "pg": "^8.23.1",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.1.0"
   }
 }

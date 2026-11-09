@@ -28,6 +28,22 @@ struct ProcessCommandRunner: CommandRunner {
         standardInput: String?,
         onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
+        try await run(
+            executable: executable, arguments: arguments, environment: environment,
+            currentDirectory: currentDirectory, standardInput: standardInput,
+            terminateOnCancel: false, onOutput: onOutput
+        )
+    }
+
+    func run(
+        executable: URL,
+        arguments: [String],
+        environment: [String: String],
+        currentDirectory: URL?,
+        standardInput: String?,
+        terminateOnCancel: Bool,
+        onOutput: @escaping @Sendable (OutputLine) -> Void
+    ) async throws -> CommandResult {
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw CommandRunnerError.notExecutable(executable)
         }
@@ -61,6 +77,12 @@ struct ProcessCommandRunner: CommandRunner {
             collector.consume(handle.availableData, from: .standardError)
         }
 
+        // The exit is recorded before the child exists, so an exit that lands
+        // before anyone is waiting for it (a task already cancelled, a child
+        // that ends at once) is remembered rather than missed.
+        let exited = ExitSignal()
+        process.terminationHandler = { _ in exited.fire() }
+
         do {
             try process.run()
         } catch {
@@ -73,8 +95,14 @@ struct ProcessCommandRunner: CommandRunner {
         }
         try? stdin.fileHandleForWriting.close()
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            process.terminationHandler = { _ in continuation.resume() }
+        // Only a caller that asked (`terminateOnCancel`: the Compute pane's
+        // Cancel Download) has its child ended when its task is cancelled —
+        // SIGTERM, then the same exit path as any other termination. Every
+        // other caller's verb runs to completion however its task ends.
+        await withTaskCancellationHandler {
+            await exited.wait()
+        } onCancel: {
+            if terminateOnCancel, process.isRunning { process.terminate() }
         }
 
         out.fileHandleForReading.readabilityHandler = nil
@@ -105,6 +133,34 @@ struct ProcessCommandRunner: CommandRunner {
             .joined(separator: ":")
         for (key, value) in overrides { env[key] = value }
         return env
+    }
+}
+
+/// "The child has exited", set once and awaitable any number of times, in
+/// either order: `fire()` before `wait()` is remembered.
+private final class ExitSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func fire() {
+        let pending: [CheckedContinuation<Void, Never>] = lock.withLock {
+            fired = true
+            defer { waiters.removeAll() }
+            return waiters
+        }
+        for waiter in pending { waiter.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { (waiter: CheckedContinuation<Void, Never>) in
+            let done = lock.withLock { () -> Bool in
+                if fired { return true }
+                waiters.append(waiter)
+                return false
+            }
+            if done { waiter.resume() }
+        }
     }
 }
 

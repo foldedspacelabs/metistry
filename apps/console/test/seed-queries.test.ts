@@ -12,8 +12,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { parse } from "yaml";
 import { QueryStore, type SqlExecutor } from "@foldedspacelabs/metistry-queries";
-import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, finishRun, isRequestKind, requestWordOf, requestWordSql, startRun } from "@foldedspacelabs/metistry-core";
+import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, finishRun, isRequestKind, normalizeRepoRemote, recentSessionsForCaller, requestWordOf, requestWordSql, startRun } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
+import { privateTables } from "./private-tables.js";
+import { REMOTE_FIXTURES } from "../../../packages/core/test/fixtures/remotes.js";
 
 loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
@@ -61,6 +63,7 @@ const REQUIRED = [
   "knowledge_areas", // GET /api/knowledge/areas — the area rollup the Knowledge screen lists
   "secret_last_used", // GET /api/secrets — *last used*, from the names the egress fill stamps on its run (never a value)
   "day_close", // POST /api/today/close — what the day did to the owner's tasks, the section Close the Day writes
+  "recording_state", // GET /api/recordings/:id — a recording's retention state, the dates computed in the query (T8-4)
 ];
 
 // The daily flow's five (docs/product/daily-flow-spec.md §11, P1-5). Listed
@@ -189,8 +192,20 @@ describe("seed queries", () => {
     // `tracker_closed` (T4-26) says which of the owner's tracker issues the
     // source closed — Today's *Done in Linear*, for Today to read, never a
     // way for an agent to probe which refs exist.
+    // `recording_state` (T8-4) is a recording's retention state — when the
+    // owner recorded a meeting, which apps it heard, where its transcript
+    // is: `GET /api/recordings/:id`'s alone, never an agent's.
+    // `project_for_repo` (CM-3) is a vault path and the owner's title for a
+    // page they wrote; `recent_sessions` (CM-4) is vault paths, the files
+    // the owner touched and their own first prompt. Both are CM-1's
+    // briefing route's to read under `canSeeUnder`, never a way past the
+    // knowledge tiers for a `queries: true` grant.
+    // `briefing_page_handles` (CM-1, X-128) is vault paths and titles around
+    // the owner's project page — the briefing route's to read under the
+    // caller's grant, never a way to walk the link graph with `queries: true`.
     expect(routeBacked.sort()).toEqual([
       "board",
+      "briefing_page_handles",
       "calendar_event",
       "collector_health",
       "connection_calls",
@@ -205,6 +220,9 @@ describe("seed queries", () => {
       "pending_count",
       "pending_requests",
       "people_by_email",
+      "project_for_repo",
+      "recent_sessions",
+      "recording_state",
       "route_features",
       "routine_history",
       "secret_last_used",
@@ -507,6 +525,160 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     } finally {
       await pool.query(`DELETE FROM people_emails WHERE path = ANY($1::text[])`, [[jim, twinA, twinB]]);
       await pool.query(`DELETE FROM knowledge_files WHERE path = ANY($1::text[])`, [[jim, twinA, twinB]]);
+    }
+  });
+
+  // CM-3: a repository → the project page the owner wrote for it. The SQL
+  // in project_for_repo.yaml reduces the caller's remote the way core's
+  // normalizeRepoRemote reduced the stored one; this is the parity test —
+  // every raw spelling below is stored through the TypeScript and looked up
+  // through the SQL, so the two cannot drift apart unnoticed.
+  it("project_for_repo: every clone spelling in REMOTE_FIXTURES finds the one page the TypeScript stored it under; two claimants, an unknown remote and a non-remote resolve to nothing (never guessed)", async () => {
+    const tag = `pfr${Date.now()}`;
+    // one page per distinct canonical remote in the shared fixture list — the
+    // TS side stores, the SQL side looks up, so the two normalisers are held
+    // to the same spellings (an upper-case SSH user among them)
+    const canonicals = [...new Set(REMOTE_FIXTURES.map(([, c]) => c))];
+    const pageFor = new Map(canonicals.map((c, i) => [c, `Projects/${tag} Page ${i}.md`]));
+    const pages = [...pageFor.values()];
+    const twinA = `Projects/${tag} Twin A.md`;
+    const twinB = `Projects/${tag} Twin B.md`;
+    const shared = normalizeRepoRemote(`https://github.com/${tag}/shared`)!;
+    for (const [c, path] of pageFor) {
+      await pool.query(`INSERT INTO knowledge_files (path, mtime, content_hash, title, description) VALUES ($1, now(), 'h', $2, $3)`, [path, `${tag} ${c}`, `page for ${c}`]);
+      await pool.query(`INSERT INTO project_repos (remote, path) VALUES ($1, $2)`, [normalizeRepoRemote(c), path]); // stored through the TypeScript
+    }
+    await pool.query(`INSERT INTO knowledge_files (path, mtime, content_hash) VALUES ($1, now(), 'h2'), ($2, now(), 'h3')`, [twinA, twinB]);
+    await pool.query(`INSERT INTO project_repos (remote, path) VALUES ($1, $2), ($1, $3)`, [shared, twinA, twinB]);
+    try {
+      for (const [raw, canonical] of REMOTE_FIXTURES) {
+        expect(normalizeRepoRemote(raw), raw).toBe(canonical); // the TS side agrees with the list…
+        const rows = (await store.run("project_for_repo", { remote: raw })).rows; // …and the SQL side finds what the TS side stored
+        expect(rows, raw).toEqual([{ remote: canonical, path: pageFor.get(canonical), title: `${tag} ${canonical}`, description: `page for ${canonical}` }]);
+      }
+      // the path's case is kept: a different spelling is a different repository
+      expect((await store.run("project_for_repo", { remote: "ssh://git@gitlab.example:2222/group/sub/REPO" })).rows).toHaveLength(0);
+      // two pages claim one remote: neither is the project
+      expect((await store.run("project_for_repo", { remote: `git@github.com:${tag}/shared.git` })).rows).toHaveLength(0);
+      // an unmapped repository is no project — no fallback on a basename or a prefix
+      expect((await store.run("project_for_repo", { remote: `https://github.com/${tag}/metistry-instance` })).rows).toHaveLength(0);
+      expect((await store.run("project_for_repo", { remote: "github.com/foldedspacelabs" })).rows).toHaveLength(0);
+      expect((await store.run("project_for_repo", { remote: "metistry" })).rows).toHaveLength(0);
+      // not plainly a remote: matches nothing rather than something
+      for (const bad of ["", "   ", "%", "https://github.com/folded spacelabs/metistry", "github.com", "/x/y", "x'; DROP TABLE project_repos; --"]) {
+        expect((await store.run("project_for_repo", { remote: bad })).rows, JSON.stringify(bad)).toHaveLength(0);
+      }
+      expect((await store.run("project_for_repo")).rows).toHaveLength(0); // the default, blank
+    } finally {
+      await pool.query(`DELETE FROM project_repos WHERE path = ANY($1::text[])`, [[...pages, twinA, twinB]]);
+      await pool.query(`DELETE FROM knowledge_files WHERE path = ANY($1::text[])`, [[...pages, twinA, twinB]]);
+    }
+  });
+
+  // CM-4: last time in this repository, as handles. The ruling of 2026-10-04
+  // gates a session on the fold: until folded, only the same project may see
+  // it (which a named query cannot tell — so it serves none unless its caller
+  // sets `unfolded`, which core's recentSessionsForCaller does only after
+  // proving the project); once folded, anyone with the grant may. An agent credential's capture is never the
+  // owner's session, and the agent's reply has no column to be served from.
+  it("recent_sessions: folded sessions in the repo, newest first, handles only — never an unfolded one, an agent's capture, another repo's, or one outside the window", async () => {
+    const tag = `rs${Date.now()}`;
+    const repo = `${tag}-Repo`;
+    const paths = ["folded-a", "folded-b", "unfolded", "agent", "other-repo", "old", "rejected"].map((k) => `Inbox/claude-code-session-${tag}-${k}.md`);
+    const [foldedA, foldedB, unfolded, agentRow, otherRepo, old, rejected] = paths as [string, string, string, string, string, string, string];
+    // the fold's anchor: the newest fold that enqueued a turn, two hours ago
+    const anchorRun = await pool.query(
+      `INSERT INTO runs (component, kind, ok, ts, meta) VALUES ('knowledge-fold', 'routine_run', true, now() - interval '2 hours', '{"folded":"true"}') RETURNING id`,
+    );
+    const session = (path: string, repoName: string, started: string, turns: number, prompt: string) =>
+      pool.query(
+        `INSERT INTO vault_sessions (path, content_hash, session_id, tool, repo, cwd, branch, started, ended, turns, files, first_prompt)
+         VALUES ($1, 'h', 'sid', 'claude-code', $2, '/w/' || $2, 'main', $3::timestamptz, $3::timestamptz + interval '20 minutes', $4, '["src/a.ts","src/b.ts"]', $5)`,
+        [path, repoName, started, turns, prompt],
+      );
+    const inboxRow = (path: string, ts: string, agent: string | null, status = "classified") =>
+      pool.query(`INSERT INTO inbox (source, path, note, ts, source_agent, status) VALUES ('http', $1, 'note', $2::timestamptz, $3, $4)`, [path, ts, agent, status]);
+    const dayAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+    try {
+      await session(foldedA, repo, dayAgo(1), 3, "Fix the loader test");
+      await inboxRow(foldedA, dayAgo(1), null);
+      await session(foldedB, repo.toLowerCase(), dayAgo(3), 1, "Rename the module"); // the capture spelt the checkout lowercase
+      await inboxRow(foldedB, dayAgo(3), null);
+      await session(unfolded, repo, dayAgo(0), 2, "STILL-WAITING-FOR-THE-FOLD");
+      await inboxRow(unfolded, new Date(Date.now() + 86_400_000).toISOString(), null); // after every fold anchor there could be
+      await session(agentRow, repo, dayAgo(2), 2, "PLANTED-BY-AN-AGENT");
+      await inboxRow(agentRow, dayAgo(2), "research-agent");
+      await session(otherRepo, `${tag}-Other`, dayAgo(1), 2, "ANOTHER-REPO");
+      await inboxRow(otherRepo, dayAgo(1), null);
+      await session(old, repo, dayAgo(40), 2, "TOO-OLD");
+      await inboxRow(old, dayAgo(40), null);
+      await session(rejected, repo, dayAgo(1), 2, "THE-OWNER-SAID-NO");
+      await inboxRow(rejected, dayAgo(1), null, "rejected");
+
+      const rows = (await store.run("recent_sessions", { repo: repo.toUpperCase() })).rows; // case-insensitive, like the Mac's filesystem
+      expect(rows.map((r) => r.path)).toEqual([foldedA, foldedB]);
+      expect(rows[0]).toMatchObject({ tool: "claude-code", repo, branch: "main", turns: 3, files: ["src/a.ts", "src/b.ts"], first_prompt: "Fix the loader test" });
+      expect(Object.keys(rows[0]!).sort()).toEqual(["branch", "date", "files", "first_prompt", "folded", "path", "repo", "tool", "turns"]); // handles only — no reply, no cwd, no session id
+      const dump = JSON.stringify(rows);
+      for (const never of ["STILL-WAITING", "PLANTED", "ANOTHER-REPO", "TOO-OLD", "SAID-NO"]) expect(dump).not.toContain(never);
+
+      expect(rows.map((r) => r.folded)).toEqual([true, true]);
+      // the same-project arm (X-131): the caller sets `unfolded` and the waiting session appears, flagged as such —
+      // and it is still not an agent's capture, another repo's, a rejected one, or one outside the window
+      const both = (await store.run("recent_sessions", { repo, unfolded: true })).rows;
+      expect(both.map((r) => [r.path, r.folded])).toEqual([[unfolded, false], [foldedA, true], [foldedB, true]]);
+      const bothDump = JSON.stringify(both);
+      for (const never of ["PLANTED", "ANOTHER-REPO", "TOO-OLD", "SAID-NO"]) expect(bothDump).not.toContain(never);
+      expect((await store.run("recent_sessions", { repo, unfolded: false })).rows.map((r) => r.path)).toEqual([foldedA, foldedB]);
+      // the window widens to the old one; the gates do not move
+      expect((await store.run("recent_sessions", { repo, days: 60 })).rows.map((r) => r.path)).toEqual([foldedA, foldedB, old]);
+      expect((await store.run("recent_sessions", { repo, days: 100_000 })).rows.map((r) => r.path)).toEqual([foldedA, foldedB, old]); // bounded to a year, still not the unfolded one
+      expect((await store.run("recent_sessions", { repo, limit: 1 })).rows.map((r) => r.path)).toEqual([foldedA]);
+      // blank, a near miss, a hostile value: nothing
+      for (const bad of ["", "  ", `${tag}`, `${tag}-Rep`, "%", `${repo}' OR 1=1 --`]) expect((await store.run("recent_sessions", { repo: bad })).rows, bad).toHaveLength(0);
+      expect((await store.run("recent_sessions")).rows).toHaveLength(0);
+    } finally {
+      await pool.query(`DELETE FROM vault_sessions WHERE path = ANY($1::text[])`, [paths]);
+      await pool.query(`DELETE FROM inbox WHERE path = ANY($1::text[])`, [paths]);
+      await pool.query(`DELETE FROM runs WHERE id = $1`, [anchorRun.rows[0]!.id]);
+    }
+  });
+
+  // X-131, end to end: core's recentSessionsForCaller over the REAL queries.
+  it("recentSessionsForCaller: the waiting session reaches an agent in the repository's project and no other", async () => {
+    const tag = `rc${Date.now()}`;
+    const repo = `${tag}-repo`;
+    const page = `Projects/${tag}x.md`; // slug: `<tag>x`
+    const remote = `github.com/org/${repo}`; // a remote ends in the checkout's name, or the same-project arm is closed
+    const [folded, waiting] = [`Inbox/claude-code-session-${tag}-f.md`, `Inbox/claude-code-session-${tag}-w.md`];
+    const anchorRun = await pool.query(
+      `INSERT INTO runs (component, kind, ok, ts, meta) VALUES ('knowledge-fold', 'routine_run', true, now() - interval '2 hours', '{"folded":"true"}') RETURNING id`,
+    );
+    const run = async (name: string, params: Record<string, string | number | boolean>) => (await store.run(name, params)).rows;
+    try {
+      await pool.query(`INSERT INTO project_repos (remote, path) VALUES ($1, $2)`, [remote, page]);
+      for (const [path, ago, prompt] of [[folded, 1, "FOLDED-PROMPT"], [waiting, -1, "WAITING-PROMPT"]] as const) {
+        await pool.query(
+          `INSERT INTO vault_sessions (path, content_hash, tool, repo, started, turns, files, first_prompt) VALUES ($1, 'h', 'claude-code', $2, now() - make_interval(days => 0) - ($3 * interval '1 day'), 2, '[]', $4)`,
+          [path, repo, Math.max(ago, 0), prompt],
+        );
+        await pool.query(`INSERT INTO inbox (source, path, note, ts, status) VALUES ('http', $1, 'note', now() - ($2 * interval '1 day'), 'classified')`, [path, ago]);
+      }
+      const ask = (callerProjects: string[], remoteArg: string | null = remote) =>
+        recentSessionsForCaller(run, { repo, remote: remoteArg, callerProjects });
+      expect((await ask([`${tag}x`])).map((h) => h.path)).toEqual([waiting, folded]); // same project: both, newest first
+      expect((await ask(["someone-else"])).map((h) => h.path)).toEqual([folded]);
+      expect((await ask([])).map((h) => h.path)).toEqual([folded]);
+      expect((await ask([`${tag}x`], null)).map((h) => h.path)).toEqual([folded]); // no remote, no project
+      expect((await ask([`${tag}x`], `github.com/${tag}/another`)).map((h) => h.path)).toEqual([folded]); // a repository no page claims
+      // two pages claim the remote: ambiguous is none, so the waiting session stays back
+      await pool.query(`INSERT INTO project_repos (remote, path) VALUES ($1, $2)`, [remote, `Projects/${tag}y.md`]);
+      expect((await ask([`${tag}x`, `${tag}y`])).map((h) => h.path)).toEqual([folded]);
+    } finally {
+      await pool.query(`DELETE FROM project_repos WHERE remote = $1`, [remote]);
+      await pool.query(`DELETE FROM vault_sessions WHERE path = ANY($1::text[])`, [[folded, waiting]]);
+      await pool.query(`DELETE FROM inbox WHERE path = ANY($1::text[])`, [[folded, waiting]]);
+      await pool.query(`DELETE FROM runs WHERE id = $1`, [anchorRun.rows[0]!.id]);
     }
   });
 
@@ -1183,6 +1355,25 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
   // TIMELINE. A capture is in it the instant it lands — the accidental
   // latency the review found was that it waited for the `*/5` drain — and the
   // stream is filterable by kind and pullable incrementally.
+  // Q-c (ruled 2026-10-04): `activity_feed` is servable through `queries_run`
+  // on any tier, and a transcript's first spoken line must not be. The capture
+  // branch reads the path alone.
+  it("activity_feed shows a capture's file name as its subject, and no line of the note reaches the feed", async () => {
+    const tag = `spoken-${Date.now()}`;
+    const spoken = ["my password is hunter2 and I owe the landlord", "second spoken line", "third spoken line"];
+    await pool.query(`INSERT INTO inbox (source, path, note, status) VALUES ($1, $2, $3, 'new')`, [
+      tag,
+      `Inbox/Recordings/${tag}-transcript.md`,
+      `---\ntitle: "a frontmatter title"\n---\n${spoken.join("\n")}`,
+    ]);
+    const rows = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "capture", subject: `${tag}-transcript.md`, detail: `${tag} · new` });
+    const served = JSON.stringify(rows);
+    for (const line of [...spoken, "a frontmatter title"]) expect(served).not.toContain(line);
+    expect(served).not.toContain("hunter2");
+  });
+
   it("activity_feed carries inbox captures, derives a group per row, and filters by kind", async () => {
     const tag = `tl-${Date.now()}`;
     await pool.query(`INSERT INTO inbox (source, path, note, status) VALUES ($1, $2, $3, 'new')`, [
@@ -1196,10 +1387,13 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
       kind: "capture",
       group: "capture",
       actor: tag,
-      subject: "renew the cert", // the first BODY line, not the frontmatter and not the whole note
+      subject: `${tag}.md`, // the file name (Q-c) — no line of the note
       detail: `${tag} · new`, // source · status — the "still being triaged" pill
     });
     expect(String(capture[0]!.ref)).toMatch(/^inbox:\d+$/);
+    // Q-c: the feed is servable through `queries_run` on any tier, so no line of
+    // a note — frontmatter, first spoken line or later ones — reaches any column
+    expect(JSON.stringify(capture[0])).not.toMatch(/renew the cert|second line|ignored|todo/);
 
     // a capture with no note falls back to the file name, never to an empty row
     await pool.query(`INSERT INTO inbox (source, path, status) VALUES ($1, $2, 'new')`, [tag, `Inbox/${tag}-photo.heic`]);
@@ -1917,7 +2111,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
   const DAY = "2026-09-20"; // fixed: nothing here may depend on the clock
 
   /** One vault_tasks row, with the NOT NULLs filled and everything else the caller's. */
-  const task = (pool: pg.Pool, o: Record<string, unknown>) => {
+  const task = (pool: pg.Pool | pg.PoolClient, o: Record<string, unknown>) => {
     const row: Record<string, unknown> = {
       checked: false,
       dropped: false,
@@ -2320,50 +2514,63 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
   // level rather than over HTTP.
   it("pending_count: always one row, a snoozed proposal is not counted, and `waiting` is exactly the pending-and-not-snoozed filter's count", async () => {
     const tag = `pc-${Date.now()}`;
-    const mk = (o: { decision?: string; snoozed?: string } = {}) =>
-      pool.query(
-        `INSERT INTO proposals (kind, source_agent, trust, payload, decision, snoozed_until) VALUES ('report', $1, 'internal', '{}'::jsonb, $2, $3) RETURNING id`,
-        [tag, o.decision ?? "pending", o.snoozed ?? null],
-      );
-    const rawCount = async () =>
-      Number(
-        (
-          await pool.query(
-            `SELECT count(*)::int AS n FROM proposals WHERE decision = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= now())`,
-          )
-        ).rows[0]!.n,
-      );
+    // `pending_count` counts the whole table and takes no filter, so a marker
+    // cannot scope it: any proposal another file raises in parallel would move
+    // the answer. This test counts on a connection whose `proposals` is its own
+    // (test/private-tables.ts) — nothing shared is read, written or deleted.
+    const db = await privateTables(pool, ["proposals"]);
+    const mine = new QueryStore(db);
+    await mine.loadDir(SEED_DIR);
+    try {
+      const mk = (o: { decision?: string; snoozed?: string } = {}) =>
+        db.query(
+          `INSERT INTO proposals (kind, source_agent, trust, payload, decision, snoozed_until) VALUES ('report', $1, 'internal', '{}'::jsonb, $2, $3) RETURNING id`,
+          [tag, o.decision ?? "pending", o.snoozed ?? null],
+        );
+      const rawCount = async () =>
+        Number(
+          (
+            await db.query(
+              `SELECT count(*)::int AS n FROM proposals WHERE decision = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= now())`,
+            )
+          ).rows[0]!.n,
+        );
 
-    // one row, always — even before this test adds anything of its own
-    const before = (await store.run("pending_count")).rows;
-    expect(before).toHaveLength(1);
-    expect(before[0]!.waiting).toBe(await rawCount());
+      // one row, always — even before this test adds anything of its own
+      const before = (await mine.run("pending_count")).rows;
+      expect(before).toHaveLength(1);
+      expect(before[0]!.waiting).toBe(0); // the shadow starts empty: no one else's row is in this count
+      expect(before[0]!.oldest_ts).toBeNull();
+      expect(before[0]!.waiting).toBe(await rawCount());
 
-    // a pending, unsnoozed row: the count moves by exactly one
-    await mk();
-    const withPending = (await store.run("pending_count")).rows;
-    expect(withPending).toHaveLength(1);
-    expect(withPending[0]!.waiting).toBe((before[0]!.waiting as number) + 1);
-    expect(withPending[0]!.waiting).toBe(await rawCount());
-    expect(withPending[0]!.oldest_ts).not.toBeNull();
+      // a pending, unsnoozed row: the count moves by exactly one
+      await mk();
+      const withPending = (await mine.run("pending_count")).rows;
+      expect(withPending).toHaveLength(1);
+      expect(withPending[0]!.waiting).toBe((before[0]!.waiting as number) + 1);
+      expect(withPending[0]!.waiting).toBe(await rawCount());
+      expect(withPending[0]!.oldest_ts).not.toBeNull();
 
-    // a row snoozed into the future: `later` is not an answer, but it has
-    // left the queue until its instant arrives — the count does not move
-    await mk({ snoozed: "2099-01-01T00:00:00Z" });
-    const withSnoozed = (await store.run("pending_count")).rows;
-    expect(withSnoozed).toHaveLength(1);
-    expect(withSnoozed[0]!.waiting).toBe(withPending[0]!.waiting);
-    expect(withSnoozed[0]!.waiting).toBe(await rawCount());
+      // a row snoozed into the future: `later` is not an answer, but it has
+      // left the queue until its instant arrives — the count does not move
+      await mk({ snoozed: "2099-01-01T00:00:00Z" });
+      const withSnoozed = (await mine.run("pending_count")).rows;
+      expect(withSnoozed).toHaveLength(1);
+      expect(withSnoozed[0]!.waiting).toBe(withPending[0]!.waiting);
+      expect(withSnoozed[0]!.waiting).toBe(await rawCount());
 
-    // a decided row: also not pending, also does not move it
-    await mk({ decision: "allow" });
-    const withDecided = (await store.run("pending_count")).rows;
-    expect(withDecided[0]!.waiting).toBe(withPending[0]!.waiting);
-    expect(withDecided[0]!.waiting).toBe(await rawCount());
+      // a decided row: also not pending, also does not move it
+      await mk({ decision: "allow" });
+      const withDecided = (await mine.run("pending_count")).rows;
+      expect(withDecided[0]!.waiting).toBe(withPending[0]!.waiting);
+      expect(withDecided[0]!.waiting).toBe(await rawCount());
 
-    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [tag]);
-    // back to the baseline once this test's own rows are gone
-    expect((await store.run("pending_count")).rows[0]!.waiting).toBe(before[0]!.waiting);
+      await db.query(`DELETE FROM proposals WHERE source_agent = $1`, [tag]);
+      // back to the baseline once this test's own rows are gone
+      expect((await mine.run("pending_count")).rows[0]!.waiting).toBe(before[0]!.waiting);
+    } finally {
+      await db.done();
+    }
   });
 
   it("pending_requests: every stored kind reads as the request type table says — action as action — and a kind it does not know as a report", async () => {
@@ -2391,49 +2598,57 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
   // directory listing `knowledge_pages` refuses to publish), and the reason
   // it is the only one of the five that is `expose: generic`.
   it("task_ageing: the measure only — buckets, totals, and a source KIND that can never be a path", async () => {
-    await pool.query(`DELETE FROM vault_tasks`);
     const tag = `ta-${Date.now()}`;
-    await task(pool, { path: `${tag}/a.md`, task_key: "t1", line_no: 1, text: "Fresh", text_norm: "fresh", first_seen_on: DAY });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t2", line_no: 2, text: "Three days", text_norm: "three days", first_seen_on: "2026-09-17", due: "2026-09-18" });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t3", line_no: 3, text: "A month", text_norm: "a month", first_seen_on: "2026-08-15", waiting: true, assigned: "People/Jim Fallon.md" });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t4", line_no: 4, text: "From a meeting", text_norm: "from a meeting", first_seen_on: "2026-09-19", source: `meeting:${tag}/Journal/Meetings/secret-topic.md` });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t5", line_no: 5, text: "Closed", text_norm: "closed", checked: true, done_on: "2026-09-19", first_seen_on: "2026-09-18" });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t6", line_no: 6, text: "A rule", text_norm: "a rule", recur_rule: "every week", recur_next: DAY });
-    await task(pool, { path: `${tag}/a.md`, task_key: "t7", line_no: 7, text: "Unreadable", text_norm: "unreadable", parse_warning: "due nextweek", first_seen_on: DAY });
+    // `task_ageing` measures the whole table and takes no filter (that is its
+    // design), so it runs on a connection whose `vault_tasks` is its own
+    // (test/private-tables.ts). It used to empty the real table first — which
+    // took the rows out from under the files reading their own (X-25).
+    const db = await privateTables(pool, ["vault_tasks"]);
+    const ageing = new QueryStore(db);
+    await ageing.loadDir(SEED_DIR);
+    try {
+      await task(db, { path: `${tag}/a.md`, task_key: "t1", line_no: 1, text: "Fresh", text_norm: "fresh", first_seen_on: DAY });
+      await task(db, { path: `${tag}/a.md`, task_key: "t2", line_no: 2, text: "Three days", text_norm: "three days", first_seen_on: "2026-09-17", due: "2026-09-18" });
+      await task(db, { path: `${tag}/a.md`, task_key: "t3", line_no: 3, text: "A month", text_norm: "a month", first_seen_on: "2026-08-15", waiting: true, assigned: "People/Jim Fallon.md" });
+      await task(db, { path: `${tag}/a.md`, task_key: "t4", line_no: 4, text: "From a meeting", text_norm: "from a meeting", first_seen_on: "2026-09-19", source: `meeting:${tag}/Journal/Meetings/secret-topic.md` });
+      await task(db, { path: `${tag}/a.md`, task_key: "t5", line_no: 5, text: "Closed", text_norm: "closed", checked: true, done_on: "2026-09-19", first_seen_on: "2026-09-18" });
+      await task(db, { path: `${tag}/a.md`, task_key: "t6", line_no: 6, text: "A rule", text_norm: "a rule", recur_rule: "every week", recur_next: DAY });
+      await task(db, { path: `${tag}/a.md`, task_key: "t7", line_no: 7, text: "Unreadable", text_norm: "unreadable", parse_warning: "due nextweek", first_seen_on: DAY });
 
-    const { rows } = await store.run("task_ageing", { today: DAY, days: 7 });
-    const total = rows.find((r) => r.row_kind === "total")!;
-    expect(rows[0]).toBe(total); // the total reads first
-    expect(total).toMatchObject({ label: null });
-    expect(Number(total.n)).toBe(5); // five open non-rule lines
-    expect(Number(total.recurrence_rules)).toBe(1); // counted on its own line, never mixed in
-    expect(Number(total.overdue)).toBe(1);
-    expect(Number(total.carried)).toBe(1);
-    expect(Number(total.waiting)).toBe(1);
-    expect(Number(total.delegated)).toBe(1);
-    expect(Number(total.parse_warnings)).toBe(1);
-    expect(Number(total.unscheduled)).toBe(4);
-    expect(Number(total.done_in_window)).toBe(1);
-    expect(Number(total.created_in_window)).toBe(5); // six non-rule lines, one of them first seen 2026-08-15
-    expect(Number(total.oldest_open_days)).toBe(36);
-    expect(Number(total.completion_rate)).toBeCloseTo(1 / 5);
+      const { rows } = await ageing.run("task_ageing", { today: DAY, days: 7 });
+      const total = rows.find((r) => r.row_kind === "total")!;
+      expect(rows[0]).toBe(total); // the total reads first
+      expect(total).toMatchObject({ label: null });
+      expect(Number(total.n)).toBe(5); // five open non-rule lines
+      expect(Number(total.recurrence_rules)).toBe(1); // counted on its own line, never mixed in
+      expect(Number(total.overdue)).toBe(1);
+      expect(Number(total.carried)).toBe(1);
+      expect(Number(total.waiting)).toBe(1);
+      expect(Number(total.delegated)).toBe(1);
+      expect(Number(total.parse_warnings)).toBe(1);
+      expect(Number(total.unscheduled)).toBe(4);
+      expect(Number(total.done_in_window)).toBe(1);
+      expect(Number(total.created_in_window)).toBe(5); // six non-rule lines, one of them first seen 2026-08-15
+      expect(Number(total.oldest_open_days)).toBe(36);
+      expect(Number(total.completion_rate)).toBeCloseTo(1 / 5);
 
-    const buckets = rows.filter((r) => r.row_kind === "age");
-    expect(buckets.map((b) => [b.label, Number(b.n)])).toEqual([
-      ["today", 2],
-      ["1-3d", 2],
-      ["31-90d", 1],
-    ]);
+      const buckets = rows.filter((r) => r.row_kind === "age");
+      expect(buckets.map((b) => [b.label, Number(b.n)])).toEqual([
+        ["today", 2],
+        ["1-3d", 2],
+        ["31-90d", 1],
+      ]);
 
-    // the KIND, never the value: `meeting:<path>` must not put a vault path
-    // into an aggregate the generic door serves
-    const sources = rows.filter((r) => r.row_kind === "source");
-    expect(sources.map((s) => s.label).sort()).toEqual(["meeting", "typed"]);
-    expect(JSON.stringify(rows)).not.toContain("secret-topic");
-    expect(JSON.stringify(rows)).not.toContain(tag);
-    expect(JSON.stringify(rows)).not.toContain("Jim");
-
-    await pool.query(`DELETE FROM vault_tasks`);
+      // the KIND, never the value: `meeting:<path>` must not put a vault path
+      // into an aggregate the generic door serves
+      const sources = rows.filter((r) => r.row_kind === "source");
+      expect(sources.map((s) => s.label).sort()).toEqual(["meeting", "typed"]);
+      expect(JSON.stringify(rows)).not.toContain("secret-topic");
+      expect(JSON.stringify(rows)).not.toContain(tag);
+      expect(JSON.stringify(rows)).not.toContain("Jim");
+    } finally {
+      await db.done();
+    }
   });
 
   // T1-11's own test line: "expired rows are not returned" — session_detail

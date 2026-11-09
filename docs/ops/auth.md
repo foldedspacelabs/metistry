@@ -12,7 +12,7 @@ one *principal*.
 | Credential | Presented as | Principal | Reaches |
 | --- | --- | --- | --- |
 | Passkey session | `Cookie: metistry_session=…` | `user` | everything except the `local` routes — minting an agent bearer — which answer `403 local_only` ([client-api.md](client-api.md), "The `local` gate") |
-| **Local owner token** | `Authorization: Bearer $METISTRY_LOCAL_OWNER_TOKEN`, from this machine | `user` | everything except the two session-bound endpoints below |
+| **Local owner token** | `Authorization: Bearer $METISTRY_LOCAL_OWNER_TOKEN`, from this machine, on the console's **main listener** — never on the proxy listener ("The proxy listener", below) | `user` | everything except the two session-bound endpoints below |
 | Host-minted owner token | `Authorization: Bearer …` (an `owner_tokens` row) | `owner_token` | `/capture`, `/message`, `/api/status`, named queries — never management |
 | Agent token | `Authorization: Bearer …` (an `agents` row) | that agent | `/capture` and the mcp-brain mount at `/mcp`; a uniform 403 everywhere else |
 | Crew run token | `Authorization: Bearer …` (an `agents` row, `kind = 'crew'`) | that crew | the same, narrowed to the tool groups its manifest names ([crews.md](crews.md)) |
@@ -201,12 +201,18 @@ machine — are a different question, and they keep registering passkeys
 exactly as before. Nothing about passkey enrollment or login changed.
 
 **The rule.** The token is accepted only when the **connection's peer
-address** is loopback: `127.0.0.1`, `::1`, `::ffff:127.0.0.1`. That
-decision is made from the socket and nothing else. `X-Forwarded-For`,
+address** is loopback — `127.0.0.1`, `::1`, `::ffff:127.0.0.1` — **and the
+connection arrived on the console's main listener**
+(`METISTRY_CONSOLE_HOST:METISTRY_CONSOLE_PORT`). Both facts are read off the
+socket the server accepted and nothing else. `X-Forwarded-For`,
 `Forwarded`, `X-Real-IP` and `Host` are written by the caller, so reading
 any of them would hand the rule to the attacker; there is no configuration
 that turns one of them on, and the misuse tests assert it
-(`apps/console/test/local-owner.test.ts`).
+(`apps/console/test/local-owner.test.ts`). On the **proxy listener** — the
+second place the console answers, for remote-access providers only — the
+token is refused from every peer, loopback included, because the only thing
+a loopback peer proves there is that a tunnel carried the request ("The
+proxy listener", below).
 
 **From anywhere else** the response is a 401 byte-identical to the one an
 unknown token gets — no oracle telling a prober that it holds the right
@@ -220,7 +226,17 @@ from it". On macOS that is the logged-in user — the same claim a platform
 passkey makes. The Keychain is the boundary, and it is the boundary either
 way. What the loopback rule adds is that a token which *leaks* — into a
 log, a screenshot, a synced dotfile — still cannot be replayed from off the
-machine.
+machine **through the console's own ports**. That sentence used to stop
+there, and it was wrong once anything proxied to the console from this Mac:
+a tunnel's agent (`tailscaled`, `cloudflared`, zrok, ngrok) dials the
+console from `127.0.0.1`, so a leaked token sent from a phone *through the
+tunnel* arrived with a loopback peer and was honoured — `local` routes and
+all. That is the finding X-103 closed (plan §2.23): a proxy may be pointed
+only at the proxy listener, where the token is never honoured, and the main
+listener stays where only this Mac's own processes reach it. Pointing a
+proxy at the main port is the one misconfiguration that would reopen it,
+which is why `metistry doctor` fails any provider whose upstream is the
+main port (X-105).
 
 **What it may not do.** Two endpoints act on a device *session row* and so
 need one: `POST /auth/logout` and `/api/push/*` (a push subscription is
@@ -260,6 +276,131 @@ loopback, which is the fail-closed direction; the same container with the
 variable emptied answers 401 to the host. An explicit address or IPv4 CIDR
 is also accepted, for a shape neither of those covers. `0.0.0.0/0` is
 refused rather than honoured.
+
+## The proxy listener
+
+The console answers in **two places**, and which one a request arrived on is
+a fact about the socket — never a header, never an address:
+
+| Listener | Where | For | The local owner token | `local` routes | `Host` |
+| --- | --- | --- | --- | --- | --- |
+| **main** | `METISTRY_CONSOLE_HOST:METISTRY_CONSOLE_PORT` (default `127.0.0.1:8080`) | the Mac app, the CLI, the PWA on this Mac — and nothing that proxies | honoured from a loopback peer (above) | answer, to the token alone | never asked about |
+| **proxy** | the Unix socket `<instance>/.metistry/state/console-proxy.sock` (mode **0600**) and the loopback TCP port `METISTRY_CONSOLE_PROXY_PORT` (default the console port + 1: `8081`) | every remote-access provider's agent — `tailscaled`, `cloudflared`, zrok, ngrok, a TLS terminator for a forwarded port (plan §2.23) | **refused from every peer**, loopback included, and audited (`kind=auth, tool=owner_token_remote, meta.listener=proxy`) — the same uniform 401 an unknown token gets | **never answer**: `403 local_only`, whoever asks, audited with `meta.listener=proxy` | **must be a remote host `METISTRY_ORIGIN` names**, else `421 misdirected` before anything answers |
+
+A request on the proxy listener is **remote by construction**. The listener
+exists because every provider's agent connects to the console *from this
+machine*, so on the main listener a request that crossed a tunnel is
+indistinguishable from the Mac app's; no address rule can tell them apart,
+and the console does not try. Instead the provider is given a listener where
+the question never arises: `local-owner.ts`'s `checkLocalOwner` answers
+`remote` for the token on it whatever the peer says — a loopback address, the
+compose gateway, or no address at all on the socket — and there is no
+configuration that opens the local door there.
+
+**What does work through it** is exactly what a phone needs: the PWA shell,
+the passkey ceremonies, a passkey session on every `owner` route, an agent
+bearer on `/capture` and `/mcp`, `GET /health` and `GET /api/identity`.
+
+**The `Host` rule.** `METISTRY_ORIGIN` lists the origins this console is
+configured for — once a provider is chosen, the remote origin first and the
+loopback origin `init` wrote second (plan §2.23, "How the origin flows").
+The proxy listener answers only a `Host` whose authority matches one of the
+**non-loopback** entries (case-insensitive; `:80` and `:443` elided because
+TLS ended at the provider and the scheme is not on the wire; any other port
+is part of the name, so Funnel on `8443` is `name:8443`). Anything else —
+another name, `127.0.0.1`, `localhost`, the right name on an unconfigured
+port — is `421 misdirected`, decided before the shell, the ceremonies,
+`/health`, `/mcp` and any credential. A **loopback-only install** — every
+install's default — configures no remote host, so its proxy listener refuses
+every request with a message naming Settings ▸ Remote Access; the main
+listener is untouched by any of this. A wrong `Host` is not audited per
+request on purpose: a refused burst is one row (below), and a row per probe
+would make `runs` the thing a scanner fills.
+
+**On the internet: rate limits** (plan §2.23, X-111; `apps/console/src/rate-limit.ts`).
+Funnel, Cloudflare Tunnel, zrok, ngrok and a forwarded port all put the
+sign-in page where any scanner can reach it, so the proxy listener bounds how
+often it answers **without a session** — never who gets in, which stays the
+credential's decision:
+
+| | per client | the ceiling |
+| --- | --- | --- |
+| counts | answers given without a session to one address, per window | answers given without a session by the whole listener, per window |
+| default | `METISTRY_CONSOLE_PROXY_CLIENT_LIMIT=120` | `METISTRY_CONSOLE_PROXY_GLOBAL_LIMIT=1200` |
+| window | `METISTRY_CONSOLE_PROXY_WINDOW_S=60`, fixed and aligned to the clock | the same |
+
+- **What is charged**: the shell's files, `GET /health`, `GET /api/identity`,
+  the four ceremonies (every `public` row of the client API table, read off
+  the table), a wrong `Host`, and **every `401`** — a bearer guessed at
+  `/api/whoami` or at `/mcp` spends the same allowance. One request is one
+  charge, however many gates it passes. A request a credential admits — a
+  passkey session, an agent bearer, the capture token — is **never limited**:
+  the credential is checked first, and only a refusal is counted, so the
+  owner's phone keeps working on an address a scanner shares with it. The one
+  exception is `/mcp`, where the bridge checks the bearer after it has the
+  body: an address already past its limit is answered `429` there bearer or
+  not, and an agent on an exhausted address waits one window.
+- **The client** is the *last* entry of the provider's client-address header
+  — `METISTRY_CONSOLE_PROXY_CLIENT_HEADER`, default `x-forwarded-for` — which
+  is the address the hop nearest to us wrote, whatever the client put in
+  front of it (a provider adapter that knows a better header, Cloudflare's
+  `CF-Connecting-IP`, names it). That header is read **on the proxy listener
+  alone, for limiting alone**: no credential decision reads any forwarded
+  header (`local-owner.ts`, `webauthn.ts`), the main listener never reads it
+  at all, and a test holds that no header — forwarded address, `Forwarded`,
+  `Tailscale-User-Login`, anything — can raise a principal on either listener.
+  With no such header every request through that provider shares one bucket
+  (the provider's own loopback dial), which is the fail-closed direction, and
+  the ceiling bounds it.
+- **A refusal** is `429 rate_limited` with `Retry-After` (whole seconds to the
+  window's end) and a message naming what would permit more: signing in. A
+  client past its own limit does not spend the ceiling — a refusal is not an
+  answer — so one scanner cannot close the sign-in page to everyone; a
+  scanner spread over many addresses meets the ceiling, which then closes it
+  to every stranger (and to no session) until the window turns.
+- **One `runs` row per refused burst**: `kind=auth, tool=rate_limited`, meta
+  `{listener: "proxy", scope: "client" | "global", client, route, limit,
+  window_s}`, written by the first refusal of a window and by nothing after it
+  — the next window's burst is the next row. The limiter is one per console,
+  so the port and the socket add up together, and it holds at most 10 000
+  client keys (the oldest make room) so a varying header cannot grow it.
+
+**On the internet: headers** (`apps/console/src/http-util.ts`
+`PROXY_SECURITY_HEADERS`). Every answer on the proxy listener — the shell, a
+`200`, a `401`, a `421`, a `429`, a `500` — carries
+`Strict-Transport-Security: max-age=31536000; includeSubDomains` (**no
+preload**: the name is the provider's or the owner's, and a preload entry
+outlives a Settings change), a `Content-Security-Policy` written for the shell
+as it is (`default-src 'self'`; scripts and connections from this origin
+alone; style attributes allowed because the shell writes them; `data:`/`blob:`
+images and fonts for the artifact viewer's opaque-origin frame, which inherits
+this policy and narrows it further with its own; `object-src 'none'`,
+`base-uri 'none'`, `form-action 'self'`, `frame-ancestors 'none'`),
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
+`X-Frame-Options: DENY`. The main listener sets none of them: loopback, plain
+HTTP, the Mac app and the CLI — HSTS there would be a lie, and nothing frames
+it. The main listener's behaviour is unchanged by all of this.
+
+**Where it binds.** Under `launchd` the console binds the TCP port on
+`127.0.0.1` and the socket in the instance's state directory; a namespaced
+instance takes the block's second-to-last slot for the port (`base + 6`,
+beside the egress proxy's `base + 7`), because "the console port + 1" there
+is Postgres. Under `compose` the container publishes the port on
+`127.0.0.1` only (`${METISTRY_CONSOLE_PROXY_PORT:-8081}:8081`) and there is
+no socket — the container holds no instance directory (D5). A port the
+console cannot bind is logged and survived: the main listener owes the proxy
+listener nothing, and a provider pointed at a dead proxy port fails to
+connect, which is the fail-closed direction. There is no fallback to the
+main port anywhere.
+
+**Tests.** `apps/console/test/local-owner.test.ts` (the verdicts),
+`apps/console/test/proxy-listener.test.ts` (the `Host` rule),
+`apps/console/test/proxy-listener.integration.test.ts` (the same over the
+port and the socket, with the audit rows they leave and the socket's mode),
+`apps/console/test/rate-limit.test.ts` (the limiter's arithmetic) and
+`apps/console/test/proxy-limits.integration.test.ts` (the 429s, the one row
+per burst, the headers, every header that cannot raise a principal, the exact
+set of routes that answer without a session, and the main listener unchanged).
 
 ## Checking it
 
@@ -437,25 +578,122 @@ the moment the job restarts.
 
 ## Passkeys: origins
 
-`METISTRY_ORIGIN` is the canonical HTTPS origin passkeys bind to. It may be
-a **comma-separated list** when one install is loaded under more than one
-origin (a tailnet name and a public hostname, say) — `@simplewebauthn`
-v13's `expectedOrigin` takes an array. The **first** entry stays canonical:
-it is the rpID's source, what enrolled passkeys record, and the base
-relative URLs resolve against.
+`METISTRY_ORIGIN` is the HTTPS origin passkeys bind to. It may be a
+**comma-separated list** when one install is loaded under more than one
+origin — the remote-access origin and the loopback one `init` wrote
+(design-build-plan §2.23), say — and `@simplewebauthn/server` v14 takes
+`expectedOrigin` and `expectedRPID` as arrays. The **first** entry is
+canonical for two things: it is the base relative URLs resolve against, and
+its host is what a passkey enrolled before migration `0039` reads as.
 
-An origin the console does not expect no longer surfaces as HTTP 500. The
+**The rpID follows the request** (X-104). A passkey is scoped by the browser
+to one rpID — the host it was created on — and is never offered anywhere
+else, so a console that issued every ceremony the first entry's host could
+never finish one at a second origin on another host. Now:
+
+- `POST /auth/enroll/start` and `POST /auth/login/start` read the `Origin`
+  header a browser sends on every POST, match it **exactly** against the
+  list, and issue that origin's host as `rp.id` / `rpId`. An `Origin` outside
+  the list is refused there and then — 401, naming both sides (below) — and an
+  enrolment code is not burned by a refused start.
+- A client that sends no `Origin` — the Mac app's enrolment, which performs
+  its ceremony at `https://<rpID>`, or a probe — is issued the **canonical**
+  origin's host, as every ceremony was before; it states another configured
+  origin with an `Origin` header. `Host` is not read: TLS terminators rewrite
+  it, and the console's one client without a browser reaches it over loopback
+  for a ceremony it performs at the canonical host.
+- `POST /auth/enroll/finish` verifies the browser's own signed statement of
+  the origin against the whole list (`expectedOrigin`), the credential's rpID
+  against every configured host (`expectedRPID`), and records the host the
+  passkey was bound to in `passkeys.rp_id` (`0039`, durable) and the origin
+  the browser stated in `rp_origin`.
+- `POST /auth/login/finish` verifies against the passkey's **own** host —
+  `rp_id`, or the first origin's host when it is null — never the whole
+  list: an assertion claiming a sibling host for a passkey that was never
+  offered there is refused, naming both sides. A passkey from before `0039`
+  therefore signs in at the first origin exactly as it did.
+- `GET /api/devices` serves each passkey's `rp_id`, resolved (a null reads as
+  the first origin's host) so a client never needs the origin list to tell
+  which passkeys a provider change stranded (`docs/ops/client-api.md`).
+
+**Changing the list strands passkeys.** A passkey added at
+`old.example.com` signs in nowhere else; after the origin changes, Devices
+can say so from `rp_id` (*"Added for old.example.com. Remove it and add this
+phone again."*, X-107). Removing the first entry changes what every
+pre-`0039` passkey reads as, so add the new origin and keep the old one first
+until those phones are re-added, or accept re-enrolling them.
+
+An origin the console does not expect never surfaces as HTTP 500. The
 ceremony answers 401 with a reason naming both sides:
 
 ```json
 {"error":{"code":"unauthenticated","message":"origin mismatch: this console
- expects https://metis.example, the browser presented https://elsewhere.example
- — set METISTRY_ORIGIN to the origin you actually load"}}
+ expects https://assistant.example or https://assistant.tailnet.ts.net, the browser
+ presented https://elsewhere.example — set METISTRY_ORIGIN to the origin you
+ actually load"}}
 ```
 
-Both origins are already known to the caller (it presented its own) and to
+and a passkey presented where it was not added:
+
+```json
+{"error":{"code":"unauthenticated","message":"rpID mismatch: this passkey was
+ added for assistant.tailnet.ts.net, the browser presented https://assistant.example
+ — a passkey signs in only where it was added; add this device again there"}}
+```
+
+Both sides are already known to the caller (it presented its own) and to
 anyone who can load the login page, so nothing leaks; what it buys is that a
-misconfigured install stops looking like a broken one.
+misconfigured install stops looking like a broken one. Each refusal is one
+audit row (`auth` · `enroll` or `login`, `ok: false`, with the reason).
+
+## Adding a phone: enrolment codes
+
+The owner's walk-through — the Mac's sheet, the phone's steps, each refusal and
+its fix, and removing a device — is [phone.md](phone.md); this section is the
+mechanism under it.
+
+A device's first passkey is created against a **one-time enrolment code**:
+`POST /auth/enroll/start` checks it without spending it, `POST
+/auth/enroll/finish` spends it as the passkey is stored. A code is 16 random
+bytes, stored as its SHA-256 in `auth_enrollment_codes` (migration `0003`),
+good for **ten minutes and one use** — a fixed security parameter, not a
+setting. Every refusal at the door is the same uniform `401 unauthenticated`:
+an unknown code, a spent one, an expired one and a cancelled one are
+indistinguishable from outside.
+
+**`start` also stamps the row** (migration `0040`; plan §2.23 step 7, X-114):
+for a live code it writes `opened_at` and `opened_via` — `proxy` when the
+request came in on the proxy listener (so from outside), `main` when it came
+in on the loopback listener. A `proxy` stamp replaces a `main` one and nothing
+replaces a `proxy` stamp, so the owner opening the link on the Mac first
+cannot hide the phone arriving. **Stamping is not using:** `used_at` and
+`expires_at` are untouched, the code is still single-use and still dies in ten
+minutes, and an unknown, spent, expired or cancelled code stamps nothing. A
+stamp is one audit row (`auth` · `enroll_opened`, with the row's id and the
+listener — never the code). `metistry enroll --status <code_id>` reads it
+back; the Mac's sheet shows *Opened on your phone* only for `proxy`.
+
+**Only the Mac mints one.** Shell access to the host is the root of trust for
+a first credential (plan §4.2), so **no HTTP route mints a code** — not an
+unauthenticated one and not a `local` one — and two tests hold that: the
+client API table has no such row (and the conformance test holds the server
+to the table), and no console source calls the mint. What mints is
+`metistry enroll` (`docs/ops/cli.md`, "Adding a phone"; plan §2.22, M19),
+which the Mac app's *Add a Phone…* sheet drives through `--json`, and
+`apps/console/scripts/enroll.mjs` on the compose shape. Both call the one
+`mintEnrollmentCode` in `packages/core/src/enrollment-codes.ts`, the module
+the console's `peek` and `consume` come from, so a minter and the spender
+cannot disagree on the hash or the lifetime.
+
+`metistry enroll` **refuses before it mints** when the phone cannot complete
+the ceremony against the first `METISTRY_ORIGIN` entry: a loopback host
+(every install's default), `http:`, an IP literal, or an origin this Mac
+itself cannot reach within 5 s (or whose `/api/identity` names another
+instance). A refusal writes no row. `metistry enroll --cancel <code_id>`
+expires an unused code at once — its `expires_at` is moved to now, so the
+door's existing rule refuses it; there is no new column and no new state.
+Each mint and cancel is a `runs` row (`auth`), carrying the row's id and
+never the code.
 
 ## Rotating and revoking
 
@@ -469,7 +707,18 @@ misconfigured install stops looking like a broken one.
   turning the local door *off* permanently means removing the variable from
   the console's environment (unset it in `docker-compose.yml` or the job's
   plist), not clearing the `.env` line.
-- **A passkey session:** the devices tab, or `POST /api/devices/<id>/revoke`.
+- **A device — its passkey and every session under it:** Remove in Devices,
+  or `POST /api/devices/<session id>/revoke` (`metistry console call POST
+  /api/devices/<id>/revoke`). The passkey's row keeps `revoked_at`
+  (migration 0038) and `getPasskey` never returns it again, so a login with
+  it is the same uniform 401 an unknown credential gets; its sessions are
+  revoked and their push subscriptions dropped in the same act (design-build-plan
+  §2.22). Irreversible: a removed phone enrols again as a new device.
+- **A device's sessions, passkey kept:** the same route with `{"scope":
+  "sessions"}` — what Sign Out Everywhere does to each device. `checkSession`
+  also refuses any session whose passkey is revoked, whatever the session's
+  own row says, so a session issued in the instant between a login's lookup
+  and a Remove dies with the device.
 - **A host-minted owner token** (the capture Shortcut,
   `docs/ops/capture-shortcut.md`): `UPDATE owner_tokens SET revoked_at =
   now() WHERE label = '…'`.

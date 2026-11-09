@@ -12,9 +12,9 @@
 //   3. writing inside the state dir succeeds
 //   4. connecting to the console's port and to Postgres' succeeds; any
 //      other loopback port does not
-//   5. the four instance config files it is granted BY NAME are readable —
+//   5. the five instance config files it is granted BY NAME are readable —
 //      and a note sitting right beside them is not. That pair is the whole
-//      argument for four literals over one grant on the directory that
+//      argument for five literals over one grant on the directory that
 //      holds them (which on an unmigrated instance is the vault root).
 //
 // Darwin only: sandbox-exec is a macOS binary, and CI runs on Linux.
@@ -78,8 +78,9 @@ describe("sandbox parameters", () => {
       "DB_TCP=localhost:5432",
       "-D",
       "PROXY_TCP=localhost:7814",
-      // the four config files, by name — no instance dir, so each is the
-      // product's own seed copy and the grant changes nothing
+      // the five config files, by name — no instance dir, so each is the
+      // product's own seed copy (secrets.yaml has none: a path under
+      // PRODUCT_DIR that matches nothing) and the grant changes nothing
       "-D",
       "CONFIG_IDENTITY=/p/seed/identity.yaml",
       "-D",
@@ -88,6 +89,8 @@ describe("sandbox parameters", () => {
       "CONFIG_RULES=/p/seed/rules.yaml",
       "-D",
       "CONFIG_COMPUTE=/p/seed/compute.yaml",
+      "-D",
+      "CONFIG_SECRETS=/p/seed/secrets.yaml",
       "/n/bin/node",
       "/p/main.js",
     ]);
@@ -100,15 +103,17 @@ describe("sandbox parameters", () => {
       CONFIG_ASSISTANT_PROMPT: "/i/.metistry/assistant-prompt.md",
       CONFIG_RULES: "/i/.metistry/rules.yaml",
       CONFIG_COMPUTE: "/i/.metistry/compute.yaml",
+      CONFIG_SECRETS: "/i/.metistry/secrets.yaml",
     });
     // a legacy instance keeps them at the vault root; the `Knowledge/` beside
-    // them is why this is four literals and not one subpath
+    // them is why this is five literals and not one subpath
     const legacy = engineConfigParams({ instanceDir: "/l", productDir: "/p", realpath: (p) => p, exists: (p) => p === "/l/identity.yaml" });
     expect(legacy).toEqual({
       CONFIG_IDENTITY: "/l/identity.yaml",
       CONFIG_ASSISTANT_PROMPT: "/l/assistant-prompt.md",
       CONFIG_RULES: "/l/rules.yaml",
       CONFIG_COMPUTE: "/l/compute.yaml",
+      CONFIG_SECRETS: "/l/secrets.yaml",
     });
     expect(Object.keys(legacy)).toEqual(ENGINE_CONFIG_KEYS.map(configParamName));
   });
@@ -245,11 +250,11 @@ console.log(JSON.stringify({
     });
   }, 90_000);
 
-  // The engine's own config, in BOTH layouts. The four files are granted by
+  // The engine's own config, in BOTH layouts. The five files are granted by
   // name; the note beside them is the control, and on the legacy fixture it
   // sits in the same directory as the config — which is why a grant on that
   // directory was refused.
-  it.each(["flat", "legacy"] as const)("reads a %s instance's four config files and nothing else in it", async (shape) => {
+  it.each(["flat", "legacy"] as const)("reads a %s instance's five config files — secrets.yaml the fifth — and nothing else in it", async (shape) => {
     const inst = join(root, `instance-${shape}`);
     const config = shape === "flat" ? join(inst, ".metistry") : inst;
     const vault = shape === "flat" ? inst : join(inst, "Knowledge");
@@ -259,6 +264,7 @@ console.log(JSON.stringify({
     await writeFile(join(config, "assistant-prompt.md"), "You are {{name}}.\n");
     await writeFile(join(config, "rules.yaml"), "tiers: {}\n");
     await writeFile(join(config, "compute.yaml"), "providers: {}\n");
+    await writeFile(join(config, "secrets.yaml"), "secrets: {}\n");
     await writeFile(join(vault, "private.md"), "a note the engine must not be able to read");
     await writeFile(
       join(root, "app", "config-probe.mjs"),
@@ -271,7 +277,7 @@ console.log(JSON.stringify(Object.fromEntries(process.argv.slice(2).map((p) => [
     const params = sandboxParams({ productDir: join(root, "app"), nodeBin: process.execPath, stateDir: join(root, "state"), instanceDir: inst, consolePort, dbPort, proxyPort, tmpDir: join(root, "tmp") });
     // the grant follows the layout: flat → `.metistry/`, legacy → the root
     expect(params.CONFIG_IDENTITY).toBe(realpathSync(instanceFile(inst, "identity")));
-    const probed = [join(config, "identity.yaml"), join(config, "assistant-prompt.md"), join(config, "rules.yaml"), join(config, "compute.yaml"), join(vault, "private.md")];
+    const probed = [join(config, "identity.yaml"), join(config, "assistant-prompt.md"), join(config, "rules.yaml"), join(config, "compute.yaml"), join(config, "secrets.yaml"), join(vault, "private.md")];
     const argv = sandboxArgv(sandboxProfilePath(REPO), params, [process.execPath, join(root, "app", "config-probe.mjs"), ...probed]);
     const { stdout } = await run(argv[0]!, argv.slice(1), { timeout: 60_000 });
     expect(JSON.parse(stdout.trim())).toEqual({
@@ -279,6 +285,8 @@ console.log(JSON.stringify(Object.fromEntries(process.argv.slice(2).map((p) => [
       [join(config, "assistant-prompt.md")]: "You are {{name}}.",
       [join(config, "rules.yaml")]: "tiers: {}",
       [join(config, "compute.yaml")]: "providers: {}",
+      // X-7: the policy file, so a provider key's grant can be checked
+      [join(config, "secrets.yaml")]: "secrets: {}",
       // D5, still: knowledge reaches the engine through the brain bridge
       // over HTTP or not at all
       [join(vault, "private.md")]: "denied:EPERM",

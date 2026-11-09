@@ -14,10 +14,14 @@
 // `release` pulls the pinned ones and never builds (plan §4.16).
 
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   COMPUTE_FILENAME,
+  COMPOSE_SECRETS_SOURCE_VAR,
+  COMPOSE_POLICY_TARGET_DIR,
+  mirrorSecretsPolicy,
+  secretsMirrorDir,
   EGRESS_PROXY_HOST,
   KEEP_AWAKE_ENV,
   emptyCompute,
@@ -28,6 +32,7 @@ import {
   GIT_ASKPASS_PATH_VAR,
   firstOnMachineBaseUrl,
   keepAwakeOf,
+  remoteOf,
   loadCompute,
   resolveLocalModelUrl,
   servedProviders,
@@ -38,8 +43,10 @@ import {
   type EgressInput,
   type GitCredentialLookup,
 } from "@foldedspacelabs/metistry-core";
-import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
+import { droppedOriginsNote } from "./remote/rows.js";
+import { assistantEnv, consoleEnv, consoleOrigins, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
+import type { StartedAt } from "./doctor-grace.js";
 import type { Exec } from "./exec.js";
 import {
   awaitBootout,
@@ -82,6 +89,9 @@ import {
 import { shellUnsafeEnvLines } from "./env.js";
 import { ensureInstanceId, envPaths, readInstanceId } from "./instance.js";
 import { ensureOwnerBridgeToken } from "./protected-write.js";
+import { describeRecorderTokens, ensureRecorderTokens, recorderConfigured, registerCaptureOwnerToken, type EnsureRecorderTokensResult } from "./recorder-tokens.js";
+import { deliveredSecretNames, renderEnvFile, type RenderEnvResult } from "./secrets.js";
+import type { MigrationSession } from "./migrate.js";
 import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
 import { llamaServerChild } from "./local-models.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
@@ -157,6 +167,10 @@ export interface UpOptions {
   mintPassword?: (() => string) | undefined;
   /** test seam: the vault bridge's owner bearer, minted once for an install that has none */
   mintOwnerToken?: (() => string) | undefined;
+  /** test seam: the recorder's tokens, minted once for an install that configures the recorder */
+  mintRecorderToken?: (() => string) | undefined;
+  /** test seam: the database session the recorder's capture owner token is recorded through */
+  openSession?: ((env: NodeJS.ProcessEnv) => Promise<(MigrationSession & { end(): Promise<void> }) | null>) | undefined;
   /** test seam: the fetch the bundled-runtime download uses */
   fetchFn?: typeof fetch | undefined;
   /** the deps pack's os-arch (default: this host's) */
@@ -229,17 +243,55 @@ export function composeEnvArgs(productDir: string, envFile: string | undefined):
   return envFile && envFile !== join(productDir, ".env") ? ["--env-file", envFile] : [];
 }
 
-export async function composeUp(r: StepRunner, productDir: string, source: LockSource, version?: string | undefined, envFile?: string | undefined): Promise<void> {
+/**
+ * What compose is told about `secrets.yaml` (X-7, the owner's rulings of
+ * 2026-09-30): `METISTRY_SECRETS_POLICY_DIR` = this instance's policy mirror
+ * directory, `.metistry/state/policy/`, which docker-compose.yml bind-mounts
+ * READ-ONLY into the console and assistant. A directory, not the file: a
+ * single-file bind pins an inode every writer replaces by rename, so a
+ * revoke would not reach a running container; a directory bind sees the
+ * replaced entry. The directory holds nothing but the mirror (core's
+ * `mirrorSecretsPolicy`, which the reconciler refreshes every second); `up`
+ * creates it and mirrors once before compose starts, so the bind's
+ * `create_host_path: false` always finds it. No instance, no mount: the
+ * containers get an empty METISTRY_SECRETS_FILE and refuse every
+ * `{{ secret.x }}` provider key naming the mount.
+ */
+export async function prepareComposePolicy(r: StepRunner, instanceDir: string | undefined): Promise<Record<string, string>> {
+  if (!instanceDir) {
+    r.note("secrets policy: no instance directory — the containers get no grant policy, and a {{ secret.x }} provider key is refused");
+    return {};
+  }
+  const dir = secretsMirrorDir(instanceDir);
+  if (r.action(`mirror ${instanceFile(instanceDir, "secrets")} → ${dir}/secrets.yaml`)) {
+    await mkdir(dir, { recursive: true });
+    const outcome = await mirrorSecretsPolicy(instanceDir);
+    r.note(`secrets policy: ${dir} mounted read-only at ${COMPOSE_POLICY_TARGET_DIR} in console and assistant (${outcome === "absent" ? "no secrets.yaml yet — every provider key refused until one grants it" : `mirror ${outcome}`}; the reconciler keeps it current, so a revoke reaches the containers within a second)`);
+  }
+  return { [COMPOSE_SECRETS_SOURCE_VAR]: dir };
+}
+
+export async function composeUp(
+  r: StepRunner,
+  productDir: string,
+  source: LockSource,
+  version?: string | undefined,
+  envFile?: string | undefined,
+  instanceDir?: string | undefined,
+  /** values `up` DERIVES and compose must interpolate over `.env`'s — `METISTRY_ORIGIN` from the remote-access record (deployment.ts `consoleOrigins`) */
+  derived: Record<string, string> = {},
+): Promise<void> {
   const base = ["compose", ...composeEnvArgs(productDir, envFile)];
+  const secrets = { env: { ...(await prepareComposePolicy(r, instanceDir)), ...derived } };
   if (source === "release") {
     // the released, versioned images — docker-compose.yml reads
     // METISTRY_<SERVICE>_IMAGE and falls back to the dev tags a checkout builds
-    const env = version ? { ...r.env, ...imageEnv(version, r.env) } : r.env;
+    const env = { ...(version ? { ...r.env, ...imageEnv(version, r.env) } : r.env), ...secrets.env };
     if (version) r.note(`images: ${IMAGE_SERVICES.map((s) => imageRef(s, version, r.env)).join(", ")}`);
     await r.run("docker", [...base, "pull"], { cwd: productDir, env, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true, comment: version ? `pinned to ${version}` : "metistry.lock pins released images" });
     await r.run("docker", [...base, "up", "-d", "--no-build"], { cwd: productDir, env, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
   } else {
-    await r.run("docker", [...base, "up", "-d", "--build"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
+    await r.run("docker", [...base, "up", "-d", "--build"], { cwd: productDir, env: { ...r.env, ...secrets.env }, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
   }
 }
 
@@ -391,7 +443,7 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
         // `HTTPS_PROXY` plus `NODE_USE_ENV_PROXY=1`, because Node's global
         // fetch ignores the former without the latter (core's egressProxyEnv)
         env: { ...assistantEnv(v, v.compute), ...(v.egress ? egressProxyEnv("assistant", { port: v.egress.port, tokens: v.egress.tokens ?? {} }) : {}) },
-        // CONFIG_*: the four instance files the engine reads, granted BY
+        // CONFIG_*: the five instance files the engine reads, granted BY
         // NAME (sandbox.ts). Without them the profile's deny-default makes
         // an absolute instance path an EPERM, so the overlay that now finds
         // this install's identity.yaml would crash the job instead.
@@ -411,6 +463,9 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
           CONFIG_ASSISTANT_PROMPT: p.CONFIG_ASSISTANT_PROMPT,
           CONFIG_RULES: p.CONFIG_RULES,
           CONFIG_COMPUTE: p.CONFIG_COMPUTE,
+          // secrets.yaml — policy, never a value — so the engine can check a
+          // provider key's grant before it dials (X-7)
+          CONFIG_SECRETS: p.CONFIG_SECRETS,
         },
       };
     }
@@ -1109,10 +1164,12 @@ export function runningNote(shape: Deployment["shape"]): string {
 }
 
 /** The closing doctor: printed in a dry run, executed otherwise; its verdict is the exit code. */
-export async function closingDoctor(r: StepRunner, productDir: string, deps: Partial<DoctorDeps> | undefined, doctorFn: (d: DoctorDeps) => Promise<DoctorReport>): Promise<number> {
+export async function closingDoctor(r: StepRunner, productDir: string, deps: Partial<DoctorDeps> | undefined, doctorFn: (d: DoctorDeps) => Promise<DoctorReport>, startedAt?: StartedAt): Promise<number> {
   r.section("doctor");
   if (!r.action("metistry doctor")) return 0;
-  const report = await doctorFn({ productDir, exec: r.exec, env: r.env, ...deps });
+  // the jobs this run has just bootstrapped or kickstarted: doctor waits out
+  // their start rather than failing a socket that is not there yet (X-122)
+  const report = await doctorFn({ productDir, exec: r.exec, env: r.env, ...(startedAt ? { startedAt } : {}), ...deps });
   r.out(renderTable(report));
   return report.ok ? 0 : 1;
 }
@@ -1200,6 +1257,9 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     // supervisor.json's `env`), and there is no second channel to it.
     env: { ...env, [KEEP_AWAKE_ENV]: keepAwakeOf(deployment) },
     shape: deployment.shape,
+    // …and so is `remote:` for METISTRY_ORIGIN (plan §2.23): the provider's
+    // origin first, the loopback one second, or the loopback one alone
+    remote: remoteOf(deployment),
     // derived state hangs off the install root, never off a release: a version
     // flip must not orphan the assistant's state or the Postgres data dir
     stateDir: assistantStateDir({ ...instanceDir, productDir: opts.productDir }),
@@ -1222,6 +1282,23 @@ export async function up(opts: UpOptions): Promise<UpResult> {
           ? `keep-awake: ${keepAwake} — the supervisor holds PreventUserIdleSystemSleep while it runs`
           : `keep-awake: ${keepAwake}, but the compose shape has no supervisor to hold it — nothing is held (docs/ops/deployment-shapes.md)`,
     );
+  }
+  // the origins the console will answer for, derived from the record rather
+  // than read from `.env` (docs/ops/remote-access.md): a hand-written remote
+  // origin beside `remote: none` is the configuration X-103 found unsafe
+  {
+    const remote = remoteOf(deployment);
+    const origins = consoleOrigins(values);
+    r.note(
+      remote.provider === "none"
+        ? `remote access: none — METISTRY_ORIGIN is loopback only${origins.value ? ` (${origins.value})` : ""}; your phone can't reach this Mac until you choose a way (\`metistry remote set\`, docs/ops/remote-access.md)`
+        : `remote access: ${remote.provider}${remote.mode ? ` (${remote.mode})` : ""} — METISTRY_ORIGIN: ${origins.value ?? "(none)"}`,
+    );
+    if (origins.dropped.length > 0) {
+      // the same sentence doctor's `remote:origins` row carries — this note is
+      // read only by someone watching `up`, and the row is where the rest see it
+      r.note(droppedOriginsNote(origins.dropped, remote));
+    }
   }
   r.note(`node: ${le.node} (${chosenNode.why}) — every launchd job execs this`);
   // the notice itself is main.ts's job (it prints to stderr, once per run);
@@ -1253,6 +1330,28 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     r.note(`namespace: labels ${LABEL_PREFIX}${ns.labelSuffix}.<service>, ports ${ns.base}-${ns.base + PORTED_SERVICES.length - 1} — from ${ns.from}`);
     r.note(applied.length ? `namespace → environment: ${applied.join(" ")}` : "namespace → environment: nothing to fill; .env already sets every port and URL");
   }
+  // The recorder's three tokens, once this instance has its id (the Mac app
+  // reads the control key from the Keychain under that account) and before the
+  // jobs are rendered, so the bridge is STARTED with them. Opt-in: nothing is
+  // made unless METISTRY_LIVE_CAPTURE_URL is set. Each is kept when it exists.
+  // Inside `update` the render is a re-render and `.env` already holds them.
+  let recorder: EnsureRecorderTokensResult | undefined;
+  if (!opts.within && recorderConfigured(env)) {
+    const wanted = "make the recorder's control, bridge and inbox tokens where they are missing (login Keychain + .env; an existing value is kept; never shown)";
+    if (r.action(wanted)) {
+      recorder = await ensureRecorderTokens({
+        env,
+        also: values.env,
+        envFile,
+        platform: le.platform,
+        ...(instanceId ? { instanceId } : {}),
+        exec: r.exec,
+        out: (l) => r.note(l),
+        ...(opts.mintRecorderToken ? { mint: opts.mintRecorderToken } : {}),
+      });
+      for (const l of describeRecorderTokens(recorder)) r.note(l);
+    }
+  }
   // one line, before anything is written: an install with no engine is a
   // shape, not a fault (docs/ops/assistant-tools.md, "Running without an
   // engine"), and the operator should see WHY there is no assistant below
@@ -1260,13 +1359,85 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   if (!engine.ok) r.note(engineAbsentNote(engine.why as string, engine.fix as string));
   let failure: StepFailed | undefined;
   let bootstrapped: string[] = [];
+  /** when each bootstrapped job was started (epoch ms), for the closing doctor */
+  const startedAt: Record<string, number> = {};
+
+  // `.env` is DERIVED (X-124; owner ruling 2026-10-04): rendered here, after
+  // every mint of this run and before anything reads the file — compose
+  // interpolates it, four launchd jobs source it — from this instance's
+  // Keychain and what `.metistry/*.yaml` decides (secrets.ts `renderEnvFile`).
+  // The jobs are then rendered from the SAME values, so the file and the
+  // plists cannot disagree (the 0.14.2 drift). A line the file held that
+  // nothing derives yet is carried by name, never dropped; a hand edit since
+  // the last render is named and adopted into the store first. An install
+  // with no instance directory keeps its product-checkout `.env` as it is:
+  // that file is the deprecated environment `secrets retire-legacy-env`
+  // retires, not the derived one.
+  let envFileNow = envFile;
+  let derivedEnv = false;
+  const deriveEnv = async (): Promise<void> => {
+    if (derivedEnv || !instanceDir.instanceDir) return;
+    derivedEnv = true;
+    const target = paths?.write ?? envFile;
+    r.section("env");
+    if (!r.action(`derive ${target} from .metistry/*.yaml and the login Keychain (secret lines adopted into the Keychain, configuration carried, a hand edit named; values never shown)`)) return;
+    const deliver = await deliveredSecretNames({ instanceDir: instanceDir.instanceDir, productDir: runDir });
+    for (const n of deliver.notes) r.note(n);
+    // what `.metistry/*.yaml` decides for the file: METISTRY_ORIGIN from the
+    // remote-access record (plan §2.23, X-105) — the provider's origin first,
+    // the loopback origin second, or the loopback origin alone. A hand-set
+    // remote origin the file held is superseded and NAMED, never kept silently
+    // — and what that costs is said with it, in the same words as the remote
+    // rows (X-105): passkeys bound to the dropped origin stop signing in, a
+    // remote origin is configured by `metistry remote set <provider>`, and the
+    // dropped line is kept in `.env.pre-render`
+    const origins = consoleOrigins(values);
+    const derived =
+      origins.value !== undefined
+        ? { METISTRY_ORIGIN: { value: origins.value, from: "deployment.yaml `remote:` (`metistry remote set`)", ...(origins.dropped.length > 0 ? { note: droppedOriginsNote(origins.dropped, remoteOf(deployment)) } : {}) } }
+        : {};
+    let rendered: RenderEnvResult;
+    try {
+      rendered = await renderEnvFile({
+        envFile,
+        envTarget: target,
+        exampleFile: join(runDir, ".env.example"),
+        ...(instanceId ? { instanceId } : {}),
+        exec: r.exec,
+        env,
+        platform: le.platform,
+        out: (l) => r.note(l),
+        derived,
+        deliver: deliver.names,
+        deliverComplete: deliver.complete,
+        restartFollows: true,
+      });
+    } catch (e) {
+      throw new StepFailed(`could not derive ${target} (${e instanceof Error ? e.message : String(e)}) — nothing was installed; \`metistry doctor\`'s \`env\` row names the file's state`);
+    }
+    // what the jobs are rendered from is exactly what the file now says
+    for (const [k, v] of rendered.values) {
+      values.env[k] = v;
+      env[k] = v;
+    }
+    for (const n of rendered.dropped) {
+      delete values.env[n];
+      delete env[n];
+    }
+    values.envFile = rendered.wrote;
+    envFileNow = rendered.wrote;
+  };
 
   try {
     if (opts.compose === false) {
       r.note("--no-compose: containers left as they are");
     } else if (usesCompose(deployment)) {
+      await deriveEnv();
       r.section("compose");
-      await composeUp(r, runDir, source, pinnedVersion, envFile);
+      // the rendered METISTRY_ORIGIN reaches the compose file's interpolation
+      // through the process environment, which compose reads before --env-file
+      const origins = consoleOrigins(values);
+      await composeUp(r, runDir, source, pinnedVersion, envFileNow, values.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || undefined, origins.value !== undefined ? { METISTRY_ORIGIN: origins.value } : {});
     } else {
       r.note("shape launchd: no containers, so docker is never called");
     }
@@ -1299,7 +1470,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
             : undefined;
         // the install root, not the release: `.env`, `state/pg` and any
         // bundled runtime/postgres live where the install does
-        pg = await preparePostgres(r, opts.productDir, { exists: opts.exists, mintPassword: opts.mintPassword ?? mintPassword, runtimeDeps, envFile });
+        pg = await preparePostgres(r, opts.productDir, { exists: opts.exists, mintPassword: opts.mintPassword ?? mintPassword, runtimeDeps, envFile: envFileNow });
         // a password this run minted into `.env` goes into what the jobs are
         // rendered from too — else a fresh install's supervisor and console
         // start without it until a second `up` (doctor's `launchd env` row)
@@ -1308,6 +1479,10 @@ export async function up(opts: UpOptions): Promise<UpResult> {
         values.pgData = pg.plan.dataDir;
         await r.run("mkdir", ["-p", values.stateDir], { comment: "the assistant's state dir — HOME, and the only path its sandbox may write" });
       }
+      // the file every job below sources, derived once the Postgres password
+      // is in it (a password minted a moment ago is adopted into the Keychain
+      // by the same render) — a no-op when the compose branch already did it
+      await deriveEnv();
       // the bundled git, if this install has one, goes on the front of the
       // reconciler's PATH — a clean Mac has no git until Xcode CLT is installed
       values.gitPath = pathWithRuntimeGit(opts.productDir, opts.exists ?? existsSync);
@@ -1315,10 +1490,18 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       await planConfinement(r, opts.productDir, values, opts.exists ?? existsSync);
       r.section("launchd");
       bootstrapped = await installLaunchd(r, runDir, le, deployment, values, opts.exists ?? existsSync);
+      for (const l of bootstrapped) startedAt[l] = Date.now();
       if (pg) {
         r.section("database");
         await finishPostgres(r, pg);
       }
+    }
+
+    // The capture owner token's row, once the database is up. Soft: a database
+    // that is not answering or not migrated yet is a note, and the next `up`
+    // records it (recorder-tokens.ts).
+    if (recorder?.inbox) {
+      await registerCaptureOwnerToken({ env: { ...values.env }, token: recorder.inbox, out: (l) => r.note(l), ...(opts.openSession ? { openSession: opts.openSession } : {}) });
     }
 
     // the cli shim: independent of compose/launchd, but — like everything
@@ -1341,7 +1524,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   if (opts.within) return { code: failure ? failure.code || 1 : 0, source, commands: r.commands, timings: [], elapsedMs: r.elapsedMs(), bootstrapped };
 
   // doctor runs even after a failed step — its table is the diagnosis; the failure keeps the exit code
-  const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
+  const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor, startedAt);
   const timings = r.timings();
   r.section("timings");
   r.note(renderTimings(timings, r.elapsedMs()));

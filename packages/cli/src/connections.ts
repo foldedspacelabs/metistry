@@ -1,5 +1,5 @@
-// `metistry connections list | show | add | set | policy | remove | test` —
-// M13 (design-build-plan §2.2, §2.6; T4-8a).
+// `metistry connections list | show | add | set | policy | remove | test |
+// authorize` — M13 (design-build-plan §2.2, §2.6; T4-8a, T4-10).
 //
 // `.metistry/connections/<name>.yaml` says where Metistry reaches for the
 // owner — hosts, commands, credentials by name, tool modes, the offer
@@ -23,6 +23,31 @@
 // `add` and `test` DIAL: they run the command or reach the URL, through the
 // same pool the console will use (packages/connections) — the egress door,
 // the closed environment, the origin pin all apply to the owner's own check.
+//
+// **T4-10.** An API, feed or files connection is written with the tools
+// Metistry generates for it, every one at Ask First (the CLAUDE.md default
+// for a proxied tool; the owner moves one with `policy`). OAuth is `--auth
+// oauth`: a known service's client from its connection type (or the owner's
+// own, `--client-id-secret`), a custom one's from `--authorize-url`,
+// `--token-url`, `--scope` and the owner's client id — and `authorize` is
+// the one door that signs in: a loopback listener on 127.0.0.1 for one
+// callback, the browser, the exchange through the egress door, and the
+// refresh token into this instance's Keychain. The assistant has no shell
+// (invariant 9), and nothing it reaches imports the flow. And `add` writes a
+// sync's FIRST `connection:` into `scheduled.yaml` when the provider is read
+// by one and nothing names a connection for it yet (ruled 2026-09-27; the
+// Scheduled door keeps refusing to set it).
+//
+// **T6-13b.** `add` and `set` take a repeatable `--config KEY=VALUE` (T4-11's flag, one flag for both) for a
+// known service's config fields, judged against its connection type's
+// manifest BEFORE anything is written — an unknown key, a value of the wrong
+// kind, a required field left out are each a usage error (exit 2) with one
+// line naming the field. A `secret` field takes the NAME of a secret and
+// nothing else: a value on a command line is in every process's argv and
+// the shell's history, so it is refused pointing at `metistry secrets set`,
+// and never echoed. An `oauth` field is not typed at all — `--auth oauth`
+// writes it and `authorize` signs in. The Mac's editor builds exactly these
+// arguments (coordinator call 2026-09-30, closing the gap the ticket found).
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -30,32 +55,49 @@ import { parseDocument, stringify } from "yaml";
 import {
   CUSTOM_PROVIDER,
   CONNECTION_TYPES,
+  DEFAULT_TOOL_MODE,
+  SCHEDULED_FILENAME,
+  SecretRedactor,
   TOOL_GROUPS,
+  looksLikeKey,
+  parseScheduled,
+  parseSecretsFile,
   secretRefsIn,
   variableRefsIn,
   type CheckResult,
+  type ConnectionField,
   type ConnectionType,
   type ToolGroup,
   type ToolMode,
 } from "@foldedspacelabs/metistry-core";
 import {
+  DEFAULT_OAUTH_FLOW_TIMEOUT_MS,
+  authorizeConnection,
   checkConnection,
+  connectionGrantee,
   describeConnectionDetail,
+  forgetCheck,
+  describeConnectionTypes,
   describeConnections,
+  generatedToolsFor,
+  isGeneratedType,
   judgeConnection,
+  oauthClientOf,
   parseConnectionText,
+  type AuthorizeResult,
   type ConnectionCatalog,
   type ConnectionDetail,
   type ConnectionRow,
+  type ConnectionTypeSummary,
   type InstanceCatalog,
   type UpstreamTool,
 } from "@foldedspacelabs/metistry-connections";
-import { catalogFor, poolOver, presenceOf, type ConnectionsOptions } from "./connection-check.js";
+import { catalogFor, poolOver, presenceOf, secretsStore, type ConnectionsOptions } from "./connection-check.js";
 import { realExec } from "./exec.js";
 import { deleteProtected, protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { StepFailed, StepRunner } from "./steps.js";
 
-export const CONNECTION_VERBS = ["list", "show", "add", "set", "policy", "remove", "test"] as const;
+export const CONNECTION_VERBS = ["list", "show", "add", "set", "policy", "remove", "test", "authorize"] as const;
 export type ConnectionVerb = (typeof CONNECTION_VERBS)[number];
 
 export function parseConnectionVerb(v: string | undefined): ConnectionVerb | undefined {
@@ -69,6 +111,19 @@ export const TOOL_GROUP_LABEL: Readonly<Record<ToolGroup, string>> = { reads: "R
 
 /** Q15: a new tool's mode, by its group. The file's own default for a tool with no mode is Ask First (core's DEFAULT_TOOL_MODE). */
 export const NEW_TOOL_MODE: Readonly<Record<ToolGroup, ToolMode>> = { reads: "on", changes: "ask", starts_agent: "ask" };
+
+/**
+ * A generated tool's mode when a connection is added (T4-10): Ask First,
+ * every group — CLAUDE.md's default for a proxied connection tool, taken
+ * whole here, because a generated tool reaches a service no one has yet
+ * seen answer through Metistry. The owner moves one to Allow with `policy`.
+ */
+export const GENERATED_TOOL_MODE: ToolMode = DEFAULT_TOOL_MODE;
+
+/** `github-work` → `github_work`: a connection's name as the start of a secret's. */
+function snakeOf(name: string): string {
+  return name.replaceAll("-", "_");
+}
 
 /** `allow | ask | ask-first | never` — the owner's words — and the file's own `on | off`. */
 export function parseToolMode(word: string | undefined): ToolMode | undefined {
@@ -101,8 +156,13 @@ export function connectionRel(instanceDir: string, name: string): string {
 
 /** `connections list`: the rows `GET /api/connections` serves. */
 export async function connectionsList(opts: ConnectionsOptions): Promise<ConnectionRow[]> {
+  return (await connectionsListing(opts)).connections;
+}
+
+/** `connections list --json`: the body `GET /api/connections` serves — the rows, and the connection types this instance has installed (T6-13b). */
+export async function connectionsListing(opts: ConnectionsOptions): Promise<{ connections: ConnectionRow[]; types: ConnectionTypeSummary[] }> {
   const catalog = await catalogFor(opts);
-  return describeConnections(catalog, { presence: presenceOf(opts) });
+  return { connections: await describeConnections(catalog, { presence: presenceOf(opts) }), types: describeConnectionTypes(catalog.types) };
 }
 
 /** `connections show <name>`: the body `GET /api/connections/:name` serves. */
@@ -120,6 +180,7 @@ function reachLine(r: ConnectionRow["reach"]): string {
   if (!r) return "-";
   if (r.class === "http") return `${r.url}${r.auth !== "none" ? ` (${r.auth})` : ""}`;
   if (r.class === "command") return `${[r.command, ...r.args].join(" ")}${r.runs_on === "container" ? " (in a container)" : ""}`;
+  if (r.class === "imap") return `imap${r.security === "tls" ? "s" : ""}://${r.host}:${r.port}${r.security === "plain" ? " (no TLS: this Mac only)" : ""}`;
   return r.path;
 }
 
@@ -137,6 +198,7 @@ export function renderConnections(rows: ConnectionRow[]): string {
     if (r.reach) out.push(`    reaches  ${reachLine(r.reach)}`);
     if (r.reach) out.push(`    tools    ${toolCounts(r)}`);
     out.push(`    used by  ${r.used_by.length ? r.used_by.map((u) => `${u.kind} ${u.name}`).join(", ") : "nobody yet"}`);
+    out.push(`    checked  ${r.last_checked ? `${r.last_checked.at} — ${r.last_checked.status}` : "never"}`);
     for (const i of r.issues) out.push(`    ! ${i}`);
   }
   return out.join("\n");
@@ -145,7 +207,10 @@ export function renderConnections(rows: ConnectionRow[]): string {
 export function renderConnectionDetail(d: ConnectionDetail): string {
   const out = [renderConnections([d]), `    file     ${d.file}`];
   if (d.description) out.push(`    about    ${d.description}`);
-  if (d.reach?.class === "http" && (d.reach.headers.length || d.reach.query.length)) out.push(`    sends    ${[...d.reach.headers.map((h) => `header ${h}`), ...d.reach.query.map((q) => `query ${q}`)].join(", ")}`);
+  if (d.reach?.class === "http" && (d.reach.headers.length || d.reach.query.length)) {
+    const header = (h: { header: string; secrets: string[] }) => `header ${h.header}${h.secrets.length ? ` (${h.secrets.join(", ")})` : ""}`;
+    out.push(`    sends    ${[...d.reach.header_secrets.map(header), ...d.reach.query.map((q) => `query ${q}`)].join(", ")}`);
+  }
   if (d.reach?.class === "command" && d.reach.env.length) out.push(`    env      ${d.reach.env.join(", ")} (given to this command only; never written to disk)`);
   if (d.secrets.length) out.push(`    secrets  ${d.secrets.join(", ")}`);
   if (d.variables.length) out.push(`    vars     ${d.variables.join(", ")}`);
@@ -154,8 +219,8 @@ export function renderConnectionDetail(d: ConnectionDetail): string {
 }
 
 /** The tool table: by group, each tool with its mode in the owner's words. */
-export function renderPolicy(r: Pick<ConnectionRow, "name" | "tools" | "offer_to_agents">): string {
-  const out = [`  ${r.name}: offer to agents ${r.offer_to_agents ? "on" : "off"}`];
+export function renderPolicy(r: Pick<ConnectionRow, "name" | "tools" | "offer_to_agents" | "fold">): string {
+  const out = [`  ${r.name}: offer to agents ${r.offer_to_agents ? "on" : "off"}; fold large answers ${r.fold ? "on" : "off"}`];
   if (r.tools.length === 0) return [...out, "  no tools listed — nothing may be called. `metistry connections test <name>` shows what the server offers."].join("\n");
   const width = Math.max(...r.tools.map((t) => t.name.length));
   for (const g of TOOL_GROUPS) {
@@ -235,13 +300,35 @@ export function parsePair(raw: string, what: string): [string, string] {
   return [raw.slice(0, eq), raw.slice(eq + 1)];
 }
 
-/** How an HTTP connection signs in: `--auth none|bearer|api_key|basic` with `--secret` (and `--auth-header` for an API key, `--username` for basic — an app password, T4-13). oauth arrives with T4-10. */
+/**
+ * How an HTTP connection signs in: `--auth none|bearer|api_key|basic|oauth`
+ * with `--secret` (and `--auth-header` for an API key, `--username` for basic
+ * — an app password, T4-13). OAuth (T4-10) takes its client from the
+ * connection type, or — a custom connection — from `--authorize-url`,
+ * `--token-url` and `--scope`; the owner's own client is `--client-id-secret`
+ * (and `--client-secret-secret`), each the NAME of a secret; the sign-in is
+ * kept in `--token-secret` (default `<name>_oauth_token`).
+ */
 export interface AuthFlags {
   auth?: string | undefined;
   secret?: string | undefined;
   authHeader?: string | undefined;
   username?: string | undefined;
+  authorizeUrl?: string | undefined;
+  tokenUrl?: string | undefined;
+  scopes?: string[] | undefined;
+  clientIdSecret?: string | undefined;
+  clientSecretSecret?: string | undefined;
+  tokenSecret?: string | undefined;
 }
+
+const SECRET_NAME_RE = /^[a-z][a-z0-9_]*$/;
+function secretFlag(flag: string, v: string | undefined): string | undefined {
+  if (v === undefined) return undefined;
+  if (!SECRET_NAME_RE.test(v)) throw new StepFailed(`--${flag} takes the NAME of a secret (lowercase snake_case, stored with \`metistry secrets set <name>\`), never its value`);
+  return v;
+}
+const ref = (name: string) => `{{ secret.${name} }}`;
 
 function authOf(flags: AuthFlags): { scheme: string; secret?: string; header?: string; username?: string } | undefined {
   if (flags.auth === undefined) return undefined;
@@ -261,10 +348,51 @@ function authOf(flags: AuthFlags): { scheme: string; secret?: string; header?: s
       if (flags.username.includes(":")) throw new StepFailed("--username cannot contain a colon — Basic sign-in splits the pair there (RFC 7617)");
       return { scheme: "basic", username: flags.username, secret: flags.secret };
     case "oauth":
-      throw new StepFailed(`--auth ${flags.auth}: ${flags.auth} sign-in arrives with T4-10 — this release sends none, a bearer, an API key header, or basic with an app password`);
+      // the client and the references are the connection type's business, or a custom connection's (oauthAuth)
+      return { scheme: "oauth" };
     default:
-      throw new StepFailed(`--auth takes none, bearer, api_key or basic, not ${JSON.stringify(flags.auth)}`);
+      throw new StepFailed(`--auth takes none, bearer, api_key, basic or oauth, not ${JSON.stringify(flags.auth)}`);
   }
+}
+
+/**
+ * `--auth oauth`, written out (T4-10). A known service: the reach says `auth:
+ * oauth` and the type's oauth field holds the references — the token secret
+ * and, when the owner brings one, the client id and secret. A custom
+ * connection (C118): the reach carries the client model and the references,
+ * and the client id is always the owner's own.
+ */
+function oauthAuth(name: string, provider: string, flags: AuthFlags, catalog: { types: InstanceCatalog["types"] }): { auth: Record<string, unknown>; config: Record<string, unknown> } {
+  const token = secretFlag("token-secret", flags.tokenSecret) ?? `${snakeOf(name)}_oauth_token`;
+  const clientId = secretFlag("client-id-secret", flags.clientIdSecret);
+  const clientSecret = secretFlag("client-secret-secret", flags.clientSecretSecret);
+  if (provider === CUSTOM_PROVIDER) {
+    const missing = [!flags.authorizeUrl && "--authorize-url", !flags.tokenUrl && "--token-url", !(flags.scopes && flags.scopes.length) && "--scope", !clientId && "--client-id-secret"].filter(Boolean);
+    if (missing.length) {
+      throw new StepFailed(`a custom OAuth connection names its client — no connection type supplies one (C118): ${missing.join(", ")}. The client id is your own, stored as a secret (\`metistry secrets set <name>\`)`);
+    }
+    return {
+      auth: {
+        scheme: "oauth",
+        client: { authorize_url: flags.authorizeUrl, token_url: flags.tokenUrl, scopes: flags.scopes, pkce: true, redirect: "loopback" },
+        token: ref(token),
+        client_id: ref(clientId!),
+        ...(clientSecret ? { client_secret: ref(clientSecret) } : {}),
+      },
+      config: {},
+    };
+  }
+  if (flags.authorizeUrl || flags.tokenUrl || flags.scopes?.length) {
+    throw new StepFailed(`${provider} supplies its OAuth client — --authorize-url, --token-url and --scope are for a custom connection; bring your own client with --client-id-secret`);
+  }
+  const fields = (catalog.types.get(provider)?.manifest.fields ?? []).filter((f) => f.kind === "oauth");
+  if (fields.length !== 1) {
+    throw new StepFailed(fields.length === 0 ? `${provider} does not sign in with OAuth` : `${provider} has ${fields.length} OAuth fields (${fields.map((f) => f.key).join(", ")}) — this command writes one; edit the file for the others`);
+  }
+  return {
+    auth: { scheme: "oauth" },
+    config: { [fields[0]!.key]: { token: ref(token), ...(clientId ? { client_id: ref(clientId) } : {}), ...(clientSecret ? { client_secret: ref(clientSecret) } : {}) } },
+  };
 }
 
 /**
@@ -283,17 +411,137 @@ function basicAllowed(auth: { scheme: string } | undefined, provider: string, ca
   }
 }
 
+/** A usage error: the command line is wrong, so nothing was judged or written — exit 2 (a StepFailed that names the flag). */
+function usage(message: string): StepFailed {
+  return new StepFailed(message, 2);
+}
+
+const REF_RE = /^\{\{\s*(secret|variable)\.([a-z][a-z0-9_]*)\s*\}\}$/;
+
+/**
+ * `--config KEY=VALUE`, judged against the provider's connection type (T6-13b).
+ * Returns the `config` values to write — every value a string, a secret or a
+ * variable field written as its reference. Refuses, as a usage error and
+ * naming the field but never the value:
+ *
+ *   - a field on a custom connection (it has none — its settings are its reach);
+ *   - a key the type does not declare, or one given twice;
+ *   - a `secret` field given anything but the NAME of a secret (bare, or as
+ *     `{{ secret.name }}`) — a value on a command line lands in argv and the
+ *     shell's history, so it points at `metistry secrets set`;
+ *   - an `oauth` field — signed in, never typed;
+ *   - a `variable` field given anything but a variable's name;
+ *   - a `url` field that is not an http(s) URL (or a variable holding one), or carries a secret;
+ *   - a `choice` outside its options; a `text` that looks like a key;
+ *   - and, once merged with what the file holds, a required field with no
+ *     default still missing.
+ */
+export function configFieldsOf(
+  pairs: readonly string[] | undefined,
+  provider: string,
+  catalog: { types: InstanceCatalog["types"] },
+  existing: Readonly<Record<string, unknown>> = {},
+): Record<string, string> {
+  const given = pairs ?? [];
+  if (provider === CUSTOM_PROVIDER) {
+    if (given.length > 0) throw usage("--config sets a connection type's fields — a custom connection has none (its settings are its reach); pass --provider <type>");
+    return {};
+  }
+  const unit = catalog.types.get(provider);
+  if (!unit) {
+    if (given.length > 0) throw usage(`--config: no connection type named ${provider} is installed, so its fields are not known (\`metistry extensions list\`)`);
+    return {};
+  }
+  const fields = new Map<string, ConnectionField>(unit.manifest.fields.map((f) => [f.key, f]));
+  const keys = [...fields.keys()];
+  const out: Record<string, string> = {};
+  for (const raw of given) {
+    const eq = raw.indexOf("=");
+    if (eq <= 0) throw usage("--config takes KEY=VALUE"); // never echoing what was given: it may be a value
+    const key = raw.slice(0, eq);
+    const value = raw.slice(eq + 1);
+    const field = fields.get(key);
+    if (!field) throw usage(keys.length ? `config.${key}: ${provider} has no field "${key}" — its fields: ${keys.join(", ")}` : `config.${key}: ${provider} has no fields`);
+    if (Object.hasOwn(out, key)) throw usage(`--config ${key} is given twice`);
+    out[key] = fieldValue(field, value, provider);
+  }
+  const merged = { ...existing, ...out };
+  for (const f of unit.manifest.fields) {
+    if (f.kind === "oauth" || !f.required || ("default" in f && f.default !== undefined) || merged[f.key] !== undefined) continue;
+    throw usage(`config.${f.key}: required by ${provider} — --config ${f.key}=… (${f.label}${f.help ? ` — ${f.help}` : ""})`);
+  }
+  return out;
+}
+
+/** One field's value, judged by its kind — the reference written for a secret or a variable. The value is never in the message. */
+function fieldValue(field: ConnectionField, value: string, provider: string): string {
+  const key = field.key;
+  const ref = REF_RE.exec(value.trim());
+  switch (field.kind) {
+    case "secret": {
+      const name = ref?.[1] === "secret" ? ref[2]! : SECRET_NAME_RE.test(value.trim()) && !looksLikeKey(value) ? value.trim() : undefined;
+      if (!name) {
+        throw usage(
+          `--config ${key}: a secret never goes on a command line (every process can read argv, and the shell keeps it) — store it with \`metistry secrets set <name>\` (the value on stdin), then name it: --config ${key}=<name>`,
+        );
+      }
+      return `{{ secret.${name} }}`;
+    }
+    case "oauth":
+      throw usage(`--config ${key}: an oauth field is signed in, not typed — \`--auth oauth\` writes it and \`metistry connections authorize <name>\` signs in`);
+    case "variable": {
+      const name = ref?.[1] === "variable" ? ref[2]! : SECRET_NAME_RE.test(value.trim()) ? value.trim() : undefined;
+      if (!name) throw usage(`--config ${key}: a variable field names a variable — --config ${key}=<name> or {{ variable.<name> }} (\`metistry variables set <name> <value>\` sets one)`);
+      return `{{ variable.${name} }}`;
+    }
+    case "url": {
+      const v = value.trim();
+      if (secretRefsIn(v).names.length > 0) throw usage(`--config ${key}: a URL never carries a secret — a URL lands in logs and histories`);
+      if (ref?.[1] === "variable") return v;
+      let u: URL | undefined;
+      try {
+        u = new URL(v);
+      } catch {
+        u = undefined;
+      }
+      if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) throw usage(`--config ${key}: ${field.label} is an http(s) URL, or a {{ variable.<name> }} that holds one`);
+      if (u.username || u.password) throw usage(`--config ${key}: a URL never carries credentials`);
+      return v;
+    }
+    case "choice": {
+      const values = field.options.map((o) => o.value);
+      if (!values.includes(value)) throw usage(`--config ${key}: ${field.label} is one of ${values.join(", ")}`);
+      return value;
+    }
+    case "text":
+      if (looksLikeKey(value.replace(/\{\{[^{}]*\}\}/g, " "))) {
+        throw usage(`--config ${key}: this looks like a key — a connection file holds names, never values; store it as a secret (\`metistry secrets set <name>\`) and reference it (${provider} declares ${key} as text)`);
+      }
+      return value;
+  }
+}
+
 export interface AddSpec extends AuthFlags {
   name: string | undefined;
   type: string | undefined;
   provider?: string | undefined;
   url?: string | undefined;
+  /** `host[:port]` of an IMAP server (T4-15) — signed in with `--username` and the app password `--secret` names */
+  imap?: string | undefined;
+  /** reach the IMAP server without TLS — accepted for a server on this Mac only */
+  plain?: boolean | undefined;
+  /** a files connection's folder or file (T4-10), with its include and skip patterns */
+  path?: string | undefined;
+  include?: string[] | undefined;
+  skip?: string[] | undefined;
   /** argv: the command and its arguments (everything after `--`) */
   command?: string[] | undefined;
   env?: string[] | undefined;
   headers?: string[] | undefined;
   runsOn?: string | undefined;
   description?: string | undefined;
+  /** `--config KEY=VALUE`, repeatable: a known service's config fields, judged against its connection type (T6-13b; T4-11's flag) */
+  config?: string[] | undefined;
   /** dial it and list what it offers (default); false writes it with no tools, or the provider's declared ones */
   discover?: boolean | undefined;
 }
@@ -303,9 +551,27 @@ export interface AddResult {
   file: string;
   tools: Array<{ name: string; group: ToolGroup; mode: ToolMode; read_only_hint: boolean }>;
   delivery?: ProtectedWrite | undefined;
+  /** the sync whose first connection this became in `scheduled.yaml`, when it did */
+  sync?: { name: string; delivery: ProtectedWrite } | undefined;
 }
 
-/** `connections add <name> --type <type> (--url <url> | -- <command…>)`. */
+/**
+ * `--imap host[:port] --username <user> --secret <name> [--plain]` → the file's
+ * `reach.imap` (T4-15). The username is written; the app password is the
+ * secret, by name. Port 993 (implicit TLS) unless given; `--plain` only for a
+ * server on this Mac — the file check refuses it anywhere else, and a mail
+ * submission port, before anything is written.
+ */
+function imapReachOf(spec: AddSpec): { host: string; port?: number; security?: "plain"; username: string; secret: string } {
+  const m = /^([^:\s/]+)(?::(\d{1,5}))?$/.exec(spec.imap ?? "");
+  if (!m) throw new StepFailed(`--imap takes host or host:port (imap.gmail.com:993) — no scheme, no path`);
+  if (spec.auth !== undefined && spec.auth !== "basic") throw new StepFailed("an IMAP connection signs in with --username and an app password (--secret) — --auth takes nothing else");
+  if (!spec.username || !spec.secret) throw new StepFailed("--imap needs --username <user> and --secret <name> — the secret holds the app password, never the command line");
+  const port = m[2] === undefined ? undefined : Number(m[2]);
+  return { host: m[1]!.toLowerCase(), ...(port !== undefined && port !== 993 ? { port } : {}), ...(spec.plain ? { security: "plain" as const } : {}), username: spec.username, secret: spec.secret };
+}
+
+/** `connections add <name> --type <type> (--url <url> | --imap <host[:port]> | --path <path> | -- <command…>)`. */
 export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): Promise<AddResult> {
   const name = spec.name;
   if (!name || !NAME_RE.test(name)) throw new StepFailed(`${JSON.stringify(name ?? "")} is not a connection name — lowercase kebab-case, e.g. github`);
@@ -315,21 +581,45 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
   if (catalog.entries.some((e) => e.name === name) || existsSync(`${catalog.dir}/${name}.yaml`) || existsSync(`${catalog.dir}/${name}.yml`)) {
     throw new StepFailed(`there is already a connection named ${name} — \`metistry connections set ${name} …\` changes it, \`remove\` deletes it`);
   }
-  if ((spec.url === undefined) === (spec.command === undefined || spec.command.length === 0)) {
-    throw new StepFailed("say how it is reached: --url <url>, or -- <command> [args…] after everything else");
+  const hows = [spec.url !== undefined, spec.command !== undefined && spec.command.length > 0, spec.imap !== undefined, spec.path !== undefined].filter(Boolean).length;
+  if (hows !== 1) {
+    throw new StepFailed("say how it is reached — one of: --url <url>, --imap <host[:port]> (a mailbox), --path <folder or file> (a files connection), or -- <command> [args…] after everything else");
   }
+  if (spec.plain && spec.imap === undefined) throw new StepFailed("--plain is for a connection reached by --imap");
   const provider = spec.provider ?? CUSTOM_PROVIDER;
-  const auth = authOf(spec);
+  const imap = spec.imap !== undefined ? imapReachOf(spec) : undefined;
+  const auth = imap ? undefined : authOf(spec);
   basicAllowed(auth, provider, catalog);
   const env = Object.fromEntries((spec.env ?? []).map((p) => parsePair(p, "--env")));
   const headers = Object.fromEntries((spec.headers ?? []).map((p) => parsePair(p, "--header")));
   if (spec.url === undefined && (auth || Object.keys(headers).length)) throw new StepFailed("--auth and --header are for a connection reached by --url");
-  if (spec.url !== undefined && Object.keys(env).length) throw new StepFailed("--env is for a connection reached by a command");
-  const reach =
-    spec.url !== undefined
-      ? { http: { url: spec.url, ...(auth ? { auth } : {}), ...(Object.keys(headers).length ? { headers } : {}) } }
-      : { command: { command: spec.command![0]!, ...(spec.command!.length > 1 ? { args: spec.command!.slice(1) } : {}), ...(Object.keys(env).length ? { env } : {}), ...(spec.runsOn ? { runs_on: spec.runsOn } : {}) } };
-  const obj: { name: string; type: ConnectionType; provider: string; description?: string; reach: unknown; secrets: string[]; variables: string[]; tools: Record<string, { group: ToolGroup; mode: ToolMode }>; offer_to_agents: boolean } = {
+  if ((spec.command === undefined || spec.command.length === 0) && Object.keys(env).length) throw new StepFailed("--env is for a connection reached by a command");
+  if (spec.path === undefined && (spec.include?.length || spec.skip?.length)) throw new StepFailed("--include and --skip are for a files connection reached by --path");
+  const oauth = auth?.scheme === "oauth" ? oauthAuth(name, provider, spec, catalog) : undefined;
+  if (!oauth && (spec.authorizeUrl || spec.tokenUrl || spec.scopes?.length || spec.clientIdSecret || spec.clientSecretSecret || spec.tokenSecret)) {
+    throw new StepFailed("--authorize-url, --token-url, --scope, --client-id-secret, --client-secret-secret and --token-secret are for --auth oauth");
+  }
+  // the known service's fields (T6-13b): judged against its manifest before anything else is
+  const config: Record<string, unknown> = { ...configFieldsOf(spec.config, provider, catalog, oauth?.config ?? {}), ...(oauth?.config ?? {}) };
+  const reach = imap
+    ? { imap }
+    : spec.url !== undefined
+      ? { http: { url: spec.url, ...(oauth ? { auth: oauth.auth } : auth ? { auth } : {}), ...(Object.keys(headers).length ? { headers } : {}) } }
+      : spec.path !== undefined
+        ? { path: { path: spec.path, ...(spec.include?.length ? { include: spec.include } : {}), ...(spec.skip?.length ? { skip: spec.skip } : {}) } }
+        : { command: { command: spec.command![0]!, ...(spec.command!.length > 1 ? { args: spec.command!.slice(1) } : {}), ...(Object.keys(env).length ? { env } : {}), ...(spec.runsOn ? { runs_on: spec.runsOn } : {}) } };
+  const obj: {
+    name: string;
+    type: ConnectionType;
+    provider: string;
+    description?: string;
+    reach: unknown;
+    secrets: string[];
+    variables: string[];
+    config?: Record<string, unknown>;
+    tools: Record<string, { group: ToolGroup; mode: ToolMode }>;
+    offer_to_agents: boolean;
+  } = {
     name,
     type,
     provider,
@@ -337,34 +627,43 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
     reach,
     secrets: [],
     variables: [],
+    ...(Object.keys(config).length ? { config } : {}),
     tools: {},
     offer_to_agents: false,
   };
-  referencedNames(obj, auth);
+  referencedNames(obj, auth ?? imap);
 
   // judge the file with no tools first: a refusal here names the field and dials nothing
   const bare = [...HEADER, stringify(obj)].join("\n");
   judged(name, bare, catalog);
-  const declared = catalog.types.get(provider)?.manifest.tools ?? {};
+  const unit = provider === CUSTOM_PROVIDER ? undefined : catalog.types.get(provider);
+  const declared = unit?.manifest.tools ?? {};
+  const generated = isGeneratedType(type) && (!unit || unit.manifest.implementation.kind === "native") ? generatedToolsFor(obj as Parameters<typeof generatedToolsFor>[0]) : [];
 
   let found: UpstreamTool[] | undefined;
-  if (spec.discover !== false && opts.dryRun !== true) {
+  const signInFirst = oauth !== undefined;
+  // a mailbox is not an MCP server — nothing to discover; `connections test` signs in
+  if (spec.discover !== false && opts.dryRun !== true && !imap && !signInFirst) {
     const entry = judgeConnection(name, `${catalog.dir}/${name}.yaml`, parseDocument(bare).toJS(), catalog.types);
     // the one dial `add` makes: initialize and tools/list, through the same pool
-    // and door as every later call — no tool is called
+    // and door as every later call — no tool is called. A generated type has no
+    // server to list tools: the service is reached once (a feed read, a GET, the folder)
     const probe: ConnectionCatalog = { ...catalog, entries: [entry] };
     const pool = poolOver(opts, async () => probe);
     try {
       found = await pool.upstreamTools(name);
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
-      throw new StepFailed(`${name} did not answer, so nothing was written — ${why}. Fix it and add again, or pass --no-discover to write it with no tools`);
+      throw new StepFailed(`${name} did not answer, so nothing was written — ${why}. Fix it and add again, or pass --no-discover to write it without reaching it`);
     } finally {
       await pool.close();
     }
   }
   const tools: AddResult["tools"] = [];
-  if (found) {
+  if (generated.length > 0) {
+    // Metistry's own tools for it — known without reaching it, and every one at Ask First
+    for (const t of generated) tools.push({ name: t.name, group: t.group, mode: GENERATED_TOOL_MODE, read_only_hint: false });
+  } else if (found) {
     for (const t of found) {
       const group: ToolGroup = Object.hasOwn(declared, t.name) ? declared[t.name]!.group : "changes";
       tools.push({ name: t.name, group, mode: NEW_TOOL_MODE[group], read_only_hint: t.readOnly });
@@ -377,13 +676,68 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
   const content = [...HEADER, stringify(obj)].join("\n");
   judged(name, content, catalog);
 
-  opts.out(`add ${name} (${type}${provider !== CUSTOM_PROVIDER ? ` · ${provider}` : ""}): ${tools.length} tool${tools.length === 1 ? "" : "s"}${found ? " the server offers" : spec.discover === false ? " (not dialled: --no-discover)" : " (not dialled: dry run)"}, offer to agents off`);
+  const how = generated.length > 0 ? ` the tools Metistry generates for a ${type} connection${found ? " (it answered)" : ""}` : found ? " the server offers" : imap ? ` (a mailbox — \`metistry connections test ${name}\` signs in)` : signInFirst ? " (not dialled: sign in first)" : spec.discover === false ? " (not dialled: --no-discover)" : " (not dialled: dry run)";
+  opts.out(`add ${name} (${type}${provider !== CUSTOM_PROVIDER ? ` · ${provider}` : ""}): ${tools.length} tool${tools.length === 1 ? "" : "s"}${how}, offer to agents off`);
   for (const t of tools) opts.out(`  ${t.name.padEnd(28)} ${TOOL_GROUP_LABEL[t.group].padEnd(16)} ${TOOL_MODE_LABEL[t.mode]}${t.read_only_hint && t.group !== "reads" ? "   (the server says read-only)" : ""}`);
   const hinted = tools.filter((t) => t.read_only_hint && t.group !== "reads").map((t) => t.name);
   if (hinted.length) opts.out(`the server marks ${hinted.length} tool${hinted.length === 1 ? "" : "s"} read-only — a hint, not a control; \`metistry connections policy ${name} <tool> allow --group reads\` files one under Reads`);
-  if (obj.secrets.length) opts.out(`secrets it uses: ${obj.secrets.join(", ")} — each must be granted to connection:${name} (\`metistry secrets grant <name> connection:${name} on\`)${reach && "http" in reach ? " and list its host (`metistry secrets hosts <name> <host>`)" : ""}`);
+  if (generated.length > 0) opts.out(`every generated tool starts at Ask First — \`metistry connections policy ${name} <tool> allow\` moves one`);
+  const hostEntry = imap ? `${imap.host}:${imap.port ?? 993}` : undefined;
+  if (obj.secrets.length) {
+    opts.out(
+      `secrets it uses: ${obj.secrets.join(", ")} — each must be granted to connection:${name} (\`metistry secrets grant <name> connection:${name} on\`)${hostEntry ? ` and list ${hostEntry} (\`metistry secrets hosts <name> ${hostEntry}\`)` : reach && "http" in reach ? " and list its host (`metistry secrets hosts <name> <host>`)" : ""}`,
+    );
+  }
+  if (signInFirst) opts.out(`next: \`metistry connections authorize ${name}\` signs in (the browser opens; the sign-in is kept in this instance's Keychain), then \`metistry connections test ${name}\``);
   const delivery = await commit(opts, name, content, `connections: add ${name}`);
-  return { name, file: connectionRel(opts.instanceDir, name), tools, delivery };
+  const sync = await firstSyncConnection(name, unit, catalog, opts);
+  return { name, file: connectionRel(opts.instanceDir, name), tools, delivery, ...(sync ? { sync } : {}) };
+}
+
+/**
+ * A sync's first `connection:` (§2.5, ruled 2026-09-27): when the provider
+ * is product code a sync reads (`implementation: builtin`, `sync: <name>`)
+ * and `scheduled.yaml` names no connection for that sync yet, `add` writes
+ * `syncs.<sync>: { connection: <name> }` — edited as a document, so the
+ * owner's comments and every other entry survive — through the reconciler
+ * as the owner. An entry that already names one is left as it is: the owner
+ * chose, and `metistry connections list` shows who reads what. The Scheduled
+ * door keeps refusing to set a connection; this is the one writer of a first.
+ */
+async function firstSyncConnection(name: string, unit: ReturnType<InstanceCatalog["types"]["get"]>, catalog: InstanceCatalog, opts: ConnectionsOptions): Promise<{ name: string; delivery: ProtectedWrite } | undefined> {
+  const m = unit?.manifest;
+  const sync = m && m.implementation.kind === "builtin" ? m.sync : undefined;
+  if (!sync) return undefined;
+  const rel = `${protectedRel(opts.instanceDir, "metistryDir")}/${SCHEDULED_FILENAME}`;
+  const path = `${opts.instanceDir.replace(/\/+$/, "")}/${rel}`;
+  const text = existsSync(path) ? await readFile(path, "utf8") : "";
+  const before = parseScheduled(text);
+  if (!before.ok) {
+    opts.out(`${rel} does not validate, so ${sync} was not pointed at ${name} — fix the file, then name it under syncs.${sync}.connection (${before.errors[0] ?? ""})`);
+    return undefined;
+  }
+  const named = before.value.syncs && Object.hasOwn(before.value.syncs, sync) ? before.value.syncs[sync]?.connection : undefined;
+  if (named !== undefined) {
+    if (named !== name) opts.out(`${sync} already reads ${named} (${rel}: syncs.${sync}.connection) — left as it is`);
+    return undefined;
+  }
+  const doc = parseDocument(text === "" ? "" : text);
+  if (doc.errors.length > 0) return undefined;
+  if (!doc.contents || !doc.has("syncs")) doc.set("syncs", doc.createNode({}));
+  doc.setIn(["syncs", sync, "connection"], name);
+  const content = String(doc);
+  const after = parseScheduled(content);
+  if (!after.ok) throw new StepFailed(`refusing to write ${rel}: the result would not validate — ${after.errors.join("; ")}`);
+  opts.out(`${sync} reads ${name}: ${rel} syncs.${sync}.connection (its first connection — the Scheduled pane changes its interval and rules, never this)`);
+  const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out, exec: opts.exec ?? realExec, env: opts.env });
+  const delivery = await writeProtected(r, rel, content, `scheduled: ${sync} reads ${name}`, {
+    env: opts.env,
+    platform: opts.platform,
+    uid: opts.uid,
+    fetchFn: opts.fetchFn ?? fetch,
+    instanceDir: opts.instanceDir,
+  });
+  return { name: sync, delivery };
 }
 
 // ---- set / policy / remove ----------------------------------------------------------
@@ -411,6 +765,10 @@ async function write(e: Editable & { name: string }, opts: ConnectionsOptions, m
 }
 
 export interface SetSpec extends AuthFlags {
+  /** `--config KEY=VALUE`, repeatable (T6-13b; T4-11's flag) */
+  config?: string[] | undefined;
+  /** `--unset-config KEY`: remove a field's value — the file is then judged, so a required one is refused (T4-11) */
+  unsetConfig?: string[] | undefined;
   url?: string | undefined;
   command?: string[] | undefined;
   env?: string[] | undefined;
@@ -429,18 +787,19 @@ export async function connectionsSet(name: string | undefined, spec: SetSpec, op
   const reach = doc.getIn(["reach"]) as unknown;
   const isHttp = doc.hasIn(["reach", "http"]);
   const isCommand = doc.hasIn(["reach", "command"]);
+  const reachedBy = isHttp ? "URL" : isCommand ? "a command" : doc.hasIn(["reach", "imap"]) ? "IMAP" : "a path";
   if (!reach) throw new StepFailed(`${e.path} has no reach: — fix it by hand`);
   if (spec.description !== undefined) {
     doc.setIn(["description"], spec.description);
     changed.push("description");
   }
   if (spec.url !== undefined) {
-    if (!isHttp) throw new StepFailed(`${e.name} is reached by a command, not a URL — remove it and add it again to change how it is reached`);
+    if (!isHttp) throw new StepFailed(`${e.name} is reached by ${reachedBy}, not a URL — remove it and add it again to change how it is reached`);
     doc.setIn(["reach", "http", "url"], spec.url);
     changed.push("url");
   }
   if (spec.command !== undefined && spec.command.length > 0) {
-    if (!isCommand) throw new StepFailed(`${e.name} is reached by URL, not a command — remove it and add it again to change how it is reached`);
+    if (!isCommand) throw new StepFailed(`${e.name} is reached by ${reachedBy}, not a command — remove it and add it again to change how it is reached`);
     doc.setIn(["reach", "command", "command"], spec.command[0]);
     if (spec.command.length > 1) doc.setIn(["reach", "command", "args"], spec.command.slice(1));
     else doc.deleteIn(["reach", "command", "args"]);
@@ -474,11 +833,57 @@ export async function connectionsSet(name: string | undefined, spec: SetSpec, op
     changed.push(`header ${k} removed`);
   }
   const auth = authOf(spec);
+  const provider = String(doc.getIn(["provider"]) ?? CUSTOM_PROVIDER);
+  if (spec.config?.length) {
+    const held = doc.getIn(["config"]) as { toJSON?: () => unknown } | undefined;
+    const existing = (held && typeof held === "object" && typeof held.toJSON === "function" ? held.toJSON() : {}) as Record<string, unknown>;
+    for (const [k, v] of Object.entries(configFieldsOf(spec.config, provider, e.catalog, existing ?? {}))) {
+      doc.setIn(["config", k], v);
+      changed.push(`config ${k}`);
+    }
+  }
+  for (const k of spec.unsetConfig ?? []) {
+    if (provider === CUSTOM_PROVIDER) throw usage("--unset-config is for a known service's fields — a custom connection has none");
+    if (!doc.hasIn(["config", k])) throw usage(`${e.name} has no config ${k}`);
+    doc.deleteIn(["config", k]); // a required field is then refused by the file's judge (`config.<key>: required by <type>`)
+    changed.push(`config ${k} removed`);
+  }
   if (auth) {
     if (!isHttp) throw new StepFailed("--auth is for a connection reached by --url");
-    basicAllowed(auth, String(doc.getIn(["provider"]) ?? CUSTOM_PROVIDER), e.catalog);
-    doc.setIn(["reach", "http", "auth"], doc.createNode(auth));
+    basicAllowed(auth, provider, e.catalog);
+    if (auth.scheme === "oauth") {
+      const o = oauthAuth(e.name, provider, spec, e.catalog);
+      doc.setIn(["reach", "http", "auth"], doc.createNode(o.auth));
+      for (const [k, v] of Object.entries(o.config)) doc.setIn(["config", k], doc.createNode(v));
+    } else {
+      doc.setIn(["reach", "http", "auth"], doc.createNode(auth));
+    }
     changed.push(`auth ${auth.scheme}`);
+  } else if (spec.clientIdSecret !== undefined || spec.clientSecretSecret !== undefined || spec.tokenSecret !== undefined) {
+    // bring your own client (§2.6 recommendation 2): the id — and a secret, where the provider needs one — as secrets of this instance
+    if (doc.getIn(["reach", "http", "auth", "scheme"]) !== "oauth" && doc.getIn(["reach", "http", "auth"]) !== "oauth") {
+      throw new StepFailed(`${e.name} does not sign in with OAuth — --client-id-secret, --client-secret-secret and --token-secret are for one that does`);
+    }
+    const parts: Array<[string, string | undefined]> = [
+      ["client_id", secretFlag("client-id-secret", spec.clientIdSecret)],
+      ["client_secret", secretFlag("client-secret-secret", spec.clientSecretSecret)],
+      ["token", secretFlag("token-secret", spec.tokenSecret)],
+    ];
+    let at: (string | number)[];
+    if (provider === CUSTOM_PROVIDER) at = ["reach", "http", "auth"];
+    else {
+      const fields = (e.catalog.types.get(provider)?.manifest.fields ?? []).filter((f) => f.kind === "oauth");
+      if (fields.length !== 1) throw new StepFailed(`${provider} has ${fields.length} OAuth fields — edit the file to choose one`);
+      at = ["config", fields[0]!.key];
+      if (typeof doc.getIn(at) !== "object") doc.setIn(at, doc.createNode({}));
+    }
+    // `auth: oauth` written as the shorthand: a custom connection's references live beside its client
+    if (provider === CUSTOM_PROVIDER && typeof doc.getIn(["reach", "http", "auth"]) === "string") doc.setIn(["reach", "http", "auth"], doc.createNode({ scheme: "oauth" }));
+    for (const [part, name] of parts) {
+      if (name === undefined) continue;
+      doc.setIn([...at, part], ref(name));
+      changed.push(part === "client_id" ? `your own client id (${name})` : part === "client_secret" ? `your own client secret (${name})` : `sign-in kept in ${name}`);
+    }
   }
   if (changed.length === 0) throw new StepFailed("nothing to change — see `metistry connections --help` for what set takes");
   // every name a value now uses joins the lists the grant check reads
@@ -497,13 +902,16 @@ export interface PolicySpec {
   mode?: string | undefined;
   group?: string | undefined;
   offer?: string | undefined;
+  /** `--fold on|off`: whether `connections_call` folds this connection's large answers (X-132; on by default) */
+  fold?: string | undefined;
 }
 
 /**
  * `connections policy <name>` prints the tool table; `policy <name> <tool>
  * <allow|ask|never> [--group g]` sets one tool's mode (listing it, if it is
  * not yet — its group from the provider, or `--group`); `--offer on|off`
- * sets the offer switch. The owner's hand: nothing else moves a tool to Allow.
+ * sets the offer switch; `--fold on|off` the fold switch. The owner's hand:
+ * nothing else moves a tool to Allow.
  */
 export async function connectionsPolicy(name: string | undefined, spec: PolicySpec, opts: ConnectionsOptions): Promise<{ row: ConnectionRow; delivery?: ProtectedWrite | undefined }> {
   const e = await openConnection(name, opts);
@@ -532,6 +940,11 @@ export async function connectionsPolicy(name: string | undefined, spec: PolicySp
     if (spec.offer !== "on" && spec.offer !== "off") throw new StepFailed("--offer takes on or off");
     doc.setIn(["offer_to_agents"], spec.offer === "on");
     changes.push(`offer to agents ${spec.offer}`);
+  }
+  if (spec.fold !== undefined) {
+    if (spec.fold !== "on" && spec.fold !== "off") throw new StepFailed("--fold takes on or off");
+    doc.setIn(["fold"], spec.fold === "on");
+    changes.push(`fold large answers ${spec.fold}`);
   }
   if (changes.length === 0) {
     const detail = await describeConnectionDetail(e.name, e.catalog, connectionRel(opts.instanceDir, e.name));
@@ -563,7 +976,134 @@ export async function connectionsRemove(name: string | undefined, opts: Connecti
     fetchFn: opts.fetchFn ?? fetch,
     instanceDir: opts.instanceDir,
   });
+  if (opts.dryRun !== true) await forgetCheck(opts.instanceDir, e.name);
   return { name: e.name, referred_by: referredBy, delivery };
+}
+
+// ---- authorize (T4-10) -------------------------------------------------------------------
+
+export interface AuthorizeSpec {
+  /** open the browser (default); false prints the address instead */
+  browser?: boolean | undefined;
+  /** seconds the listener waits for the provider (default 300) */
+  timeoutS?: number | undefined;
+}
+
+export interface AuthorizeCliResult extends AuthorizeResult {
+  /** `secrets.yaml`'s line for the token secret, when this sign-in created it */
+  policy?: { hosts: string[]; grantee: string; delivery: ProtectedWrite } | undefined;
+}
+
+/**
+ * `connections authorize <name>`: the one door that signs in (T4-10) — and
+ * the owner's alone. A listener on 127.0.0.1, on a port the system picks,
+ * for one callback; the browser at the provider (macOS `open`, or the address
+ * printed with `--no-browser`); the state checked, the code exchanged with the
+ * PKCE verifier through the egress door; the refresh token into this
+ * instance's Keychain as the connection's token secret. The first sign-in
+ * also writes that secret's policy: sent only to the token endpoint and the
+ * service, granted to this connection alone.
+ */
+export async function connectionsAuthorize(name: string | undefined, spec: AuthorizeSpec, opts: ConnectionsOptions): Promise<AuthorizeCliResult> {
+  if (!name || !NAME_RE.test(name)) throw new StepFailed(`${JSON.stringify(name ?? "")} is not a connection name — \`metistry connections list\` names them`);
+  const catalog = await catalogFor(opts);
+  const entry = catalog.entries.find((x) => x.name === name);
+  if (!entry) throw new StepFailed(`no connection named ${name} — \`metistry connections list\` names them`);
+  if (entry.status !== "ok" || !entry.connection) throw new StepFailed(`${name} is ${entry.status}: ${entry.issues.join("; ")}`);
+  let plan: ReturnType<typeof oauthClientOf>;
+  try {
+    plan = oauthClientOf(entry);
+  } catch (err) {
+    throw new StepFailed(err instanceof Error ? err.message : String(err));
+  }
+  if (!catalog.secrets.ok) throw new StepFailed(`secrets.yaml does not load, so no sign-in can be kept — ${catalog.secrets.message}`);
+  const store = secretsStore(opts);
+  if (!store) {
+    throw new StepFailed(
+      opts.instanceId
+        ? `a sign-in is kept in the macOS login Keychain, which this host (${opts.platform}) does not have — run this on the Mac that holds the instance`
+        : `${opts.instanceDir} has no instance_id in identity.yaml, and a sign-in belongs to exactly one instance — \`metistry up\` mints one`,
+    );
+  }
+  if (opts.dryRun) {
+    opts.out(`[dry-run] would listen on 127.0.0.1 for one callback, open ${new URL(plan.authorizeUrl).host} in the browser, and keep the sign-in as ${plan.tokenSecret}`);
+    if (plan.notice !== undefined) opts.out(`before you sign in: ${plan.notice}`);
+    return { connection: name, stored: plan.tokenSecret, from: plan.from, client: plan.clientId.kind === "shipped" ? "shipped" : "yours", scopes: plan.scopes, ...(plan.notice !== undefined ? { notice: plan.notice } : {}) };
+  }
+  const timeoutMs = spec.timeoutS !== undefined ? Math.round(spec.timeoutS * 1000) : DEFAULT_OAUTH_FLOW_TIMEOUT_MS;
+  opts.out(`signing in ${name} at ${new URL(plan.authorizeUrl).host} with ${plan.clientId.kind === "shipped" ? "Metistry's client for it" : "your own client"} (scopes: ${plan.scopes.join(" ")})`);
+  const result = await authorizeConnection(entry, {
+    secrets: catalog.secrets.file,
+    source: store,
+    redactor: new SecretRedactor(),
+    ...(opts.dialFetch ? { fetch: opts.dialFetch } : {}),
+    store: { set: (n, v) => store.set(n, v) },
+    timeoutMs,
+    onListening: ({ redirectUri, notice }) => {
+      opts.out(`listening for the answer on ${redirectUri} (127.0.0.1 only, one callback, ${Math.round(timeoutMs / 1000)} s)`);
+      // the connection type's words about its shipped client (Google: not verified yet) — before the browser opens, never after
+      if (notice !== undefined) opts.out(`before you sign in: ${notice}`);
+    },
+    open: async (url) => {
+      if (spec.browser === false || opts.platform !== "darwin") {
+        opts.out(`open this address to sign in (it carries the client id, as OAuth does): ${url}`);
+        return;
+      }
+      const r = await (opts.exec ?? realExec)("open", [url], { timeoutMs: 20_000 });
+      if (r.code !== 0) opts.out(`the browser did not open (${r.stderr.trim() || `exit ${r.code}`}) — open this address to sign in: ${url}`);
+      else opts.out("the browser is open — finish signing in there");
+    },
+  });
+  opts.out(`signed in: ${name} — the sign-in is kept as ${result.stored} in this instance's Keychain; its value is not printed`);
+  const policy = await ensureTokenPolicy(name, plan, opts);
+  opts.out(`next: \`metistry secrets sync --to env\` delivers it to the console (which dials connections for agents and the assistant), then \`metistry connections test ${name}\``);
+  return { ...result, ...(policy ? { policy } : {}) };
+}
+
+/**
+ * The token secret's line in `secrets.yaml`, written on the first sign-in:
+ * sent only to the token endpoint's host and the service's, granted `on` to
+ * this connection and nobody else. An existing line is the owner's and is
+ * left exactly as it is (the listing says what it would refuse).
+ */
+async function ensureTokenPolicy(name: string, plan: ReturnType<typeof oauthClientOf>, opts: ConnectionsOptions): Promise<AuthorizeCliResult["policy"]> {
+  const path = `${opts.instanceDir.replace(/\/+$/, "")}/${protectedRel(opts.instanceDir, "secrets")}`;
+  const text = existsSync(path) ? await readFile(path, "utf8") : "";
+  const doc = parseDocument(text === "" ? "secrets: {}\n" : text);
+  if (doc.errors.length > 0) return undefined;
+  if (doc.hasIn(["secrets", plan.tokenSecret])) return undefined;
+  const catalog = await catalogFor(opts);
+  const c = catalog.entries.find((e) => e.name === name)?.connection;
+  const hostOf = (u: string | undefined) => {
+    try {
+      const x = new URL(u ?? "");
+      return x.port === "" || x.port === "443" ? x.hostname : `${x.hostname}:${x.port}`;
+    } catch {
+      return undefined;
+    }
+  };
+  const hosts = [...new Set([hostOf(plan.tokenUrl), hostOf(c?.reach.http?.url)].filter((h): h is string => !!h && !h.includes("{{")))];
+  const grantee = connectionGrantee(name);
+  if (!doc.has("secrets")) doc.set("secrets", doc.createNode({}));
+  doc.setIn(["secrets", plan.tokenSecret], doc.createNode({ hosts, grants: { [grantee]: "on" } }));
+  const node = doc.getIn(["secrets", plan.tokenSecret, "hosts"], true) as { flow?: boolean } | undefined;
+  if (node && typeof node === "object") node.flow = true;
+  try {
+    parseSecretsFile(String(doc));
+  } catch (err) {
+    opts.out(`secrets.yaml would not validate with ${plan.tokenSecret}'s line, so it was not written (${err instanceof Error ? err.message : String(err)}) — \`metistry secrets hosts|grant ${plan.tokenSecret}\``);
+    return undefined;
+  }
+  opts.out(`${plan.tokenSecret} is sent only to ${hosts.join(", ")} and granted to ${grantee} — \`metistry secrets hosts|grant ${plan.tokenSecret}\` changes either`);
+  const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out, exec: opts.exec ?? realExec, env: opts.env });
+  const delivery = await writeProtected(r, protectedRel(opts.instanceDir, "secrets"), String(doc), `secrets: ${plan.tokenSecret} for ${grantee} (signed in)`, {
+    env: opts.env,
+    platform: opts.platform,
+    uid: opts.uid,
+    fetchFn: opts.fetchFn ?? fetch,
+    instanceDir: opts.instanceDir,
+  });
+  return { hosts, grantee, delivery };
 }
 
 /**

@@ -79,9 +79,11 @@ export function viewsFor(type, data = {}, open = {}) {
     case "config.changed":
       return ["settings", "usage", "projects", "project"];
     case "budget.state":
-      return ["usage", "projects", "project"];
+      return ["usage", "projects", "project", "settings"]; // Settings ▸ Compute paints each limit's spend (T7-6)
+    case "vault.sync":
+      return ["settings"]; // Settings ▸ Vault reads GET /api/vault/status (T7-6)
     default:
-      return []; // vault.sync, routine.status, sync.status: no PWA view reads their routes yet; resync is every visible view
+      return []; // routine.status, sync.status: no PWA view reads their routes yet; resync is every visible view
   }
 }
 

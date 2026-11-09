@@ -50,6 +50,10 @@ public enum StopReason: String, Equatable {
     case crashed
     /// A stream could not be reopened after the Mac woke.
     case resumeFailed = "resume_failed"
+    /// *Window* / *Screen*: the system stopped the picture (the window
+    /// closed, the grant was withdrawn). A picture recording with no picture
+    /// ends, rather than report a display it no longer has.
+    case pictureLost = "picture_lost"
     /// The helper was told to quit (launchd stopping it, a logout): a clean
     /// save, not a crash.
     case helperStopped = "helper_stopped"

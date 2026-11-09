@@ -79,7 +79,8 @@ describe("the caldav-calendar collector's manifest", () => {
   it("loads through the collector registry as a sync every 15 minutes", async () => {
     const reg = await loadKind("collector", { productDir: fileURLToPath(new URL("../..", import.meta.url)) });
     const m = reg.get("caldav-calendar")?.manifest;
-    expect(m, JSON.stringify(reg.skipped)).toMatchObject({ name: "caldav-calendar", display_name: "CalDAV Calendar", schedule: { every: "15m" }, writes: ["calendar_events", "sync_state"] });
+    expect(m, JSON.stringify(reg.skipped)).toMatchObject({ name: "caldav-calendar", display_name: "CalDAV Calendar", schedule: { every: "15m" }, writes: ["calendar_events", "sync_state", "proposals"] });
+    expect(m?.type === "collector" ? m.needs_you : null).toEqual({ invitation: { label: "A meeting invitation waits on your answer", default: true } });
   });
 });
 
@@ -167,6 +168,7 @@ describe.skipIf(!hasDb)("the caldav sync (real db)", () => {
   const clean = async () => {
     await pool.query(`DELETE FROM calendar_events WHERE connection = $1`, [CONN]);
     await pool.query(`DELETE FROM sync_state WHERE connection = $1`, [CONN]);
+    await pool.query(`DELETE FROM proposals WHERE kind = 'invitation' AND payload->>'connection' = $1`, [CONN]);
   };
 
   beforeAll(async () => {
@@ -196,8 +198,13 @@ describe.skipIf(!hasDb)("the caldav sync (real db)", () => {
     await respondToInvitation(opened.sync, { uid: "vendor-review-0929@example.com", response: "accepted", etag: preview.etag });
     expect(s.replies).toEqual([{ uid: "vendor-review-0929@example.com", partstat: "ACCEPTED", to: "dana@example.com" }]);
 
-    expect(await run(pool, ctx)).toBe(1);
+    // the invitation's request (T4-17) clears when the source changes: one row changed, one request cleared
+    const mirror = async () =>
+      (await pool.query(`SELECT decision, payload->'cleared' AS cleared FROM proposals WHERE kind = 'invitation' AND source->>'external_ref' = 'invite:uid/vendor-review-0929@example.com' AND payload->>'connection' = $1`, [CONN])).rows;
+    expect(await mirror()).toEqual([{ decision: "pending", cleared: null }]);
+    expect(await run(pool, ctx)).toBe(2);
     expect(await status()).toBe("accepted");
+    expect(await mirror()).toEqual([{ decision: "resolved_at_source", cleared: { what: "You accepted it in your calendar", where: "calendar" } }]);
     expect(JSON.stringify((await pool.query(`SELECT * FROM calendar_events WHERE connection = $1`, [CONN])).rows)).not.toContain(INVITE_BODY);
   });
 });

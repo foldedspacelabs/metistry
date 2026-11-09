@@ -41,12 +41,47 @@ land on top of a file that is already there, whoever wrote it.
 Each capture is committed on the next flush, principal `capture`, group
 `capture` (so a burst is one commit).
 
+**A recording's transcript is the one capture that is not dropped here**
+(T8-4; the owner's ruling on W3 question 29). When an owner credential
+delivers a live-capture transcript (`kind: transcript`, `source:
+live-capture`), the console files it at
+`Journal/Transcripts/<date>-<session>.md` instead — the same bridge, the same
+must-not-exist write, committed in the owner's name because `Journal/` is the
+owner's at the tool — and keeps its inbox row, so it is classified like any
+capture. It is kept 30 days after the recording, then deleted as a commit by
+the `recording-retention` routine (`docs/ops/scheduled.md`). With no bridge,
+a transcript lands in `METISTRY_INBOX_DIR` like any capture.
+
 **With no bridge configured** (`METISTRY_RECONCILER_URL` /
 `METISTRY_BRIDGE_TOKEN_RECONCILER` unset) the console degrades to writing
 files in `METISTRY_INBOX_DIR` — capture keeps working, because one silent
 drop ends the trust (SHOULD-10) — but those files are not in the vault and
 Obsidian will not see them. The recovery is a plain `mv` into
 `<instance>/Inbox/`: the scan below picks them up.
+
+## Jots from the floating bar
+
+The Mac's floating bar (`docs/ops/mac-app.md`, "The floating bar") captures
+through the same `POST /capture` as every door, with the composer's
+`Idempotency-Key`. At rest a **Note** is its words and a **To-do** is
+`- [ ] <words>`, the explicit cue the classifier already reads. During a
+recording each jot also says where in the recording it was made (C77) —
+the only stable anchor while the meeting's file does not exist yet:
+
+```
+---
+kind: "jot"
+jot: "note"                          # or "todo"
+title: "Volume tier claim needs checking"
+capture_session: "20260930-120000-00ab"
+offset_s: 754                        # seconds from Record
+---
+Volume tier claim needs checking
+```
+
+Scalars only, JSON-quoted, one per line. The meeting's Approve rewrites
+`capture_session` to the transcript's path (T8-7); nothing else in the jot
+changes.
 
 ## Files you write yourself are first-class
 
@@ -148,6 +183,48 @@ characters, and a message that is not in the script the intent descriptions are
 written in. That last one is not fussiness — an English classifier has been
 measured at 0.000 accuracy and 0.952 confidence on Khmer, so confidence cannot
 catch it and only a check in front of the model can.
+
+### A recording's meeting, and the jots you made during it
+
+Two frontmatter kinds are placed by the rules and never reach a model, because
+our own doors write them (T8-7; the capture bar, screen 11 §2.1):
+
+- **`kind: transcript`** — a recording's transcript, delivered by the
+  live-capture bridge when the session ends (`packages/mcp-live-capture`).
+  From an owner credential it opens the meeting's card in Needs You: its
+  proposal carries `group_id = meeting:<session id>` — one group per session,
+  so anything raised later for the same session lands on the same card — and
+  `payload.meeting`: the session's times from the transcript's frontmatter,
+  the calendar event it overlapped the most (read through the `day_events`
+  named query — never an all-day event, never one you declined; none, and the
+  card keeps the recorder's own title), the transcript's path, and the jots
+  below as handles (`{inbox_id, jot, offset_s}` — never their words).
+- **`kind: jot`** — a Note or To-do you made from the bar while a recording
+  ran. It is saved when you type it, so it asks you nothing: **no proposal**.
+  The drain settles the row with its anchor (`proposal: {kind: "jot", jot,
+  offset_s, capture_session}`), which is how the meeting's card counts it and
+  how Approve finds it:
+
+  ```
+  ---
+  kind: "jot"
+  jot: "note"                                # or "todo"
+  capture_session: "20260928-120000-00ab"    # the recording it was made in
+  offset_s: 754                              # seconds from Record
+  ---
+  Kessler confirmed net-45
+  ```
+
+  When you approve the meeting's transcript, each of that session's jots has
+  its `capture_session` line rewritten to
+  `source: "meeting:Journal/Transcripts/<date>-<session>.md"` — the transcript
+  it belongs beside, in the provenance spelling the task index reads — and its
+  `offset_s` kept (`docs/ops/client-api.md`, *A meeting*).
+
+Neither is honoured from an **agent's** capture: an agent's `kind: jot` is an
+ordinary capture with a card of its own, and an agent's `kind: transcript`
+opens no meeting — so no agent can put words on your meeting's card as yours.
+A `kind: jot` with no readable anchor is an ordinary note.
 
 ## Nothing overwrites your edit
 

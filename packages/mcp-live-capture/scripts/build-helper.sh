@@ -27,12 +27,12 @@ set -eu
 cd "$(dirname -- "$0")/.."
 
 # -target pins the floor to the Mac app's own (macOS 14); everything newer is
-# behind #available (the process tap 14.2, bundle-ID taps and the
-# transcriber 26).
+# behind #available (the process tap 14.2, the stream's microphone 15, a
+# picked window's app 15.2, bundle-ID taps and the transcriber 26).
 compile() {
   swiftc -O -target "$(uname -m)-apple-macos14.0" \
     -framework Foundation -framework AppKit -framework AVFoundation -framework CoreAudio \
-    -framework CoreGraphics -framework CoreMedia -framework Speech \
+    -framework CoreGraphics -framework CoreMedia -framework ScreenCaptureKit -framework Speech \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker helper/Info.plist \
     helper/sources/kit/*.swift helper/sources/helper/*.swift -o "$1"
 }

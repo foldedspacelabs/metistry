@@ -73,6 +73,12 @@ say() { printf '   %s\n' "$*" >&2; }
 die() { printf 'build-runtime-deps: %s\n' "$*" >&2; exit 1; }
 secs_since() { echo $(($(date -u +%s) - $1)); }
 
+# fetch, machos, is_dylib, strip_tree, codesign_retry, sign_machos,
+# verify_signed — shared with build-remote-packs.sh so the provider packs are
+# held to this pack's signing rule by construction, not by a copied loop.
+# shellcheck source=ops/release/pack-lib.sh
+. "$root/ops/release/pack-lib.sh"
+
 [ "$(uname -s)" = "Darwin" ] || die "macOS only (this host is $(uname -s)); the release job is macos-14"
 [ "$(uname -m)" = "arm64" ] || die "darwin-arm64 only (this host is $(uname -m))"
 command -v clang >/dev/null || die "no clang — install the Xcode Command Line Tools (xcode-select --install)"
@@ -95,39 +101,9 @@ LLAMACPP_DISABLED="openssl (-DLLAMA_OPENSSL=OFF: no HTTPS in the server, so no H
 PG_BASE_URL="https://ftp.postgresql.org/pub/source"
 GIT_BASE_URL="https://mirrors.edge.kernel.org/pub/software/scm/git"
 
-# ---- fetch --------------------------------------------------------------------
-# Download once into $dl, and refuse anything whose sha256 is not the pin.
-
-fetch() { # <url> <file> <sha256>
-  local url="$1" file="$dl/$2" want="$3" got
-  if [ -f "$file" ]; then
-    got="$(shasum -a 256 "$file" | cut -d' ' -f1)"
-    if [ "$got" = "$want" ]; then say "$2: cached, sha256 ok"; return 0; fi
-    say "$2: the cached copy has the wrong digest — re-downloading"
-    rm -f "$file"
-  fi
-  say "downloading $2"
-  curl -fsSL --retry 3 --retry-delay 2 -o "$file.part" "$url" || die "download failed: $url"
-  got="$(shasum -a 256 "$file.part" | cut -d' ' -f1)"
-  if [ "$got" != "$want" ]; then
-    rm -f "$file.part"
-    die "$2 sha256 mismatch
-  expected $want   (ops/release/runtime-versions.env)
-  got      $got   from $url"
-  fi
-  mv "$file.part" "$file"
-  say "$2: sha256 ok"
-}
-
-# ---- Mach-O helpers -----------------------------------------------------------
-# `file` is the arbiter, per the signing contract: a shell script in bin/ is
-# not a Mach-O and must be neither stripped nor signed.
-
-machos() { # <dir> — one path per line
-  find "$1" -type f -print0 2>/dev/null | xargs -0 file 2>/dev/null | awk -F': ' '/Mach-O/ {print $1}'
-}
-
-is_dylib() { file "$1" | grep -q 'dynamically linked shared library'; }
+# ---- relocation ---------------------------------------------------------------
+# (machos, is_dylib and strip_tree come from pack-lib.sh; `file` is the
+# arbiter there, so a shell script in bin/ is never stripped or signed.)
 
 # Rewrite one prefix's Mach-Os so the tree resolves its own libraries wherever
 # it is unpacked: absolute $prefix/lib/... dependencies become @rpath/..., each
@@ -157,16 +133,6 @@ relocate() { # <prefix>
       install_name_tool -add_rpath "@loader_path/${up}lib" "$f" 2>/dev/null || true
     fi
   done < <(machos "$prefix")
-}
-
-# Debug symbols are most of the size and none of the value in a shipped tree.
-# Always BEFORE signing: stripping invalidates a signature.
-strip_tree() { # <prefix>
-  local f
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    if is_dylib "$f"; then strip -S "$f" 2>/dev/null || true; else strip -S -x "$f" 2>/dev/null || true; fi
-  done < <(machos "$1")
 }
 
 # ---- Node ---------------------------------------------------------------------
@@ -387,28 +353,14 @@ assemble() {
 }
 
 # ---- signing ---------------------------------------------------------------------
-# Unset is a notice, never a failure; a codesign that actually fails is.
-#
-# Entitlements are CARRIED OVER, minus get-task-allow. Node's official binary
-# is signed with the hardened runtime plus allow-jit,
-# allow-unsigned-executable-memory, disable-library-validation and friends —
-# V8 cannot run without the first two — and with get-task-allow, which
-# notarization rejects (the v0.4.0 lesson, ops/release/build-app.sh). Signing
-# it with `--options runtime` and NO entitlements produces a node that dies
-# at startup. Postgres and git carry none and get none.
-
-codesign_retry() { # Apple's timestamp server flakes now and then; one flake must not cost a build
-  local attempt
-  for attempt in 1 2 3; do
-    codesign "$@" 2>/dev/null && return 0
-    say "  codesign failed (attempt $attempt/3) — retrying in 5s"
-    sleep 5
-  done
-  return 1
-}
+# Unset is a notice, never a failure; a codesign that actually fails is. The
+# rule itself — hardened runtime, secure timestamp, entitlements carried over
+# minus get-task-allow — is pack-lib.sh's sign_machos, shared with the
+# provider tool packs. What is particular to THIS pack is the proof after it:
+# the signed node still runs (a JIT-less hardened node does not).
 
 sign() {
-  local id="${METISTRY_SIGN_IDENTITY:-}" f name signed=0 ents ent_args
+  local id="${METISTRY_SIGN_IDENTITY:-}"
   if [ -z "$id" ]; then
     log "signing: skipped"
     say "METISTRY_SIGN_IDENTITY is unset — every Mach-O keeps the signature it came with"
@@ -416,27 +368,12 @@ sign() {
     return 0
   fi
   log "signing every Mach-O as \"$id\""
-  ents="$(mktemp -t runtime-ents)"
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    name="$(basename "$f" | tr -c 'A-Za-z0-9.-' '-')"
-    ent_args=()
-    if codesign -d --entitlements :- "$f" 2>/dev/null > "$ents" && [ -s "$ents" ] && plutil -lint -s "$ents" >/dev/null 2>&1; then
-      plutil -remove 'com\.apple\.security\.get-task-allow' "$ents" >/dev/null 2>&1 || true
-      if [ "$(plutil -p "$ents" | grep -c '=>')" -gt 0 ]; then ent_args=(--entitlements "$ents"); fi
-    fi
-    codesign_retry --force --options runtime --timestamp \
-      --identifier "com.foldedspacelabs.metistry.runtime.$name" \
-      ${ent_args[@]+"${ent_args[@]}"} \
-      --sign "$id" "$f" || die "codesign failed for $f"
-    signed=$((signed + 1))
-  done < <(machos "$out")
-  rm -f "$ents"
-  say "signed $signed Mach-O files"
+  sign_machos "$out" "com.foldedspacelabs.metistry.runtime"
   # the proof that matters: the signed node still runs (a JIT-less hardened node does not)
   "$out/node/bin/node" -e 'process.exit(0)' || die "signed node does not start — entitlements were lost"
   codesign -d --entitlements :- "$out/node/bin/node" 2>/dev/null | grep -q 'get-task-allow' && die "signed node still carries get-task-allow"
   say "signed node starts, without get-task-allow"
+  verify_signed "$out"
 }
 
 # ---- verification: from a MOVED copy ----------------------------------------------

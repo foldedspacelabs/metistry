@@ -15,10 +15,12 @@
 // an unknown value is refused, never ignored.
 //
 // This module has no I/O and imports nothing from the rest of core except
-// types, so manifest.ts can build the `connection-type` manifest from it
-// without a cycle.
+// types and data-policy.ts (which imports neither this file nor
+// manifest.ts), so manifest.ts can build the `connection-type` manifest from
+// it without a cycle.
 
 import { z } from "zod";
+import { dataPolicySchema } from "./data-policy.js";
 import type { ConnectionTypeManifest } from "./manifest.js";
 
 // --- the closed vocabularies ---------------------------------------------------
@@ -69,8 +71,14 @@ export function capabilityIssue(type: ConnectionType, capability: string): strin
     : `unknown ${type} capability "${capability}" — one of ${vocabulary.join(", ")}`;
 }
 
-/** How Metistry reaches a connection (C118): over HTTP, by running a command, or at a path. The bridges' `transport: http | stdio` are the first two. */
-export const REACH_CLASSES = ["http", "command", "path"] as const;
+/**
+ * How Metistry reaches a connection (C118): over HTTP, by running a command,
+ * at a path — the bridges' `transport: http | stdio` are the first two — or
+ * over IMAP (T4-15): a mail server is neither an HTTP service, a command nor
+ * a path, so it is a reach class of its own, with its own host guard
+ * (`imapReach` below; the egress door's `planSocketEgress`).
+ */
+export const REACH_CLASSES = ["http", "command", "path", "imap"] as const;
 export type ReachClass = (typeof REACH_CLASSES)[number];
 
 /**
@@ -105,6 +113,17 @@ export type ToolMode = (typeof TOOL_MODES)[number];
 
 /** A proxied connection tool's mode when the owner has not set one: Ask (CLAUDE.md, Packages — ratified 2026-09-26). A manifest cannot choose it. */
 export const DEFAULT_TOOL_MODE: ToolMode = "ask";
+
+/**
+ * The ports an IMAP reach never points at: SMTP (25), submission over TLS
+ * (465) and submission (587), and 2525, the submission port some providers
+ * offer beside 587. Nothing sends mail (§2.6): an IMAP reach that names one
+ * is refused at the file, and the IMAP client refuses to dial one.
+ */
+export const MAIL_SUBMISSION_PORTS: readonly number[] = [25, 465, 587, 2525];
+
+/** IMAP over implicit TLS (RFC 8314 §3.3) — the one port an IMAP reach takes by default. */
+export const IMAP_TLS_PORT = 993;
 
 /** The authentication shortcuts an HTTP reach offers (screen-09 §10.5). */
 export const AUTH_SCHEMES = ["none", "bearer", "basic", "api_key", "oauth"] as const;
@@ -199,6 +218,41 @@ export const oauthClientSchema = z
 
 export type OAuthClient = z.infer<typeof oauthClientSchema>;
 
+/**
+ * **The OAuth client of a custom connection** (C118, T4-10) — the model a
+ * connection type's `oauth` field supplies, written on the connection itself
+ * because no manifest does. The same rules as `oauthClientSchema`, and one
+ * more: **there is no shipped client**, so the client id is the owner's own —
+ * a secret beside it (`client_id: {{ secret.x }}` on the auth shortcut),
+ * never text in the file. `redirect: broker` is modelled and refused where a
+ * flow would start (§5: the broker is not built).
+ */
+export const customOAuthClientSchema = z
+  .strictObject({
+    client_id: z
+      .never({ error: "a custom connection's client id is the owner's own — store it as a secret and write client_id: {{ secret.<name> }} on the auth shortcut, beside client:" })
+      .optional(),
+    client_secret: z
+      .never({ error: "a client secret is a secret — store it and write client_secret: {{ secret.<name> }} on the auth shortcut, beside client:" })
+      .optional(),
+    pkce: z.boolean(),
+    redirect: z.enum(OAUTH_REDIRECTS),
+    authorize_url: httpsUrl,
+    token_url: httpsUrl,
+    scopes: z.array(z.string().regex(/^\S+$/, "a scope has no whitespace")).min(1, "declare the scopes — they are what a reviewer reads"),
+  })
+  .superRefine((c, ctx) => {
+    if (c.redirect === "loopback" && c.pkce !== true) {
+      ctx.addIssue({ code: "custom", path: ["pkce"], message: "a loopback redirect is a public client — pkce must be true" });
+    }
+  });
+
+export type CustomOAuthClient = z.infer<typeof customOAuthClientSchema>;
+
+/** The references an OAuth sign-in holds — a type's `oauth` field value, or a custom connection's auth shortcut. Each is a `{{ secret.name }}`. */
+export const OAUTH_REFS = ["token", "client_id", "client_secret"] as const;
+export type OAuthRef = (typeof OAUTH_REFS)[number];
+
 // --- connection-type pieces (assembled into the manifest in manifest.ts) -------
 
 const fieldCommon = {
@@ -270,6 +324,70 @@ export const connectionImplementationSchema = z.discriminatedUnion("kind", [
 
 export type ConnectionImplementation = z.infer<typeof connectionImplementationSchema>;
 
+// --- agent connections: what dispatch sends a brief through (T4-11) ------------
+
+/**
+ * The dispatchers the console implements for an `agent` connection — today's
+ * two HTTP targets (the former `targets/github-issues` and
+ * `targets/devin-sessions`, removed in 0.17.0) moved into connection types. Code, so closed (§2.7): a new dispatcher is a
+ * product change, never a manifest line. An agent type names one; the
+ * console refuses an agent connection whose type names none it knows.
+ */
+export const AGENT_DISPATCHERS = ["github-issue", "devin-session"] as const;
+export type AgentDispatcher = (typeof AGENT_DISPATCHERS)[number];
+
+/** A dispatch purpose's key: `work`, `knowledge_research`. */
+const purposeKey = snake("purposes");
+
+/**
+ * Why a brief is going (§2.7: `DEVIN_PURPOSES` → the Devin connection type).
+ * The preamble is the instruction the dispatcher puts before the brief; the
+ * answer contract after it stays the dispatcher's code (a structured output
+ * is a control, not a manifest line).
+ */
+export const agentPurposeSchema = z.strictObject({
+  label: z.string().min(1),
+  preamble: z.string().min(1),
+});
+
+/**
+ * An agent type's dispatch block — what `targets/<name>/manifest.yaml`
+ * carried, beside the connection that now carries the reach and the secret.
+ * The data policy is the TYPE's, so a connection file cannot widen it: the
+ * owner widens it by overlaying the type (an extension wins by name, D4),
+ * exactly as a target was widened by overlaying the target.
+ */
+export const agentDispatchSchema = z
+  .strictObject({
+    dispatcher: z.enum(AGENT_DISPATCHERS),
+    /** What a brief bound for a connection of this type may carry — enforced by dispatch() before a byte leaves. */
+    data_policy: dataPolicySchema,
+    /** Why a brief may be sent, each with its preamble. Empty: the dispatcher takes no purpose. */
+    purposes: z.record(purposeKey, agentPurposeSchema).default({}),
+    /** The purpose a dispatch that names none gets; required when there are purposes. */
+    default_purpose: purposeKey.optional(),
+    /** How results come back. `report_queue` is the only return path (§4.18.B); `status_via` names the sync that polls it home. */
+    result: z.strictObject({ via: z.literal("report_queue"), status_via: kebab.optional() }),
+    cost: z.strictObject({ per_run_estimate_usd: z.number().nonnegative() }).optional(),
+    /** The per-dispatch spend ceiling a devin-session dispatch sends when the call names none (Devin ACUs). */
+    max_acu: z.number().int().positive().optional(),
+  })
+  .superRefine((d, ctx) => {
+    const keys = Object.keys(d.purposes);
+    if (keys.length > 0 && d.default_purpose === undefined) {
+      ctx.addIssue({ code: "custom", path: ["default_purpose"], message: `name the purpose a dispatch that names none gets — one of ${keys.join(", ")}` });
+    }
+    if (d.default_purpose !== undefined && !keys.includes(d.default_purpose)) {
+      ctx.addIssue({ code: "custom", path: ["default_purpose"], message: `"${d.default_purpose}" is not one of the purposes${keys.length ? ` (${keys.join(", ")})` : " — there are none"}` });
+    }
+    if (d.max_acu !== undefined && d.dispatcher !== "devin-session") {
+      ctx.addIssue({ code: "custom", path: ["max_acu"], message: "max_acu is a Devin session's ceiling — only a devin-session dispatcher takes one" });
+    }
+  });
+
+export type AgentDispatch = z.infer<typeof agentDispatchSchema>;
+export type AgentPurpose = z.infer<typeof agentPurposeSchema>;
+
 /** The connection-type manifest's body, beside `name`, `type` and `schema` (manifest.ts). */
 export const connectionTypeShape = {
   /** Which connection type this provider provides (§2.6). Not `type` — that is every manifest's kind marker, and `agent` is both a manifest type and a connection type. */
@@ -287,14 +405,52 @@ export const connectionTypeShape = {
   auth: z.array(z.enum(AUTH_SCHEMES)).min(1).optional(),
   /** The sync (a collector unit) that reads connections of this type; its default schedule lives in that unit's manifest (§2.5). */
   sync: kebab.optional(),
+  /**
+   * Further syncs that read a connection of this type (T4-11): one Devin
+   * connection is read by its sessions poller (`sync`) and by its knowledge
+   * sync. `sync` stays the one a new connection is named for in
+   * `scheduled.yaml`; each of these finds it the same way (the one `ok`
+   * connection, or the one `scheduled.yaml` names).
+   */
+  also_read_by: z.array(kebab).min(1).optional(),
   implementation: connectionImplementationSchema.default({ kind: "native" }),
+  /** An agent type's dispatch (T4-11): the dispatcher, the data policy, the purposes. Only `provides: agent`. */
+  dispatch: agentDispatchSchema.optional(),
 };
+
+/** Every sync that reads a connection of this type: `sync`, then `also_read_by`. */
+export function connectionTypeSyncs(m: { sync?: string | undefined; also_read_by?: readonly string[] | undefined }): string[] {
+  return m.sync === undefined ? [] : [m.sync, ...(m.also_read_by ?? [])];
+}
 
 /** The cross-field rules of a connection-type manifest, run by its schema's superRefine. */
 export function refineConnectionType(
-  m: { name: string; provides: ConnectionType; transports: ReachClass[]; fields: ConnectionField[]; capabilities: string[]; implementation: ConnectionImplementation },
+  m: {
+    name: string;
+    provides: ConnectionType;
+    transports: ReachClass[];
+    fields: ConnectionField[];
+    capabilities: string[];
+    implementation: ConnectionImplementation;
+    auth?: AuthScheme[] | undefined;
+    sync?: string | undefined;
+    also_read_by?: string[] | undefined;
+    dispatch?: AgentDispatch | undefined;
+  },
   ctx: z.RefinementCtx,
 ): void {
+  if (m.also_read_by !== undefined) {
+    if (m.sync === undefined) ctx.addIssue({ code: "custom", path: ["also_read_by"], message: "also_read_by names further syncs — declare the first one as sync:" });
+    const all = connectionTypeSyncs(m);
+    if (new Set(all).size !== all.length) ctx.addIssue({ code: "custom", path: ["also_read_by"], message: "a sync is named once — in sync: or in also_read_by, not both" });
+  }
+  if (m.dispatch !== undefined) {
+    if (m.provides !== "agent") ctx.addIssue({ code: "custom", path: ["dispatch"], message: `dispatch is an agent type's — a ${m.provides} connection is not dispatched to` });
+    else if (m.implementation.kind !== "builtin") ctx.addIssue({ code: "custom", path: ["implementation"], message: "an agent type with dispatch is product code — implementation: { kind: builtin, module: … }" });
+    if (!m.transports.includes("http")) ctx.addIssue({ code: "custom", path: ["transports"], message: "a dispatcher reaches its service over http" });
+  } else if (m.provides === "agent" && m.implementation.kind === "builtin") {
+    ctx.addIssue({ code: "custom", path: ["dispatch"], message: "a builtin agent type says how it is dispatched to — dispatch: { dispatcher, data_policy, result }" });
+  }
   if (m.name === CUSTOM_PROVIDER) {
     ctx.addIssue({ code: "custom", path: ["name"], message: `"${CUSTOM_PROVIDER}" is reserved for connections configured by hand` });
   }
@@ -307,6 +463,13 @@ export function refineConnectionType(
   }
   if (new Set(m.transports).size !== m.transports.length) {
     ctx.addIssue({ code: "custom", path: ["transports"], message: "transports are listed once each" });
+  }
+  if (m.transports.includes("imap")) {
+    // IMAP reaches a mailbox and nothing else, and signs in with a username and an app password — basic, declared (T4-15)
+    if (m.provides !== "mail") ctx.addIssue({ code: "custom", path: ["transports"], message: `imap reaches a mailbox — only a mail connection type is reached by imap, not ${m.provides}` });
+    if (!m.auth?.includes("basic")) {
+      ctx.addIssue({ code: "custom", path: ["auth"], message: "a type reached by imap signs in with a username and an app password — declare auth: [basic]" });
+    }
   }
   const keys = m.fields.map((f) => f.key);
   keys.forEach((k, i) => {
@@ -361,8 +524,22 @@ export const httpAuthSchema = z.preprocess(
       z.strictObject({ scheme: z.literal("basic"), username: z.string().min(1), secret: secretName }),
       /** `header` as the service spells it — Linear's personal key is `Authorization: <API_KEY>`, no Bearer. */
       z.strictObject({ scheme: z.literal("api_key"), header: headerName, secret: secretName }),
-      /** The token comes from the provider's `oauth` field; `field` names it when the type has more than one. */
-      z.strictObject({ scheme: z.literal("oauth"), field: fieldKey.optional() }),
+      /**
+       * The token comes from the provider's `oauth` field; `field` names it
+       * when the type has more than one. A **custom** connection has no field:
+       * it carries its own `client` (C118) and the references a field's value
+       * holds — `token`, `client_id`, `client_secret?` — each a
+       * `{{ secret.name }}` (T4-10; `connectionFileSchema` and
+       * `connectionIssues` hold each side to its own).
+       */
+      z.strictObject({
+        scheme: z.literal("oauth"),
+        field: fieldKey.optional(),
+        client: customOAuthClientSchema.optional(),
+        token: z.string().optional(),
+        client_id: z.string().optional(),
+        client_secret: z.string().optional(),
+      }),
     ],
     {
       error: (iss) =>
@@ -399,9 +576,48 @@ const pathReach = z.strictObject({
   watch: z.boolean().default(false),
 });
 
-/** Exactly one of `http`, `command`, `path` (C118). */
+/** A host name as DNS spells it, lowercase — no scheme, no port, no path, no template, no wildcard. */
+const imapHost = z
+  .string()
+  .regex(/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/, "an IMAP host is a lowercase host name — no scheme, no port (that is port:), no path");
+
+/** Loopback, where a local server (a mail bridge on this Mac) may be reached without TLS — and nowhere else. */
+function isLoopbackName(host: string): boolean {
+  return host === "localhost" || /^127(?:\.[0-9]{1,3}){3}$/.test(host);
+}
+
+/**
+ * An IMAP mailbox (T4-15). The sign-in is always a username and an app
+ * password — the password is a secret of the connection, named here and
+ * filled only at the door (`planSocketEgress`): for a listed `host:port`,
+ * over TLS, when granted. `security: plain` is for a server on this Mac
+ * alone (a local mail bridge); off loopback it is refused, as the HTTP door
+ * refuses a secret over plain http.
+ */
+const imapReach = z
+  .strictObject({
+    host: imapHost,
+    port: z.number().int().min(1).max(65535).default(IMAP_TLS_PORT),
+    security: z.enum(["tls", "plain"]).default("tls"),
+    username: z
+      .string()
+      .min(1)
+      .max(320)
+      .regex(/^[^\u0000-\u001f\u007f"\\{}]+$/, "an IMAP username has no control character, quote, backslash or template — it is written as it is"),
+    secret: secretName,
+  })
+  .superRefine((r, ctx) => {
+    if (MAIL_SUBMISSION_PORTS.includes(r.port)) {
+      ctx.addIssue({ code: "custom", path: ["port"], message: `port ${r.port} is a mail submission port — an IMAP reach never points at one; nothing sends mail (§2.6)` });
+    }
+    if (r.security === "plain" && !isLoopbackName(r.host)) {
+      ctx.addIssue({ code: "custom", path: ["security"], message: `security: plain is for a server on this Mac only — ${r.host} is reached over TLS, so the app password never crosses the network in the clear` });
+    }
+  });
+
+/** Exactly one of `http`, `command`, `path`, `imap` (C118; imap: T4-15). */
 export const reachSchema = z
-  .strictObject({ http: httpReach.optional(), command: commandReach.optional(), path: pathReach.optional() })
+  .strictObject({ http: httpReach.optional(), command: commandReach.optional(), path: pathReach.optional(), imap: imapReach.optional() })
   .superRefine((r, ctx) => {
     const given = REACH_CLASSES.filter((c) => r[c] !== undefined);
     if (given.length !== 1) {
@@ -413,7 +629,7 @@ export type Reach = z.infer<typeof reachSchema>;
 
 /** The class of a (valid) reach. */
 export function reachClassOf(r: Reach): ReachClass {
-  return r.http ? "http" : r.command ? "command" : "path";
+  return r.http ? "http" : r.command ? "command" : r.imap ? "imap" : "path";
 }
 
 /** An `oauth` field's value on a connection: where the token is kept, and a bring-your-own client, each a secret reference. */
@@ -443,6 +659,7 @@ function templatedValues(c: {
     for (const [k, v] of Object.entries(http.query)) add(["reach", "http", "query", k], v);
     for (const [k, v] of Object.entries(http.headers)) add(["reach", "http", "headers", k], v);
     if (http.auth.scheme === "basic") add(["reach", "http", "auth", "username"], http.auth.username);
+    if (http.auth.scheme === "oauth") for (const part of OAUTH_REFS) add(["reach", "http", "auth", part], http.auth[part]);
   }
   if (command) {
     add(["reach", "command", "command"], command.command);
@@ -486,6 +703,14 @@ export const connectionFileSchema = z
     tools: z.record(toolName, connectionToolPolicy).default({}),
     /** Off: the assistant and syncs only. On: agents may reach it through the proxy, per their grants (C115). */
     offer_to_agents: z.boolean().default(false),
+    /**
+     * On (the default): an upstream answer over the proxy's threshold is
+     * folded on `connections_call` — the first items, the last, a count, or
+     * a head and a tail — and kept whole for the same caller to page (X-132).
+     * Off: every answer comes whole, whatever its size. The owner's switch,
+     * beside the per-tool policy; `metistry connections policy <name> --fold`.
+     */
+    fold: z.boolean().default(true),
   })
   .superRefine((c, ctx) => {
     for (const list of ["secrets", "variables"] as const) {
@@ -507,6 +732,10 @@ export const connectionFileSchema = z
     if (auth && "secret" in auth && !c.secrets.includes(auth.secret)) {
       ctx.addIssue({ code: "custom", path: ["reach", "http", "auth", "secret"], message: `secret "${auth.secret}" is used but not listed in secrets` });
     }
+    const imap = c.reach.imap;
+    if (imap && !c.secrets.includes(imap.secret)) {
+      ctx.addIssue({ code: "custom", path: ["reach", "imap", "secret"], message: `secret "${imap.secret}" is used but not listed in secrets` });
+    }
     if (c.provider === CUSTOM_PROVIDER) {
       const speaks = NATIVE_REACH[c.type];
       if (speaks.length === 0) {
@@ -516,6 +745,27 @@ export const connectionFileSchema = z
       }
       if (Object.keys(c.config).length > 0) {
         ctx.addIssue({ code: "custom", path: ["config"], message: "a custom connection has no config fields — its settings are its reach" });
+      }
+      // C118: no manifest supplies a custom connection's OAuth client, so its auth shortcut carries one
+      if (auth?.scheme === "oauth") {
+        const at = ["reach", "http", "auth"];
+        if (auth.field !== undefined) ctx.addIssue({ code: "custom", path: [...at, "field"], message: "a custom connection has no fields — its OAuth client is client:, beside token: and client_id:" });
+        if (!auth.client) ctx.addIssue({ code: "custom", path: [...at, "client"], message: "a custom OAuth connection names its client — authorize_url, token_url, scopes, pkce, redirect — because no connection type supplies one" });
+        for (const part of ["token", "client_id"] as const) {
+          if (auth[part] === undefined) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...at, part],
+              message: part === "token" ? "a custom OAuth connection names the secret its sign-in is kept in: token: {{ secret.<name> }}" : "a custom OAuth connection has no shipped client id — bring your own: client_id: {{ secret.<name> }}",
+            });
+          }
+        }
+      }
+    }
+    if (auth?.scheme === "oauth") {
+      for (const part of OAUTH_REFS) {
+        const v = auth[part];
+        if (v !== undefined && !soleRef(v, "secret")) ctx.addIssue({ code: "custom", path: ["reach", "http", "auth", part], message: `must be a {{ secret.name }} reference — never the ${part === "token" ? "token" : part === "client_id" ? "client id" : "client secret"} itself` });
       }
     }
   });
@@ -600,8 +850,16 @@ export function connectionIssues(c: ConnectionFile, type: ConnectionTypeManifest
     }
   }
 
+  if (c.reach.imap && !type.auth?.includes("basic")) {
+    issues.push(`reach.imap: ${type.name} does not declare basic sign-in (auth: [basic]) — an IMAP connection signs in with a username and an app password, so only a type that declares it is reached by imap`);
+  }
+
   const auth = c.reach.http?.auth;
   if (auth?.scheme === "oauth") {
+    const carried = (["client", ...OAUTH_REFS] as const).filter((k) => auth[k] !== undefined);
+    if (carried.length > 0) {
+      issues.push(`reach.http.auth: ${type.name} supplies the OAuth client — ${carried.join(", ")} ${carried.length === 1 ? "belongs" : "belong"} to a custom connection; this one keeps its token and any client of your own in its oauth field (config.<field>)`);
+    }
     const oauthKeys = type.fields.filter((f) => f.kind === "oauth").map((f) => f.key);
     if (auth.field !== undefined && !oauthKeys.includes(auth.field)) {
       issues.push(`reach.http.auth.field: ${type.name} has no oauth field "${auth.field}"`);

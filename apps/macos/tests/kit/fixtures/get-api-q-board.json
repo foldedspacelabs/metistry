@@ -24,7 +24,7 @@
         "age_hours": 0,
         "last_report_at": null,
         "reported": false,
-        "escalated": false,
+        "escalated": true,
         "external_ref": null,
         "artifact": null,
         "has_thread": false,
@@ -33,13 +33,13 @@
         "blocked_by_task": null,
         "blocked_by_task_open": null,
         "status": "open",
-        "due": "2026-09-27",
-        "updated_at": "2026-09-27T00:36:35.373Z"
+        "due": "2026-09-28",
+        "updated_at": "2026-09-30T04:49:51.945Z"
       },
       {
         "column": "assigned",
-        "id": "4",
-        "title": "review: metistry/store-interface ver_01M3G4NMXQ1DY61VBBPM145FXV (1 thread)",
+        "id": "5",
+        "title": "review: metistry/store-interface ver_01M3RABJAKM99M4CHEYREJKCBT (1 thread)",
         "description": null,
         "kind": "review",
         "project": "metistry",
@@ -51,7 +51,7 @@
         "reported": false,
         "escalated": false,
         "external_ref": null,
-        "artifact": "art_01M3G4NMXMNV51E19PMRCARA23",
+        "artifact": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
         "has_thread": false,
         "thread_count": 0,
         "blocked_by": null,
@@ -59,7 +59,7 @@
         "blocked_by_task_open": null,
         "status": "open",
         "due": null,
-        "updated_at": "2026-09-27T00:36:35.410Z"
+        "updated_at": "2026-09-30T04:49:51.972Z"
       },
       {
         "column": "in_progress",
@@ -84,7 +84,7 @@
         "blocked_by_task_open": null,
         "status": "in_progress",
         "due": null,
-        "updated_at": "2026-09-27T00:36:35.376Z"
+        "updated_at": "2026-09-30T04:49:51.948Z"
       },
       {
         "column": "in_progress",
@@ -109,7 +109,7 @@
         "blocked_by_task_open": null,
         "status": "in_progress",
         "due": null,
-        "updated_at": "2026-09-27T00:36:35.243Z"
+        "updated_at": "2026-09-30T04:49:51.752Z"
       },
       {
         "column": "blocked",
@@ -134,7 +134,7 @@
         "blocked_by_task_open": true,
         "status": "blocked",
         "due": null,
-        "updated_at": "2026-09-27T00:36:35.249Z"
+        "updated_at": "2026-09-30T04:49:51.759Z"
       },
       {
         "column": "done",
@@ -147,7 +147,7 @@
         "claimed_by": null,
         "lease_expires_at": null,
         "age_hours": 0,
-        "last_report_at": "2026-09-27T00:36:35.249Z",
+        "last_report_at": "2026-09-30T04:49:51.760Z",
         "reported": true,
         "escalated": false,
         "external_ref": null,
@@ -159,9 +159,9 @@
         "blocked_by_task_open": null,
         "status": "closed",
         "due": null,
-        "updated_at": "2026-09-27T00:36:35.249Z"
+        "updated_at": "2026-09-30T04:49:51.760Z"
       }
     ],
-    "as_of": "2026-09-27T00:36:35.462Z"
+    "as_of": "2026-09-30T04:49:52.086Z"
   }
 }

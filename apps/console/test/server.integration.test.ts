@@ -368,10 +368,28 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
   });
 
   it("enrollment codes are single-use and expiring", async () => {
-    const code = await store.mintEnrollmentCode(pool);
+    const { code } = await store.mintEnrollmentCode(pool);
     expect(await store.peekEnrollmentCode(pool, code)).toBe(true);
     expect(await store.consumeEnrollmentCode(pool, code)).toBe(true);
     expect(await store.consumeEnrollmentCode(pool, code)).toBe(false); // burned
     expect(await store.peekEnrollmentCode(pool, "wrong")).toBe(false);
+  });
+
+  it("a cancelled enrollment code's URL is refused at the door (plan §2.22: `metistry enroll --cancel`)", async () => {
+    const start = (code: string) => fetch(`${base}/auth/enroll/start`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) });
+    const live = await store.mintEnrollmentCode(pool);
+    expect((await start(live.code)).status).toBe(200); // the ceremony begins for a live code
+    expect(await store.cancelEnrollmentCode(pool, live.code_id)).toBe("cancelled");
+    const refused = await start(live.code);
+    expect(refused.status).toBe(401); // the same uniform 401 as an unknown or spent code — no existence leak
+    expect(await refused.json()).toEqual({ error: { code: "unauthenticated", message: expect.any(String) } });
+    expect(await store.peekEnrollmentCode(pool, live.code)).toBe(false);
+    expect(await store.consumeEnrollmentCode(pool, live.code)).toBe(false);
+    // cancelling again changes nothing and says so; a used code is told apart from an expired one
+    expect(await store.cancelEnrollmentCode(pool, live.code_id)).toBe("already_expired");
+    const spent = await store.mintEnrollmentCode(pool);
+    expect(await store.consumeEnrollmentCode(pool, spent.code)).toBe(true);
+    expect(await store.cancelEnrollmentCode(pool, spent.code_id)).toBe("already_used");
+    expect(await store.cancelEnrollmentCode(pool, 2147483647)).toBe("not_found");
   });
 });

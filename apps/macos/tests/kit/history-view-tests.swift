@@ -50,7 +50,10 @@ import Testing
 
     // The answer changes nothing; it names what Approve would undo.
     guard case .raised(let preview) = model.rollback else { Issue.record("not raised: \(model.rollback)"); return }
-    #expect(preview.proposalID == 7)
+    // the proposal the console raised, as the recording numbered it
+    let raised = try ConsoleFixture.load("post-api-vault-rollback").replyJSON?["proposal_id"]?.stringValue
+    #expect(preview.proposalID == raised.flatMap { Int($0) })
+    #expect(preview.proposalID != nil)
     #expect(preview.summary == "Undoes 1 commit and puts back 1 file.")
     #expect(preview.commitLines(assistantName: "Aide", clock: model.clock) == ["9ab8c7d “Fold: the store interface” — by Aide, 28 Sep"])
     #expect(preview.files == ["Projects/Metistry/Roadmap.md"])

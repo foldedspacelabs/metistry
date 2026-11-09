@@ -3,9 +3,10 @@
 // sent; only Postgres can prove the unique index, the CHECK, and the morning
 // brief's expiry actually skipping a row with a `source`.
 //
-// ISOLATION. The weekly review's suite TRUNCATEs `proposals` when it starts,
-// and the morning brief's expiry is a whole-table UPDATE, so neither this
-// suite's rows nor its brief may be visible to a sibling running beside it.
+// ISOLATION. The morning brief's expiry is a whole-table UPDATE (and until
+// X-25 the weekly review's suite TRUNCATEd `proposals` when it started), so
+// neither this suite's rows nor its brief may be visible to a sibling running
+// beside it.
 // Every case therefore runs on ONE client inside a transaction that is
 // ROLLED BACK — the rows exist only for the statements that assert on them —
 // including the in-flight raise, which uses two connections and rolls both

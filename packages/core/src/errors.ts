@@ -6,6 +6,7 @@ export type ErrorCode =
   | "unauthenticated" // 401 — missing/invalid credential (uniform; never says which)
   | "forbidden"       // 403 — authenticated but not permitted (no existence leak)
   | "local_only"      // 403 — the owner, but not on this Mac: a `local` route admits the local owner token alone (client API §2.1)
+  | "misdirected"     // 421 — the request's Host is not an origin this console is configured for: a proxy forwarding to the proxy listener from a name METISTRY_ORIGIN does not list (plan §2.23, X-103)
   | "not_found"       // 404
   | "invalid_request" // 400
   | "conflict"        // 409
@@ -22,6 +23,7 @@ const httpStatus: Record<ErrorCode, number> = {
   unauthenticated: 401,
   forbidden: 403,
   local_only: 403,
+  misdirected: 421,
   not_found: 404,
   invalid_request: 400,
   conflict: 409,
@@ -36,6 +38,7 @@ const canonicalMessage: Record<ErrorCode, string> = {
   unauthenticated: "authentication required",
   forbidden: "not granted",
   local_only: "only the Mac app on this console's Mac can do this",
+  misdirected: "this console is not configured for the host the request named",
   not_found: "not found",
   invalid_request: "invalid request",
   conflict: "conflict",

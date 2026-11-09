@@ -52,6 +52,43 @@ export const serviceOverrideSchema = z
   })
   .strict();
 
+/**
+ * The remote-access choices (plan §2.23), in the order every chooser lists
+ * them. `none` is the default; the others are adapters in
+ * `packages/cli/src/remote/`, each shipped by its own ticket — a record may
+ * name one this release has no adapter for (written by a newer CLI), and
+ * doctor says so rather than guessing.
+ */
+export const REMOTE_PROVIDERS = ["none", "tailscale", "relay", "cloudflare", "zrok", "ngrok", "port-forward"] as const;
+
+/** `https://name.example` — the one shape an origin has here: a scheme, a host, no path, no trailing slash. */
+function isOriginString(v: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    return false;
+  }
+  return (u.protocol === "https:" || u.protocol === "http:") && u.hostname !== "" && u.pathname === "/" && u.search === "" && u.hash === "" && !v.endsWith("/");
+}
+
+export const remoteSchema = z
+  .object({
+    provider: z.enum(REMOTE_PROVIDERS),
+    /** a provider's mode where it has them (Tailscale: `funnel` | `tailnet`); the adapter validates the value */
+    mode: z.string().min(1).optional(),
+    /** the stable origin the provider yields — what `METISTRY_ORIGIN` puts first and the phone opens */
+    origin: z.string().refine(isOriginString, { message: "an origin is https://<host>[:port] — a scheme and a host, no path, no trailing slash" }).optional(),
+    /** non-secret settings the adapter recorded (node name, tunnel id, hostname, the upstream it forwards to); never a token */
+    settings: z.record(z.string(), z.string()).default({}),
+  })
+  .strict()
+  .superRefine((r, ctx) => {
+    if (r.provider === "none" && (r.origin !== undefined || r.mode !== undefined || Object.keys(r.settings).length > 0)) {
+      ctx.addIssue({ code: "custom", message: "remote: none exposes nothing — it carries no origin, mode or settings" });
+    }
+  });
+
 export const deploymentSchema = z
   .object({
     shape: z.enum(DEPLOYMENT_SHAPES).default("compose"),
@@ -81,12 +118,32 @@ export const deploymentSchema = z
      * before the key existed inherits the seed's answer per key.
      */
     vault: vaultSyncSchema.optional(),
+    /**
+     * How the owner's phone reaches this Mac (plan §2.23, X-105): the
+     * provider chosen, the mode where one has modes, the origin it yields and
+     * its non-secret settings. Optional like `keep_awake`: absent means the
+     * owner was never asked, which is `none` — nothing exposed. The instance's
+     * block wins WHOLE over the seed's (`overlayDeployment`): a choice of
+     * provider is one decision, not a set of keys to merge. **No credential is
+     * in this file** — each lives where the provider's adapter says.
+     */
+    remote: remoteSchema.optional(),
     services: z.record(z.string(), serviceOverrideSchema).default({}),
   })
   .strict();
 
 export type Deployment = z.infer<typeof deploymentSchema>;
 export type ServiceOverride = z.infer<typeof serviceOverrideSchema>;
+export type RemoteRecord = z.infer<typeof remoteSchema>;
+export type RemoteProviderId = (typeof REMOTE_PROVIDERS)[number];
+
+/** The record an install has when it was never asked: nothing is exposed, `METISTRY_ORIGIN` stays loopback. */
+export const REMOTE_NONE: RemoteRecord = { provider: "none", settings: {} };
+
+/** The remote-access record in force — `none` when the file has no `remote:` block (every install's default). */
+export function remoteOf(d: Deployment): RemoteRecord {
+  return d.remote ?? REMOTE_NONE;
+}
 
 /** The shape an install has when there is no deployment.yaml anywhere: today's. */
 export const DEFAULT_DEPLOYMENT: Deployment = { shape: "compose", services: {} };
@@ -118,7 +175,11 @@ export function overlayDeployment(seed: Deployment, instance: Deployment | undef
   const keepAwake = instance.keep_awake ?? seed.keep_awake;
   // `vault` merges per key, like `keep_awake`: setting `push` alone keeps the seed's `pull`
   const vault = overlayVaultSync(seed.vault, instance.vault);
-  return { shape: instance.shape, ...(keepAwake !== undefined ? { keep_awake: keepAwake } : {}), ...(vault !== undefined ? { vault } : {}), services };
+  // `remote` wins WHOLE: the provider, its mode, origin and settings are one
+  // decision; an instance that chose nothing keeps whatever the seed says
+  // (the product's seed never names a provider, so that is `none`)
+  const remote = instance.remote ?? seed.remote;
+  return { shape: instance.shape, ...(keepAwake !== undefined ? { keep_awake: keepAwake } : {}), ...(vault !== undefined ? { vault } : {}), ...(remote !== undefined ? { remote } : {}), services };
 }
 
 /** The setting as the one shape, with "the user was never asked" spelled as the switch off. */

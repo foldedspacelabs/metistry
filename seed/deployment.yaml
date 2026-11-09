@@ -59,6 +59,16 @@ shape: compose
 #   pull:
 #     every: 5m
 
+# remote — how your phone reaches this Mac (plan §2.23;
+# docs/ops/remote-access.md). Absent means none: nothing exposed, and
+# METISTRY_ORIGIN stays the loopback origin `init` wrote. `metistry remote
+# set <provider>` writes YOUR instance's copy of this file — the provider,
+# its mode, the origin it yields and non-secret settings; no credential is
+# ever in here. Your instance's block wins whole over this one.
+#
+# remote:
+#   provider: none        # none | tailscale | relay | cloudflare | zrok | ngrok | port-forward
+
 # Per-service overrides. Both keys are optional; a service not listed here
 # takes the install-wide shape above.
 #

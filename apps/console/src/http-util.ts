@@ -55,6 +55,64 @@ export function sendRefusal(res: ServerResponse, refusal: Refusal): void {
   sendJson(res, statusFor(refusal.code), formatRefusal(refusal) ?? {});
 }
 
+/**
+ * The headers every answer on the PROXY listener carries (plan §2.23, X-111)
+ * — set before anything else looks at the request, so a `421`, a `429`, a
+ * `500` and the shell all carry them. The main listener sets none of them:
+ * it speaks plain HTTP on loopback to the Mac app and the CLI, where HSTS
+ * would be a lie and nothing frames anything.
+ *
+ *   * HSTS, a year, subdomains included, **no preload**: the owner's name is
+ *     the provider's or their own, and a preload-list entry is permanent in a
+ *     way a Settings change is not.
+ *   * CSP for the shell as it is: scripts and connections from this origin
+ *     alone; style attributes allowed because the shell writes them
+ *     (`lib.js`'s bars); `data:`/`blob:` images and fonts for the artifact
+ *     viewer, whose opaque-origin `srcdoc` frame inherits this policy and
+ *     then narrows it further with its own; no plugins, no `<base>`, forms
+ *     to this origin only, and no one may frame the console.
+ *   * `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`
+ *     (nothing here needs to be told where a visitor came from, and no
+ *     outside page needs to learn this console's paths), and
+ *     `X-Frame-Options: DENY` beside the CSP's `frame-ancestors` for the
+ *     browsers that read only the older header.
+ */
+export const PROXY_SECURITY_HEADERS: Readonly<Record<string, string>> = {
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+  "content-security-policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "manifest-src 'self'",
+    "worker-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; "),
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+};
+
+export function setProxySecurityHeaders(res: ServerResponse): void {
+  for (const [name, value] of Object.entries(PROXY_SECURITY_HEADERS)) res.setHeader(name, value);
+}
+
+/**
+ * The `429 rate_limited` answer (rate-limit.ts): the envelope, `Retry-After`
+ * in whole seconds, and a message that names the window and — R3 — what
+ * would permit more: signing in, since a session is never limited.
+ */
+export function sendRateLimited(res: ServerResponse, retryAfterS: number, scope: "client" | "global"): void {
+  res.setHeader("retry-after", String(retryAfterS));
+  const who = scope === "client" ? "this address has asked" : "this console has answered";
+  sendJson(res, statusFor("rate_limited"), errorEnvelope("rate_limited", `${who} too often without signing in — try again in ${retryAfterS}s; a signed-in session is not limited (docs/ops/auth.md, "The proxy listener")`));
+}
+
 /** Largest request body the console will read. The default clears `capture`'s 25MB+ (PoC-7); an instance that captures bigger raises METISTRY_MAX_BODY_BYTES. */
 const MAX_BODY = intEnv("METISTRY_MAX_BODY_BYTES", 32 * 1024 * 1024);
 

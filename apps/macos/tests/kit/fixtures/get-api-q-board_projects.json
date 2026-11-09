@@ -15,9 +15,9 @@
         "project": "metistry",
         "column": "backlog",
         "cards": "1",
-        "escalations": "0",
+        "escalations": "1",
         "oldest_age_hours": 0,
-        "last_activity": "2026-09-28T21:30:56.879Z"
+        "last_activity": "2026-09-30T04:49:51.945Z"
       },
       {
         "project": "metistry",
@@ -25,7 +25,7 @@
         "cards": "1",
         "escalations": "0",
         "oldest_age_hours": 0,
-        "last_activity": "2026-09-28T21:30:56.911Z"
+        "last_activity": "2026-09-30T04:49:51.972Z"
       },
       {
         "project": "metistry",
@@ -33,7 +33,7 @@
         "cards": "2",
         "escalations": "0",
         "oldest_age_hours": 0,
-        "last_activity": "2026-09-28T21:30:56.883Z"
+        "last_activity": "2026-09-30T04:49:51.948Z"
       },
       {
         "project": "metistry",
@@ -41,7 +41,7 @@
         "cards": "1",
         "escalations": "1",
         "oldest_age_hours": 0,
-        "last_activity": "2026-09-28T21:30:56.693Z"
+        "last_activity": "2026-09-30T04:49:51.759Z"
       },
       {
         "project": "metistry",
@@ -49,9 +49,9 @@
         "cards": "1",
         "escalations": "0",
         "oldest_age_hours": 0,
-        "last_activity": "2026-09-28T21:30:56.694Z"
+        "last_activity": "2026-09-30T04:49:51.760Z"
       }
     ],
-    "as_of": "2026-09-28T21:30:56.998Z"
+    "as_of": "2026-09-30T04:49:52.088Z"
   }
 }

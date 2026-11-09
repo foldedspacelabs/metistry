@@ -24,6 +24,7 @@ import { SEED_VAULT_DIR } from "./init.js";
 import { renameCaseMismatches, type VaultCaseResult } from "./vault-case.js";
 import { loadDeployment } from "./deployment.js";
 import { doctor, hostLocal, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
+import { serializeStarted, STARTED_ENV, type StartedAt } from "./doctor-grace.js";
 import { productVersion } from "./env.js";
 import { envPaths, readInstanceId } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
@@ -37,8 +38,8 @@ import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSour
 import { commitPending, ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, OWNER_BRIDGE_TOKEN_FIX, OwnerTokenMintFailed, protectedRel, writeProtected, type CommitPending, type EnsureOwnerTokenResult, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { CURRENT_LINK, currentVersion, installRelease, previousVersion, releaseDir, RELEASE_WALK_LIMIT, RELEASES_DIRNAME, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
-import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
-import { MIGRATE_SCOPE_COMMAND, migrateScope, type MigrateScopeResult } from "./secrets.js";
+import { installRuntimeDeps, REMOTE_DIRNAME, runtimeDepsEnabled, RUNTIME_DIRNAME, updateRemotePacks, type InstallRemotePackResult, type InstallRuntimeDepsResult } from "./runtime-deps.js";
+import { MIGRATE_SCOPE_COMMAND, grantProviderSecrets, migrateScope, type MigrateScopeResult, type ProviderGrantsResult } from "./secrets.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { type Ui } from "./ui.js";
 import { acknowledgeContinuation, reexecIntoRelease, releaseCliMain, type ContinueFrom, type ReexecOutcome } from "./update-reexec.js";
@@ -133,6 +134,8 @@ export interface UpdateResult {
   release?: InstallReleaseResult;
   /** release mode only: what happened to `<product>/runtime/` (Node, Postgres + pgvector, git) */
   runtimeDeps?: InstallRuntimeDepsResult;
+  /** release mode only: each provider tool pack ALREADY under `runtime/remote/`, moved to the release (one the owner never chose is not fetched) */
+  remotePacks?: InstallRemotePackResult[];
   /** release mode on a launchd Mac: what happened to the Mac app (mac-app.ts) */
   app?: UpdateAppResult;
   /** the directory the rest of the update ran against (`<product-dir>/current` in release mode) */
@@ -371,6 +374,11 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const prior = lockPath ? await readLock(lockPath) : undefined;
   const source = opts.channel ?? prior?.product.source ?? "git";
   const restarted: string[] = [];
+  /** when each of them was restarted (epoch ms) — the closing doctor waits out a job that has only just started (X-122) */
+  const startedAt: Record<string, number> = {};
+  const markStarted = (label: string): void => {
+    startedAt[label] = Date.now();
+  };
   /** jobs whose kickstart was tried and failed — never counted as restarted (#287), and never as "nothing changed" either */
   const kickFailed: Array<{ label: string; code: number }> = [];
   let migrations: MigrateResult | undefined;
@@ -378,6 +386,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   let failure: StepFailed | undefined;
   let release: InstallReleaseResult | undefined;
   let runtimeDeps: InstallRuntimeDepsResult | undefined;
+  let remotePacks: InstallRemotePackResult[] | undefined;
   let app: UpdateAppResult | undefined;
   let reexec: ReexecOutcome | undefined;
   let sharedScope: MigrateScopeResult | undefined;
@@ -492,6 +501,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
         r.action(`resolve release ${want} of ${env.METISTRY_RELEASE_REPO ?? "foldedspacelabs/metistry"} and download metistry-runtime-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz${opts.releaseVersion ? "" : ` (Latest, or the newest of the last ${RELEASE_WALK_LIMIT} releases that carries this platform's pack — never older than what runs)`}`);
         r.action(`verify its sha256 against checksums.txt, unpack to ${productDir}/releases/${want}/ and point current at it`);
         r.action(`download metistry-runtime-deps-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz the same way and unpack it to ${productDir}/${RUNTIME_DIRNAME}/ (Node, Postgres + pgvector, git)`);
+        r.action(`move each provider tool pack already under ${productDir}/${RUNTIME_DIRNAME}/${REMOTE_DIRNAME}/ to ${want} the same way (metistry-remote-<tool>-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz; a tool whose provider was never chosen is not fetched)`);
       }
       app = await macApp(want);
       if (!opts.rollback && !opts.noReexec) r.action(`hand the rest to ${want}'s own CLI (node ${productDir}/${CURRENT_LINK}/packages/cli/dist/main.js update --continue-from=switched …): build, migrations, restart, lock and doctor run on the release just installed`);
@@ -510,6 +520,11 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       if (!opts.rollback && runtimeDepsEnabled(env)) {
         runtimeDeps = await installRuntimeDeps(r, { productDir, fetchFn, env, version: releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
         if (!runtimeDeps.installed) r.note(`${RUNTIME_DIRNAME}/: unchanged — ${runtimeDeps.reason}`);
+        // and so does every provider tool pack the owner's choice put under
+        // runtime/remote/ — only those: a pack is fetched by `remote set`,
+        // never by an update (plan §2.23, X-112)
+        remotePacks = await updateRemotePacks(r, { productDir, fetchFn, env, version: releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
+        for (const p of remotePacks) if (!p.installed) r.note(`${RUNTIME_DIRNAME}/${REMOTE_DIRNAME}/${p.tool}/: unchanged — ${p.reason}`);
       }
       app = await macApp(releaseVersion);
       // The rest of this update belongs to the release just installed: this
@@ -519,7 +534,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       if (!opts.rollback && release.installed) {
         reexec = await reexecIntoRelease(r, { productDir, runDir, version: releaseVersion, runningVersion: version, flags: opts.forwardFlags ?? {}, env, disabled: opts.noReexec, tmpDir: opts.reexecTmpDir });
         if (reexec.status === "continued") {
-          return { code: reexec.code ?? 1, source, runDir, commands: r.commands, restarted, restart, deferred, reexec, release, ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}) };
+          return { code: reexec.code ?? 1, source, runDir, commands: r.commands, restarted, restart, deferred, reexec, release, ...(runtimeDeps ? { runtimeDeps } : {}), ...(remotePacks ? { remotePacks } : {}), ...(app ? { app } : {}) };
         }
         if (reexec.status === "fell-back") {
           // Loud, and not a pass: the install now runs a release whose own CLI
@@ -604,7 +619,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       deferred.push({ what: OWNER_BRIDGE_TOKEN, why: `not minted — ${err.reason}`, fix: [...OWNER_BRIDGE_TOKEN_FIX] });
       r.note(`${r.ui.paint("failed", `${r.ui.icon("fail")} ${err.message}`)} — the restart goes on without it`);
     }
-    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile);
+    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile, instanceDir.instanceDir);
     else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");
     // The launchd shape's plists and supervisor.json, re-rendered BEFORE
     // anything is restarted onto them — by `up`'s own renderer, run here
@@ -618,7 +633,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       const supervisorLabel = labelFor(SUPERVISOR_SERVICE, labelSuffix);
       const render = await rerenderLaunchd(r, { productDir, runDir, env, exec: opts.exec, source, version: releaseVersion, envFile: opts.envFile, platform, uid, fetchFn, labelSuffix, owed: restart.owed, upOptions: opts.launchdUp });
       rendered = render.bootstrapped;
-      for (const l of rendered) if (!restarted.includes(l)) restarted.push(l);
+      for (const l of rendered) {
+        markStarted(l);
+        if (!restarted.includes(l)) restarted.push(l);
+      }
       // a stale supervisor.json is owed a restart whether or not any code
       // moved — the same-version rerun that finishes a failed update is
       // exactly that case — and an agent the Mac app registered is not
@@ -640,7 +658,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
           // that SUCCEEDED counts: `restarted` is what the summary reports as
           // "kickstarted", and a job that failed was not
           const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { tolerateFailure: true, comment: "code changed" });
-          if (k.code === 0) restarted.push(t.label);
+          if (k.code === 0) {
+            restarted.push(t.label);
+            markStarted(t.label);
+          }
           else {
             kickFailed.push({ label: t.label, code: k.code });
             r.note(`${t.label}: kickstart exited ${k.code} — not restarted; \`metistry doctor\` shows its state`);
@@ -669,6 +690,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
             const res = await restartSupervisorChild(r, { runDir, env, name: "reconciler" });
             if (res.ok) {
               restarted.push(label);
+              markStarted(label);
               r.note(`reconciler: restarted through the supervisor (${res.detail}) ${why} — nothing else was touched`);
             } else {
               kickFailed.push({ label, code: 1 });
@@ -677,8 +699,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
           }
         } else if (!restarted.includes(label)) {
           const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: why });
-          if (k.code === 0) restarted.push(label);
-          else {
+          if (k.code === 0) {
+            restarted.push(label);
+            markStarted(label);
+          } else {
             kickFailed.push({ label, code: k.code });
             r.note(`${label}: kickstart exited ${k.code} — not restarted, so it has not read ${OWNER_BRIDGE_TOKEN} yet`);
           }
@@ -765,6 +789,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // values), and every way it can stop short ends in the one command.
     r.section("secrets");
     sharedScope = await updateSharedScope(r, { instanceDir: instanceDir.instanceDir, envFile, exampleFile: join(runDir, ".env.example"), env, platform, uid, fetchFn, exec: opts.exec, keychain: opts.keychain });
+    // A provider key's grantee (X-7): the release that makes the engine refuse
+    // an ungranted provider key grants the keys this instance already uses —
+    // on every host, Keychain or not, since it writes only secrets.yaml.
+    await updateProviderGrants(r, { instanceDir: instanceDir.instanceDir, env, platform, uid, fetchFn, exec: opts.exec });
     // The product checkout's .env, still read after the instance's: say what
     // only it has (names, never values) and the verb that retires it. Never
     // moved or deleted here — the preview and the --yes are the owner's.
@@ -825,8 +853,8 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const mode = opts.closingDoctor ?? (opts.doctorFn || opts.doctorDeps ? "in-process" : "child");
   const doctorCode =
     mode === "child"
-      ? await childClosingDoctor(r, { productDir, runDir, envFile: opts.envFile, doctorDeps: opts.doctorDeps, doctorFn: opts.doctorFn ?? doctor })
-      : await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
+      ? await childClosingDoctor(r, { productDir, runDir, envFile: opts.envFile, doctorDeps: opts.doctorDeps, doctorFn: opts.doctorFn ?? doctor, startedAt })
+      : await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor, startedAt);
   // a deferred failure is still a failure — it just did not get to stop the
   // restart. Non-zero, but only here, at the end.
   const code = failure ? failure.code || 1 : deferred.length > 0 ? 1 : doctorCode;
@@ -838,7 +866,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   }
   r.out("");
   r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length, app, restart, deferred }));
-  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(reexec ? { reexec } : {}), ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}), ...(vaultCase ? { vaultCase } : {}), ...(pendingCommit ? { pendingCommit } : {}) };
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(reexec ? { reexec } : {}), ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(remotePacks ? { remotePacks } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}), ...(vaultCase ? { vaultCase } : {}), ...(pendingCommit ? { pendingCommit } : {}) };
 }
 
 // ---- seed templates the vault lacks ---------------------------------------------------
@@ -959,13 +987,13 @@ export function parseDoctorJson(stdout: string): DoctorReport | undefined {
  */
 export async function childClosingDoctor(
   r: StepRunner,
-  o: { productDir: string; runDir: string; envFile?: string | undefined; doctorDeps?: Partial<DoctorDeps> | undefined; doctorFn: (d: DoctorDeps) => Promise<DoctorReport>; exists?: ((p: string) => boolean) | undefined },
+  o: { productDir: string; runDir: string; envFile?: string | undefined; doctorDeps?: Partial<DoctorDeps> | undefined; doctorFn: (d: DoctorDeps) => Promise<DoctorReport>; exists?: ((p: string) => boolean) | undefined; startedAt?: StartedAt | undefined },
 ): Promise<number> {
   const exists = o.exists ?? existsSync;
   const main = updatedCliMain(o.runDir);
   const inProcess = async (why: string): Promise<number> => {
     r.note(`closing doctor: ${why} — running this process's doctor instead, which is the PRE-update code; if it disagrees with the new release, a standalone \`metistry doctor\` is the truth`);
-    const report = await o.doctorFn({ productDir: o.runDir, exec: r.exec, env: r.env, ...o.doctorDeps });
+    const report = await o.doctorFn({ productDir: o.runDir, exec: r.exec, env: r.env, ...(o.startedAt ? { startedAt: o.startedAt } : {}), ...o.doctorDeps });
     r.out(renderTable(report, r.ui));
     return report.ok ? 0 : 1;
   };
@@ -979,11 +1007,14 @@ export async function childClosingDoctor(
   // the bundled runtime's node when there is one — a release may have just
   // brought a newer one — else the node on PATH, else this one
   const { node } = nodeFor(o.productDir, r.env, exists);
-  const args = [main, "doctor", "--json", "--product-dir", o.runDir, ...(o.envFile ? ["--env-file", o.envFile] : [])];
+  // `--check`: the closing doctor reports and never repairs (X-123) — repair is the owner's `metistry doctor`
+  const args = [main, "doctor", "--check", "--json", "--product-dir", o.runDir, ...(o.envFile ? ["--env-file", o.envFile] : [])];
   let res: { code: number; stdout: string; stderr: string };
   try {
     // exit 1 is "doctor is not happy", a verdict — not a failed step
-    res = await r.run(node, args, { tolerateFailure: true, timeoutMs: CHILD_DOCTOR_TIMEOUT_MS, comment: "the updated CLI's doctor: the new manifests, read by the new schema" });
+    // the jobs this run restarted ride in the child's environment, so its doctor waits out their start too
+    const childEnv = o.startedAt && Object.keys(o.startedAt).length > 0 ? { ...r.env, [STARTED_ENV]: serializeStarted(o.startedAt) } : undefined;
+    res = await r.run(node, args, { tolerateFailure: true, timeoutMs: CHILD_DOCTOR_TIMEOUT_MS, ...(childEnv ? { env: childEnv } : {}), comment: "the updated CLI's doctor: the new manifests, read by the new schema" });
   } catch (err) {
     return inProcess(`could not run the updated CLI (${err instanceof Error ? err.message : String(err)})`);
   }
@@ -1263,6 +1294,28 @@ export async function updateSharedScope(
     return res;
   } catch (err) {
     r.note(`shared scope: not migrated (${err instanceof Error ? err.message : String(err)}) — the update is unaffected; run \`${command}\``);
+    return undefined;
+  }
+}
+
+/**
+ * `grantProviderSecrets` for the whole instance, run by `update` — never able
+ * to fail it. Every provider key `compute.yaml` references that has no
+ * `provider:<name>` grant yet gets `on` (and its provider's host), so no
+ * install loses compute on the update that brings the refusal (X-7). A
+ * grant the owner already wrote is left alone; a rerun writes nothing.
+ */
+export async function updateProviderGrants(
+  r: StepRunner,
+  o: { instanceDir: string | undefined; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch; exec?: Exec | undefined },
+): Promise<ProviderGrantsResult | undefined> {
+  if (!o.instanceDir) return undefined;
+  try {
+    const res = await grantProviderSecrets({ instanceDir: o.instanceDir, instanceId: undefined, env: o.env, platform: o.platform, uid: o.uid, fetchFn: o.fetchFn, exec: o.exec, dryRun: r.dryRun, out: (l) => r.note(l) });
+    if (res.granted.length === 0 && res.unlisted.length === 0) r.note("provider grants: every provider key already has its provider:<name> grant");
+    return res;
+  } catch (err) {
+    r.note(`provider grants: not written (${err instanceof Error ? err.message : String(err)}) — the update is unaffected; \`metistry secrets grant <name> provider:<provider> on\` for each provider key`);
     return undefined;
   }
 }

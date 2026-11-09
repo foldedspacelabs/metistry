@@ -29,6 +29,7 @@ import {
   type AssistantIdentity,
   type Compute,
   type DefinitionFile,
+  type PermissionConnection,
   type PermissionRow,
 } from "@foldedspacelabs/metistry-core";
 import type { Db } from "./auth-store.js";
@@ -138,6 +139,13 @@ export interface ConsoleActorInputs {
    * *while this routine runs*, never in the base scope. Absent = none.
    */
   routineGrants?: ((id: string) => readonly { readonly routine: string; readonly areas: readonly string[] }[]) | undefined;
+  /**
+   * Every connection, with its tools and the offer switch (T4-10) — the
+   * listing the proxy serves. The same list for every actor: core's
+   * `describePermissions` asks `may()` which one each actor reaches, and
+   * draws those as rows *reached through Metistry*. Absent = none.
+   */
+  connections?: readonly PermissionConnection[] | undefined;
 }
 
 /** A registry row as an actor source reads it. `AgentRow` carries more; this is the part the door reads. */
@@ -170,8 +178,8 @@ export async function consoleActorSources(db: Db, input: ConsoleActorInputs): Pr
     registry: (id) => byId.get(id),
     crew: (id) => input.crews?.actorSource(id),
     compute: input.compute ?? emptyCompute(),
-    // F-3 / T4-8: the connections an actor may reach. None exist yet.
-    connections: () => [],
+    // F-3 / T4-8, T4-10: every connection; may() decides which an actor reaches
+    connections: () => input.connections ?? [],
     grantHistory: (id) => ({ approved: (byId.get(id)?.kind === "internal" ? overrides : asks).get(id) ?? [], routines: input.routineGrants?.(id) ?? [] }),
     // T4-7: a member inherits its projects' grants; resolveActor draws them "via project"
     projectGrants: await listProjectGrants(db),

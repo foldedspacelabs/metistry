@@ -1,0 +1,29 @@
+schema: 1
+name: mail-messages
+type: collector
+display_name: Mail
+description: >-
+  The headers of the last week's inbox — who wrote, to whom, the subject,
+  the thread; never a body — from the one mail connection whose provider is
+  an IMAP type (or the one scheduled.yaml names), read through the IMAP
+  provider's door: the app password goes to that connection's host:port over
+  TLS and nowhere else, the mailbox is opened read-only, and nothing is
+  marked read. Raises a message request for each message written to you that
+  looks like it waits on your reply — inferred from the headers alone
+  (addressed to you, from a person, not a list or an automatic sender, and a
+  reply in a conversation or written to you alone) — cleared when you reply,
+  it leaves the inbox, or it is a week old (design-build-plan §2.6, §2.12;
+  T4-17). Degrades absent without a mail connection.
+# A sync (§2.5's closed shape): a quarter-hour — a message that needs you
+# is not a page, and every pass signs in to the server once.
+schedule: { every: 15m }
+# The Needs You rule this sync may raise, a toggle under Scheduled
+# (`syncs.mail-messages.raise.message`, §2.5). The raise is a `message`
+# mirror (T4-17): once per message, resolved at source when it is answered
+# or leaves the inbox.
+needs_you:
+  message:
+    label: A message written to you looks like it waits on your reply
+    default: true
+writes: [proposals, sync_state]
+reads: [proposals]

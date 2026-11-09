@@ -12,12 +12,15 @@ import { labelFor, loadPlistTemplates, logPathFor, readPlistTemplates, renderPli
 import {
   allocateBase,
   applyPorts,
+  CONSOLE_PROXY_PORT_VAR,
+  consoleProxyPortOf,
   BLOCK_CEIL,
   BLOCK_FLOOR,
   BLOCK_SIZE,
   DEFAULT_PORTS,
   loadNamespace,
   parseNamespace,
+  portEnv,
   PORTED_SERVICES,
   PORT_VARS,
   portsFile,
@@ -130,6 +133,20 @@ describe("the port block", () => {
   it("refuses rather than guessing when nothing is free", async () => {
     await expect(allocateBase(ID, async () => false)).rejects.toThrow(/no free 8-port block/);
   });
+
+  // The console's proxy listener (plan §2.23, X-103) takes the block's
+  // second-to-last slot — beside the egress proxy's last one, and for the
+  // same reason: a sixth PORTED_SERVICES entry would fail every allocated
+  // instance's ports.yaml. Left to the console's own default — the console
+  // port + 1 — a namespaced console would bind its own Postgres's slot.
+  it("the console's proxy listener port is the block's second-to-last slot: not the db's, not any ported service's, not the egress proxy's", () => {
+    const n = { labelSuffix: "a1b2c3d4", base: 8400, ports: portsOf(8400), from: "ports.yaml" };
+    expect(consoleProxyPortOf(n)).toBe(8400 + BLOCK_SIZE - 2);
+    expect(consoleProxyPortOf(n)).not.toBe(n.ports.console + 1); // which is the db
+    expect(Object.values(n.ports)).not.toContain(consoleProxyPortOf(n));
+    expect(consoleProxyPortOf(n)).toBeLessThan(8400 + BLOCK_SIZE - 1); // the egress proxy's slot (egress.ts)
+    expect(CONSOLE_PROXY_PORT_VAR).toBe("METISTRY_CONSOLE_PROXY_PORT");
+  });
 });
 
 describe("ports.yaml", () => {
@@ -181,6 +198,14 @@ describe("applying a block to the environment", () => {
     expect(applied).not.toContain("METISTRY_CONSOLE_PORT=8400");
     // db has no URL variable — it is reached by host+port
     expect(Object.keys(env)).not.toContain("METISTRY_DB_URL");
+    // the console's proxy listener (X-103): its slot, filled when unset like every other port
+    expect(env.METISTRY_CONSOLE_PROXY_PORT).toBe("8406");
+    expect(applied).toContain("METISTRY_CONSOLE_PROXY_PORT=8406");
+    const explicit: NodeJS.ProcessEnv = { METISTRY_CONSOLE_PROXY_PORT: "9001" };
+    applyPorts(explicit, ns());
+    expect(explicit.METISTRY_CONSOLE_PROXY_PORT).toBe("9001");
+    // …and in the plain-environment form the sourcing jobs' plists carry
+    expect(portEnv(ns()).METISTRY_CONSOLE_PROXY_PORT).toBe("8406");
   });
 
   it("every ported service has a port variable, and the variable names are the ones the services read", () => {

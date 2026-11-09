@@ -159,11 +159,11 @@ func aChildThatRefusesToStartIsNotConfiguredAndIsNotRespawnedInALoop() async thr
     let transport = SessionConsoleCallTransport { children.next() }
     let child = children.upcoming()
     child.onSend = { child, _ in
-        child.crash(exitCode: 1, stderr: "metistry console session: https://metis.example is not loopback — the local owner token this verb presents is minted for THIS machine only\n")
+        child.crash(exitCode: 1, stderr: "metistry console session: https://assistant.example is not loopback — the local owner token this verb presents is minted for THIS machine only\n")
     }
     let result = await transport.call("GET", "/api/whoami", body: nil)
     guard case .notConfigured(let detail) = result.failure else { Issue.record("expected notConfigured, got \(result)"); return }
-    #expect(detail.hasPrefix("https://metis.example is not loopback"))
+    #expect(detail.hasPrefix("https://assistant.example is not loopback"))
     // Nothing asked again, so nothing started again.
     try await Task.sleep(for: .milliseconds(20))
     #expect(children.spawned == 1)

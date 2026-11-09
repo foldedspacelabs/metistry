@@ -7,7 +7,9 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Readable } from "node:stream";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fakeTerminal } from "./fake-terminal.js";
 import { parseCrewDefinition, type PermissionRow } from "@foldedspacelabs/metistry-core";
 import { agentAutonomy, agentsDefine, agentsList, isEmptyChange, mergeAutonomy, parseAutonomyFlags, renderAgents, renderAutonomy, renderDefine, renderPermissions } from "../src/agents.js";
 import { main } from "../src/main.js";
@@ -236,6 +238,10 @@ describe("agents list — the permissions table (T4-6)", () => {
   it("says an actor that holds nothing holds nothing — and draws no table for a revoked row", () => {
     const ui = createUi({ env: { NO_COLOR: "1" } });
     expect(renderPermissions([], ui)).toContain("holds nothing — anything not listed is not granted");
+    // a connection row: the relay glyph's words, once (T4-10 — Through Metistry)
+    const conn = [{ resource: { kind: "connection" as const, name: "gh" }, label: "gh", read: [{ key: "list", label: "list", asks: false, provenance: { kind: "proxy" as const } }], write: [] }];
+    expect(renderPermissions(conn, ui)).toMatch(/gh ⧉ +list +—\n⧉ reached through Metistry — its tools are called by Metistry with your credential$/);
+    expect(renderPermissions([{ resource: { kind: "inbox" as const }, label: "Inbox", read: [], write: [] }], ui)).not.toContain("reached through Metistry");
     const revoked = renderAgents([{ id: "gone", display_name: "Gone", ...base, revoked: true, permissions, asked: [] }], ui);
     expect(revoked).not.toContain("Knowledge");
   });
@@ -350,5 +356,32 @@ describe("agents define — a crew's definition, in the owner's hand (M12)", () 
     expect(readFileSync(own(), "utf8")).toContain("From stdin.");
     expect(existsSync(own())).toBe(true);
     expect(await main(["agents", "define"], { out: () => {}, err: (l) => errs.push(l) })).toBe(2);
+  });
+
+  it("**a terminal `--prompt-file -` prompts on stderr, never stdout**, keeps the echo, and writes what was typed; piped stdin is unchanged", async () => {
+    const term = fakeTerminal();
+    const lines: string[] = [];
+    const errs: string[] = [];
+    const run = main(["agents", "define", "scout", "--instance", instance, "--prompt-file", "-", "--json"], { out: (l) => lines.push(l), err: (l) => errs.push(l), terminal: term, platform: "linux" });
+    await vi.waitFor(() => expect(term.stderrText()).toContain("Ctrl-D"));
+    term.type("Typed at a terminal.\n");
+    term.eof();
+    expect(await run).toBe(0);
+    expect(readFileSync(own(), "utf8")).toContain("Typed at a terminal.");
+    expect(term.stderrText()).toContain("the operating prompt");
+    expect(lines.join("\n")).not.toMatch(/Ctrl-D|operating prompt/); // stdout is the --json result alone
+    expect(JSON.parse(lines.join("\n"))).toMatchObject({ id: "scout", changed: true });
+    expect(term.raw).toEqual([]);
+
+    // piped: no prompt on any stream, read to EOF
+    const before = Object.getOwnPropertyDescriptor(process, "stdin")!;
+    Object.defineProperty(process, "stdin", { value: Readable.from(["Piped prompt.\n"]), configurable: true });
+    try {
+      expect(await main(["agents", "define", "scout", "--instance", instance, "--prompt-file", "-", "--json"], { out: () => {}, err: (l) => errs.push(l), terminal: null, platform: "linux" })).toBe(0);
+    } finally {
+      Object.defineProperty(process, "stdin", before);
+    }
+    expect(readFileSync(own(), "utf8")).toContain("Piped prompt.");
+    expect(errs.filter((e) => !/written directly/.test(e))).toEqual([]); // nothing was prompted
   });
 });

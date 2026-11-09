@@ -165,8 +165,17 @@ describe.skipIf(!hasDb)("plan-tomorrow (real db)", () => {
     expect(text.trimEnd().endsWith("-->")).toBe(true);
     expect(text).toContain(`<!-- rendered by ${COMPONENT} from ${TEMPLATE_PATH} (sha256 ${sha(seedFile("Templates/Plan.md")).slice(0, 12)}…)`);
 
-    // …and the ledger row the morning brief and `metistry doctor` read
-    const { rows } = await pool.query(`SELECT meta FROM runs WHERE component = $1 AND kind = 'routine_run' AND ok ORDER BY ts DESC LIMIT 1`, [COMPONENT]);
+    // …and the ledger row the morning brief and `metistry doctor` read — scoped
+    // to this evening's target date (not just the component) and tie-broken by
+    // `id`, so a row this suite itself wrote for a different clock reading can
+    // never be the one an unscoped `ORDER BY ts DESC LIMIT 1` happens to pick:
+    // `ts` is the routine's real wall-clock write time (`record()`'s own
+    // `now()`), never the fixed clock this test hands the routine, so it is
+    // never the value to key an assertion on.
+    const { rows } = await pool.query(
+      `SELECT meta FROM runs WHERE component = $1 AND kind = 'routine_run' AND ok AND meta->>'planned_for' = $2 ORDER BY ts DESC, id DESC LIMIT 1`,
+      [COMPONENT, TARGET],
+    );
     expect(rows[0]?.meta).toMatchObject({ planned_for: TARGET, outcome: "acted", path: PLAN_FILE, created: true, truncated: false, template_warnings: 0 });
   });
 
@@ -201,9 +210,14 @@ describe.skipIf(!hasDb)("plan-tomorrow (real db)", () => {
   });
 
   it("an evening this routine has already settled is not planned twice by another scheduled pass", async () => {
+    // The prior settlement this test fakes happened at THIS evening's clock —
+    // `EVENING`, never `now()`. A real `now()` here stamps the row with the
+    // wall-clock instant the suite happens to run at, which is what let this
+    // test's own fixture drift out of step with the fixed clock its assertion
+    // is really about.
     await pool.query(
-      `INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ($1, 'routine_run', true, now(), now(), $2)`,
-      [COMPONENT, JSON.stringify({ planned_for: TARGET, outcome: "acted" })],
+      `INSERT INTO runs (component, kind, ok, ts, started_at, finished_at, meta) VALUES ($1, 'routine_run', true, $2, $2, $2, $3)`,
+      [COMPONENT, EVENING, JSON.stringify({ planned_for: TARGET, outcome: "acted" })],
     );
     const vault = fakeVault();
     expect(await planTomorrow(pool, { vault, queries, calendar, now: EVENING, scheduledFor: EVENING, timeZone: "America/New_York", env: ENV })).toBe(0);
@@ -213,9 +227,12 @@ describe.skipIf(!hasDb)("plan-tomorrow (real db)", () => {
   // Ruling 15 (X-15): Run Now never asks whether the date is settled — only
   // the scheduled pass does. The owner asked for this one by hand.
   it("…but Run Now re-renders a date a scheduled pass already settled", async () => {
+    // Same fix as the test above: the scheduled pass this fakes as already
+    // having run is pinned to `EVENING`, not the wall clock the suite happens
+    // to run under.
     await pool.query(
-      `INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ($1, 'routine_run', true, now(), now(), $2)`,
-      [COMPONENT, JSON.stringify({ planned_for: TARGET, outcome: "acted", trigger: "schedule" })],
+      `INSERT INTO runs (component, kind, ok, ts, started_at, finished_at, meta) VALUES ($1, 'routine_run', true, $2, $2, $2, $3)`,
+      [COMPONENT, EVENING, JSON.stringify({ planned_for: TARGET, outcome: "acted", trigger: "schedule" })],
     );
     const vault = fakeVault();
     expect(await planTomorrow(pool, { vault, queries, calendar, now: EVENING, env: ENV })).toBe(1); // no scheduledFor, no closedDay: Run Now

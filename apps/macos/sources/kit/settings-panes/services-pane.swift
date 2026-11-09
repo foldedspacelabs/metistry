@@ -45,7 +45,7 @@ struct ServicesPane: View {
                     .disabled(model.status.isChecking)
                 if model.status.isChecking {
                     ProgressView().controlSize(.small)
-                    Text("Checking — running `metistry doctor --json` on this Mac…")
+                    Text("Checking — running `metistry doctor --check --json` on this Mac…")
                         .metistryText(.footnote, p, .textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if let report = model.status.report {
@@ -106,7 +106,7 @@ struct ServicesPane: View {
             } else {
                 UnavailableCard(
                     what: "No services reported yet",
-                    reason: "They come from `metistry doctor --json`. Run Doctor above.",
+                    reason: "They come from `metistry doctor --check --json`. Run Doctor above.",
                     command: model.status.lastCommand
                 )
             }

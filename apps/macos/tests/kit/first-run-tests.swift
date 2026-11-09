@@ -53,6 +53,7 @@ private func model() -> FirstRunModel {
     ])
     // Steps that run nothing say so rather than inventing a command.
     #expect(m.plannedArguments(.runtime) == nil)
+    #expect(m.plannedArguments(.remoteAccess) == nil)
     #expect(m.plannedArguments(.door) == nil)
     #expect(m.plannedArguments(.compute) == nil)
 }
@@ -74,19 +75,20 @@ private func model() -> FirstRunModel {
     #expect(!m.canRun(.versioning)) // no remote url
     m.remoteURL = "https://github.com/you/instance.git"
     #expect(m.canRun(.versioning))
-    // 6 and 7 own their own screens: neither is a `metistry` verb, so neither
+    // 6, 7 and 8 own their own screens: none is one `metistry` verb, so none
     // goes through the run row.
+    #expect(!m.canRun(.remoteAccess))
     #expect(!m.canRun(.door))
     #expect(!m.canRun(.compute))
 }
 
 @MainActor
-@Test func theTwoStepsThatAreNotVerbsAreTheTwoThatOwnTheirOwnScreens() {
+@Test func theThreeStepsThatAreNotVerbsAreTheThreeThatOwnTheirOwnScreens() {
     let withOwnScreens = FirstRunStep.allCases.filter(\.hasOwnScreen)
-    #expect(withOwnScreens == [.door, .compute])
+    #expect(withOwnScreens == [.remoteAccess, .door, .compute])
     // A step with its own screen shows no argument array, because there is none
-    // to show: one is an ASAuthorization ceremony, the other an interactive
-    // terminal login.
+    // to show: one drives `metistry remote` three ways, one is an
+    // ASAuthorization ceremony, the other an interactive terminal login.
     let m = model()
     for step in withOwnScreens {
         #expect(m.plannedArguments(step) == nil, "\(step.title) must not claim to run a verb")

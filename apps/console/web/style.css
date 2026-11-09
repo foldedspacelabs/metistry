@@ -931,8 +931,12 @@ label.q-option { flex-direction: row; align-items: center; gap: var(--mt-space-2
   color: var(--mt-color-text-secondary); border: 1px dashed var(--mt-color-border-strong); border-radius: var(--mt-radius-lg);
   padding: var(--mt-space-8) var(--mt-space-4); }
 
-/* --------------------------------------------------- status / doctor rows - */
-#checks li, #device-list li, .reviews li {
+/* -------------------------------------------------------------- settings - */
+/* Settings (settings.js; design-build-plan §2.3): grouped lists. A row is a
+   name — with a line under it — and its value; a check's row the same. A
+   Mac-only row is its name and its reason in the secondary ink, and holds no
+   control. Rows grow taller at a large text size, never wider (§2.18). */
+.reviews li {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -940,11 +944,34 @@ label.q-option { flex-direction: row; align-items: center; gap: var(--mt-space-2
   padding: var(--mt-space-3) 0;
   border-bottom: 1px solid var(--mt-color-border);
 }
-#checks li:last-child, #device-list li:last-child { border-bottom: 0; }
-#checks li.checks-summary { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
-#checks, #device-list { background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
-  box-shadow: var(--mt-elevation-1); padding: 0 var(--mt-space-4); margin-top: var(--mt-space-2); }
-#status button { margin: var(--mt-space-3) var(--mt-space-2) 0 0; }
+.settings-group > li:not(.nav) {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--mt-space-2) var(--mt-space-3);
+  min-height: var(--mt-size-touch-target);
+  padding: var(--mt-space-2) var(--mt-space-4);
+  overflow-wrap: anywhere;
+}
+.settings-group .k { flex: 1 1 12em; min-width: 0; }
+.settings-group .v { flex: 0 1 auto; margin-left: auto; text-align: right; }
+.settings-group .v button { margin: var(--mt-space-1) 0 var(--mt-space-1) var(--mt-space-2); }
+.settings-group .sub { display: block; color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+.settings-group .checks-summary .v { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+.settings-group li.mac-only { flex-direction: column; align-items: flex-start; gap: 2px; }
+.settings-group li.mac-only .k { color: var(--mt-color-text-secondary); flex: none; }
+.settings-group li.state { flex-direction: column; align-items: flex-start; }
+.settings-group li.device.revoked .k { color: var(--mt-color-text-secondary); }
+.settings-group li.confirm, .settings-group li.edit { display: block; }
+.settings-group li.confirm p { margin: 0 0 var(--mt-space-2); }
+.settings-group li.confirm .acts, .setting-form .acts { margin: var(--mt-space-2) 0 0; }
+.setting-form { display: flex; flex-direction: column; gap: var(--mt-space-2); }
+.setting-form label { display: flex; flex-direction: column; gap: var(--mt-space-1); font-size: var(--mt-text-subhead-size); }
+.setting-form input, .setting-form select { width: 100%; }
+.setting-form p { margin: 0; }
+.setting-form .k { flex: none; }
+#settings .receipt { margin-top: calc(-1 * var(--mt-space-4)); margin-bottom: var(--mt-space-4); }
 
 /* ---------------------------------------------------------------- agents -- */
 /* More ▸ Agents (more.js): grouped rows, each a push. */

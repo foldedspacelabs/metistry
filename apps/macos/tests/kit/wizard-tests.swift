@@ -1,4 +1,4 @@
-// The wizard is a state machine over the plan's seven steps. These tests are
+// The wizard is a state machine over the plan's eight steps. These tests are
 // what stops it becoming a maze: you can always go back, you can always skip
 // what is genuinely optional, you can never be stuck on a step the product
 // cannot do, and every choice on screen carries both sides of itself.
@@ -30,13 +30,15 @@ private func wizard(
 }
 
 @MainActor
-@Test func itWalksTheSevenStepsInOrderAndBacksOutOfThem() {
+@Test func itWalksTheEightStepsInOrderAndBacksOutOfThem() {
     let w = wizard()
     w.present()
     #expect(w.isPresented)
     #expect(w.current == .runtime)
     #expect(!w.canGoBack)
-    #expect(w.progressLabel == "Step 1 of 7")
+    #expect(w.progressLabel == "Step 1 of 8")
+    // Services, then Remote Access (plan §2.23, X-107), then Door, then Compute
+    #expect(FirstRunStep.allCases.map(\.title) == ["Runtime", "Instance", "Versioning", "Secrets", "Services", "Remote Access", "Door", "Compute"])
 
     // Step 1 is satisfied the moment a runtime is located.
     #expect(w.canContinue)
@@ -93,11 +95,11 @@ private func wizard(
 }
 
 @MainActor
-@Test func stepsSixAndSevenAnswerFromTheirOwnModelsAndNeverWallTheWizard() {
+@Test func stepsSevenAndEightAnswerFromTheirOwnModelsAndNeverWallTheWizard() {
     let w = wizard()
     w.present(from: .door)
     // Neither is a `metistry` verb, so neither has an argument array or a run
-    // row — and neither is satisfied until the thing itself happened. Step 6's
+    // row — and neither is satisfied until the thing itself happened. Step 7's
     // "thing" is now a successful whoami, which has not been asked yet.
     #expect(!w.steps.canRun(.door))
     #expect(!w.isSatisfied(.door))
@@ -396,6 +398,45 @@ private struct FixedWizardRunner: CommandRunner {
     #expect(Set(WizardOptions.door.map(\.value)) == Set(DoorPlan.allCases))
     // Every auth mode the CLI has is represented, so none is silently dropped.
     #expect(Set(WizardOptions.repoAuth.map(\.value)) == Set(RepoAuth.allCases))
+}
+
+/// Every string the wizard prints that can speak of the assistant, built the
+/// way the screen builds it.
+private func wizardCopy(assistantName: String?) -> [String] {
+    var strings = FirstRunStep.allCases.map { $0.summary(assistantName: assistantName) }
+    for option in WizardOptions.shape(assistantName: assistantName) { strings += [option.title, option.pro, option.con] }
+    strings.append(ComputeStepModel.skipNote(assistantName: assistantName))
+    strings.append(ComputeStepModel.skippedLine(assistantName: assistantName))
+    return strings
+}
+
+@Test func withANameConfiguredNoWizardStringSaysTheAssistant() {
+    for name in ["Ada", "  Ada \n"] {
+        let strings = wizardCopy(assistantName: name)
+        for string in strings {
+            #expect(!string.localizedCaseInsensitiveContains("the assistant"), "still generic with a name: \(string)")
+        }
+        // The name is actually used, not just the generic phrase removed.
+        #expect(strings.contains { $0.contains("Ada's turns run") })
+        #expect(strings.contains { $0.contains("Ada runs on the host") })
+        #expect(strings.contains { $0.contains("the console and Ada in containers") && $0.contains("Ada's container") })
+        #expect(strings.contains { $0.hasPrefix("no engine — Ada will not be started") })
+        #expect(FirstRunStep.instance.summary(assistantName: name).contains("for Ada. That name lives in identity.yaml"))
+    }
+}
+
+@Test func beforeANameIsKnownTheGenericWordIsUsedAndNothingIsBlank() {
+    for name in [nil, "", "   "] as [String?] {
+        let strings = wizardCopy(assistantName: name)
+        #expect(strings == wizardCopy(assistantName: nil))
+        #expect(strings.contains { $0.contains("The assistant runs on the host") })
+        #expect(strings.contains { $0.contains("the assistant's turns run") || $0.contains("where the assistant's turns run") })
+        #expect(strings.contains { $0.hasPrefix("no engine — the assistant will not be started") })
+    }
+    // The parameterless forms the Compute pane and older callers use are the generic copy.
+    #expect(FirstRunStep.compute.summary == FirstRunStep.compute.summary(assistantName: nil))
+    #expect(WizardOptions.shape.map(\.pro) == WizardOptions.shape(assistantName: nil).map(\.pro))
+    #expect(ComputeStepModel.skipNote == ComputeStepModel.skipNote(assistantName: nil))
 }
 
 @Test func theReassuranceIsOnScreenAtAllTimes() {

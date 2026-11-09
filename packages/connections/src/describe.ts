@@ -19,18 +19,30 @@
 //            does not list this connection's host as one it may be sent to —
 //            exactly what the egress door would refuse, said ahead of time.
 //
-// *Used by* is what reads it today: the syncs in `scheduled.yaml` that name
-// it. Agents reach a connection through the lazy pair and their grants
-// (T4-8b); until then nothing else uses one, and an empty list is the true
-// answer (screen 9: *Nobody yet* is a real value).
+// *Used by* is everything that reads it: the syncs in `scheduled.yaml` that
+// name it, and the agents and crews granted it (`DescribeOptions.granted`,
+// which the host fills from its registry — this package holds no agent list)
+// when the owner has offered it to agents, the one rule core's `mayConnection`
+// applies. Nothing else uses one, and an empty list is the true answer
+// (screen 9: *Nobody yet* is a real value).
+//
+// *Last checked* is the time and verdict of the newest check anyone ran
+// (`stamps.ts`) — null until one has been.
 
 import {
   egressDestination,
   secretGrant,
   secretRefsIn,
+  socketDestination,
   variableRefsIn,
   type AuthScheme,
+  type ConnectionField,
   type ConnectionType,
+  type ConnectionTypeManifest,
+  type FieldKind,
+  type ReachClass,
+  type Registry,
+  type RegistryUnit,
   type Scheduled,
   type SecretPresence,
   type ToolGroup,
@@ -40,21 +52,39 @@ import {
 import type { ConnectionCatalog } from "./catalog.js";
 import { ConnectionRefused } from "./errors.js";
 import { typedValues, type ConnectionEntry, type ConnectionStatus } from "./load.js";
-import { planDial } from "./plan.js";
-import { connectionGrantee } from "./pool.js";
+import { connectionGrantee } from "./door.js";
+import { isGeneratedType } from "./generated.js";
+import { oauthClientOf, oauthSecretNames } from "./oauth.js";
+import { planHttp } from "./plan.js";
+import { readCheckStamps, type LastChecked } from "./stamps.js";
 import { syncReaders } from "./sync.js";
 
-/** Who reads a connection. Syncs today; agents and the assistant once the lazy pair lands (T4-8b). */
+export type { LastChecked } from "./stamps.js";
+
+/**
+ * Who reads a connection: a sync that names it, or an agent or a crew granted
+ * it through the lazy pair (T4-8b). The assistant reaches every connection
+ * and is not listed against each.
+ */
 export interface ConnectionUser {
-  kind: "sync";
+  kind: "sync" | "agent" | "crew";
+  /** the sync's name, or the agent's or crew's id */
   name: string;
+}
+
+/** One header an HTTP connection sends, with the secrets its value names — names, never the value or the template around it. */
+export interface HeaderSecrets {
+  header: string;
+  secrets: string[];
 }
 
 /** How Metistry reaches it — names only for headers, query parameters and environment variables. */
 export type ReachSummary =
-  | { class: "http"; url: string; auth: AuthScheme; headers: string[]; query: string[]; timeout_s: number | null }
+  | { class: "http"; url: string; auth: AuthScheme; headers: string[]; header_secrets: HeaderSecrets[]; query: string[]; timeout_s: number | null }
   | { class: "command"; command: string; args: string[]; cwd: string | null; env: string[]; runs_on: "host" | "container" }
-  | { class: "path"; path: string; include: string[]; skip: string[]; watch: boolean };
+  | { class: "path"; path: string; include: string[]; skip: string[]; watch: boolean }
+  /** an IMAP mailbox (T4-15): where it goes and how — never the username or the password */
+  | { class: "imap"; host: string; port: number; security: "tls" | "plain"; auth: "basic" };
 
 export interface ConnectionToolRow {
   name: string;
@@ -79,7 +109,53 @@ export interface ConnectionRow {
   /** the owner's per-tool policy, by name */
   tools: ConnectionToolRow[];
   offer_to_agents: boolean;
+  /** the owner's fold switch: a large answer over the proxy is folded (true, the default) or comes whole (X-132) */
+  fold: boolean;
   used_by: ConnectionUser[];
+  /** the newest check anyone ran, or null for never */
+  last_checked: LastChecked | null;
+}
+
+/**
+ * One config field of a connection type, as the app renders it (§2.7: the
+ * app renders a known service's form from these — no per-service Swift).
+ * KINDS ONLY: an `oauth` field says it is one and nothing of its client; a
+ * `secret` field has no default by schema, and a value never has a place here.
+ */
+export interface ConnectionTypeField {
+  key: string;
+  kind: FieldKind;
+  label: string;
+  help: string | null;
+  required: boolean;
+  /** `text`, `url` and `choice` may carry one — never `secret` (the schema refuses it) */
+  default?: string | undefined;
+  /** `choice` only */
+  choices?: Array<{ value: string; label: string }> | undefined;
+}
+
+/**
+ * One installed connection type — what *Add Connection* offers once the type
+ * is chosen (screen 9 §10.5, T6-13b): the unit's name, a title a person reads,
+ * whether it is the product's or the owner's extension, what it provides, how
+ * a connection of it is reached and signs in, and its fields. Built from the
+ * registry every read path loads, so a type an extension adds or replaces
+ * appears here as it does everywhere (§2.7's overlay).
+ */
+export interface ConnectionTypeSummary {
+  name: string;
+  /** the manifest's description up to its first dash or full stop, or the name */
+  title: string;
+  description: string | null;
+  origin: UnitOrigin;
+  provides: ConnectionType;
+  transports: ReachClass[];
+  /** the sign-in schemes it declares; null when it declares none (any but `basic`) */
+  auth: AuthScheme[] | null;
+  capabilities: string[];
+  fields: ConnectionTypeField[];
+  /** the tools it declares, with the group each keeps */
+  tools: Array<{ name: string; group: ToolGroup }>;
 }
 
 /** One connection, in full: the row, where its file is, and what its provider's unit declares. */
@@ -95,7 +171,49 @@ export interface ConnectionDetail extends ConnectionRow {
     sync: string | null;
     /** the tools the type declares, with the group each keeps */
     tools: Array<{ name: string; group: ToolGroup }>;
+    /** the same unit as *Add Connection* sees it — its fields, by kind (T6-13b) */
+    type: ConnectionTypeSummary;
   } | null;
+}
+
+/** A field as the wire carries it: its kind and shape, never a value. */
+export function describeConnectionField(f: ConnectionField): ConnectionTypeField {
+  const out: ConnectionTypeField = { key: f.key, kind: f.kind, label: f.label, help: f.help ?? null, required: f.required };
+  if ((f.kind === "text" || f.kind === "url" || f.kind === "choice") && f.default !== undefined) out.default = f.default;
+  if (f.kind === "choice") out.choices = f.options.map((o) => ({ value: o.value, label: o.label }));
+  return out;
+}
+
+/** `Linear — the issues assigned to you…` → `Linear`; no description → the name. */
+export function connectionTypeTitle(m: Pick<ConnectionTypeManifest, "name" | "description">): string {
+  const text = (m.description ?? "").trim();
+  const cut = text.search(/\s+[—–-]\s+|[.:]\s|[.:]$/);
+  const title = (cut === -1 ? text : text.slice(0, cut)).trim();
+  return title.length > 0 && title.length <= 80 ? title : m.name;
+}
+
+/** One installed connection type, as `GET /api/connections` serves it under `types`. */
+export function describeConnectionType(unit: RegistryUnit<ConnectionTypeManifest>): ConnectionTypeSummary {
+  const m = unit.manifest;
+  return {
+    name: unit.name,
+    title: connectionTypeTitle(m),
+    description: m.description ?? null,
+    origin: unit.origin,
+    provides: m.provides,
+    transports: [...m.transports],
+    auth: m.auth ? [...m.auth] : null,
+    capabilities: [...m.capabilities],
+    fields: m.fields.map(describeConnectionField),
+    tools: Object.entries(m.tools)
+      .map(([n, t]) => ({ name: n, group: t.group }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+/** Every installed connection type, sorted by name — seed and extensions through one registry, a skipped manifest absent (its reason is doctor's). */
+export function describeConnectionTypes(types: Registry<ConnectionTypeManifest>): ConnectionTypeSummary[] {
+  return types.units().map(describeConnectionType);
 }
 
 export interface DescribeOptions {
@@ -103,21 +221,41 @@ export interface DescribeOptions {
   presence?: SecretPresence | undefined;
   /** `scheduled.yaml`, for *used by*. Default: the catalog's */
   scheduled?: Scheduled | null | undefined;
+  /** connection name → the agents and crews granted it, from the host's registry (revoked and pending rows already left out). Absent: none are known, and none are listed */
+  granted?: ReadonlyMap<string, readonly ConnectionUser[]> | undefined;
+  /** connection name → its last check. Default: read from the instance's state directory (`stamps.ts`) when the catalog names one */
+  checks?: ReadonlyMap<string, LastChecked> | undefined;
 }
 
 function reachOf(entry: ConnectionEntry): ReachSummary | null {
   const c = entry.connection;
   if (!c) return null;
-  const { http, command, path } = c.reach;
-  if (http) return { class: "http", url: http.url, auth: http.auth.scheme, headers: Object.keys(http.headers).sort(), query: Object.keys(http.query).sort(), timeout_s: http.timeout_s ?? null };
+  const { http, command, path, imap } = c.reach;
+  if (imap) return { class: "imap", host: imap.host, port: imap.port, security: imap.security, auth: "basic" };
+  if (http) return { class: "http", url: http.url, auth: http.auth.scheme, headers: Object.keys(http.headers).sort(), header_secrets: headerSecrets(http.headers), query: Object.keys(http.query).sort(), timeout_s: http.timeout_s ?? null };
   if (command) return { class: "command", command: command.command, args: [...command.args], cwd: command.cwd ?? null, env: Object.keys(command.env).sort(), runs_on: command.runs_on };
   if (path) return { class: "path", path: path.path, include: [...path.include], skip: [...path.skip], watch: path.watch };
   return null;
 }
 
-/** The syncs that read `name`: those `scheduled.yaml` names it for, and the sync its provider declares when that sync reads it (`syncReaders`, the rule the sync itself opens by). */
-function usersOf(name: string, scheduled: Scheduled | null | undefined, entries: readonly ConnectionEntry[]): ConnectionUser[] {
-  return (syncReaders({ entries, scheduled }).get(name) ?? []).map((sync) => ({ kind: "sync" as const, name: sync }));
+/** Each header with the secrets its value names, sorted by header — a header per secret lists one each. */
+function headerSecrets(headers: Record<string, string>): HeaderSecrets[] {
+  return Object.keys(headers)
+    .sort()
+    .map((header) => ({ header, secrets: [...secretRefsIn(headers[header]!).names].sort() }));
+}
+
+/**
+ * Who reads `name`: the syncs `scheduled.yaml` names it for (and the sync its
+ * provider declares when that sync reads it — `syncReaders`, the rule the sync
+ * itself opens by), then the agents and crews granted it. A grant reaches only
+ * a connection the owner has offered to agents (core's `mayConnection`), so an
+ * unoffered connection's grants are not "use".
+ */
+function usersOf(name: string, offered: boolean, scheduled: Scheduled | null | undefined, entries: readonly ConnectionEntry[], granted: DescribeOptions["granted"]): ConnectionUser[] {
+  const syncs = (syncReaders({ entries, scheduled }).get(name) ?? []).map((sync) => ({ kind: "sync" as const, name: sync }));
+  const holders = offered ? [...(granted?.get(name) ?? [])].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name)) : [];
+  return [...syncs, ...holders];
 }
 
 /** What the caller can add to a file's own verdict: missing variables and secret items (absent), grants and hosts the door would refuse (failed). */
@@ -141,25 +279,43 @@ async function runtimeIssues(entry: ConnectionEntry, catalog: ConnectionCatalog,
   const grantee = connectionGrantee(c.name);
   const envSecrets = new Set<string>();
   for (const v of Object.values(c.reach.command?.env ?? {})) for (const n of secretRefsIn(v).names) envSecrets.add(n);
+  // an OAuth connection's token secret is filled by signing in, not by hand
+  let signIn: string | undefined;
+  try {
+    signIn = c.reach.http?.auth.scheme === "oauth" ? oauthClientOf(entry).tokenSecret : undefined;
+  } catch {
+    signIn = undefined; // why it cannot sign in is the dial's to say
+  }
   for (const n of c.secrets) {
-    if (opts.presence && !(await opts.presence.has(n))) absent.push(`secret ${n} has no item in this instance's Keychain — \`metistry secrets set ${n}\``);
+    if (opts.presence && !(await opts.presence.has(n))) {
+      absent.push(n === signIn ? `${c.name} is not signed in yet — \`metistry connections authorize ${c.name}\`` : `secret ${n} has no item in this instance's Keychain — \`metistry secrets set ${n}\``);
+    }
     const mode = secretGrant(file, n, grantee);
     if (mode === "off") failed.push(`secrets.yaml does not grant ${n} to ${grantee} — \`metistry secrets grant ${n} ${grantee} on\``);
     else if (mode === "ask" && envSecrets.has(n)) failed.push(`${n} is Ask First for ${grantee}, but a command's environment is filled once, when it starts — grant it on`);
   }
 
-  // an HTTP MCP connection: every secret its requests carry must be allowed to go where it dials
-  if (c.type === "mcp" && c.reach.http && absent.length === 0) {
+  // an HTTP MCP connection, or one reached through generated tools: every secret its
+  // requests carry must be allowed to go where it dials — and an OAuth sign-in's to
+  // the token endpoint too (and a client id of your own to the authorize page)
+  if ((c.type === "mcp" || isGeneratedType(c.type)) && c.reach.http && entry.provider?.manifest.implementation.kind !== "builtin" && absent.length === 0) {
     try {
-      const plan = planDial(entry, catalog.variables, catalog.baseDir);
-      if (plan.kind === "http") {
-        const dest = egressDestination(plan.url)?.entry;
-        const carried = new Set<string>();
-        for (const v of Object.values(plan.headers)) for (const n of secretRefsIn(v).names) carried.add(n);
-        for (const n of [...carried].sort()) {
-          const hosts = Object.hasOwn(file.secrets, n) ? file.secrets[n]!.hosts : [];
-          if (dest && !hosts.includes(dest)) failed.push(`${n} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts ${n} ${[...hosts, dest].join(" ")}\`)`);
-        }
+      const plan = planHttp(entry, catalog.variables);
+      const dest = egressDestination(plan.url)?.entry;
+      const needs = new Map<string, Set<string>>();
+      const need = (n: string, host: string | undefined) => {
+        if (host) needs.set(n, new Set([...(needs.get(n) ?? []), host]));
+      };
+      for (const v of Object.values(plan.headers)) for (const n of secretRefsIn(v).names) need(n, dest);
+      if (plan.oauth) {
+        const tokenHost = egressDestination(plan.oauth.tokenUrl)?.entry;
+        for (const n of oauthSecretNames(plan.oauth)) need(n, tokenHost);
+        if (plan.oauth.clientId.kind === "secret") need(plan.oauth.clientId.name, egressDestination(plan.oauth.authorizeUrl)?.entry);
+      }
+      for (const [n, want] of [...needs].sort(([a], [b]) => a.localeCompare(b))) {
+        const hosts = Object.hasOwn(file.secrets, n) ? file.secrets[n]!.hosts : [];
+        const missing = [...want].filter((h) => !hosts.includes(h)).sort();
+        if (missing.length) failed.push(`${n} may not be sent to ${missing.join(", ")} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts ${n} ${[...hosts, ...missing].join(" ")}\`)`);
       }
     } catch (err) {
       if (err instanceof ConnectionRefused && err.code !== "not_built") failed.push(err.message);
@@ -177,11 +333,19 @@ async function runtimeIssues(entry: ConnectionEntry, catalog: ConnectionCatalog,
       if (dest && !hosts.includes(dest)) failed.push(`${n} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts ${n} ${[...hosts, dest].join(" ")}\`)`);
     }
   }
+  // an IMAP mailbox (T4-15): the app password must be allowed to go to its exact host:port — what the socket guard refuses, said ahead of time
+  const imap = c.reach.imap;
+  if (imap && absent.length === 0) {
+    const dest = socketDestination(imap.host, imap.port, imap.security === "tls").entry;
+    const hosts = Object.hasOwn(file.secrets, imap.secret) ? file.secrets[imap.secret]!.hosts : [];
+    if (!hosts.includes(dest)) failed.push(`${imap.secret} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts ${imap.secret} ${[...hosts, dest].join(" ")}\`)`);
+  }
   return { absent, failed };
 }
 
 /** One row. */
 export async function describeConnection(entry: ConnectionEntry, catalog: ConnectionCatalog, opts: DescribeOptions = {}): Promise<ConnectionRow> {
+  const checks = opts.checks ?? (await readCheckStamps(catalog.baseDir));
   const c = entry.connection;
   if (!c || entry.status === "failed") {
     // the file broke a rule: its name, its status and why — nothing it holds
@@ -197,7 +361,9 @@ export async function describeConnection(entry: ConnectionEntry, catalog: Connec
       variables: [],
       tools: [],
       offer_to_agents: false,
-      used_by: usersOf(entry.name, opts.scheduled ?? catalog.scheduled, catalog.entries),
+      fold: true,
+      used_by: usersOf(entry.name, false, opts.scheduled ?? catalog.scheduled, catalog.entries, opts.granted),
+      last_checked: checks.get(entry.name) ?? null,
     };
   }
   let status: ConnectionStatus = entry.status;
@@ -222,14 +388,17 @@ export async function describeConnection(entry: ConnectionEntry, catalog: Connec
       .map(([name, p]) => ({ name, group: p.group, mode: p.mode }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     offer_to_agents: c.offer_to_agents,
-    used_by: usersOf(c.name, opts.scheduled ?? catalog.scheduled, catalog.entries),
+    fold: c.fold,
+    used_by: usersOf(c.name, c.offer_to_agents, opts.scheduled ?? catalog.scheduled, catalog.entries, opts.granted),
+    last_checked: checks.get(c.name) ?? null,
   };
 }
 
 /** Every row, sorted by name. */
 export async function describeConnections(catalog: ConnectionCatalog, opts: DescribeOptions = {}): Promise<ConnectionRow[]> {
   const rows: ConnectionRow[] = [];
-  for (const e of [...catalog.entries].sort((a, b) => a.name.localeCompare(b.name))) rows.push(await describeConnection(e, catalog, opts));
+  const shared = { ...opts, checks: opts.checks ?? (await readCheckStamps(catalog.baseDir)) };
+  for (const e of [...catalog.entries].sort((a, b) => a.name.localeCompare(b.name))) rows.push(await describeConnection(e, catalog, shared));
   return rows;
 }
 
@@ -254,6 +423,7 @@ export async function describeConnectionDetail(name: string, catalog: Connection
             tools: Object.entries(unit.manifest.tools)
               .map(([n, t]) => ({ name: n, group: t.group }))
               .sort((a, b) => a.name.localeCompare(b.name)),
+            type: describeConnectionType(unit),
           }
         : null,
   };

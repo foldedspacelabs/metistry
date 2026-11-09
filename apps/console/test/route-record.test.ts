@@ -247,3 +247,28 @@ describe("consultRoute: every outcome of §5, and never the text", () => {
     }
   });
 });
+
+describe("a capture session in scope (X-84)", () => {
+  it("pins the record to the private tier and never consults the policy — even one that would answer", async () => {
+    const policy = answering({ outcome: "chosen", row: "r1", chosen: { operation: "answer", tier: "fast" } }, { tiers: ["fast", "default", "deep"] });
+    const rec = await consultRoute(input("what did they just decide?", { policy, captureSession: true }));
+    expect(rec.ok).toBe(true);
+    expect(rec.meta.served).toMatchObject({ kind: "model", tier: "private", capture_session: true });
+    expect(rec.meta.policy).toEqual({ outcome: "not_consulted", bounded_by: ["capture_session"] });
+    expect(rec.meta.agrees).toBeNull();
+    // the same text without the marker is consulted and recorded as the rules served it
+    const plain = await consultRoute(input("what did they just decide?", { policy }));
+    expect(plain.meta.served).toMatchObject({ kind: "model", tier: "default" });
+    expect(plain.meta.served).not.toHaveProperty("capture_session");
+    expect((plain.meta.policy as { outcome: string }).outcome).toBe("chosen");
+  });
+
+  it("a marked /note or fast path keeps its own tier-less record, with the marker beside the command that bounded it", async () => {
+    const note = await consultRoute(input("/note the vendor agreed", { captureSession: true }));
+    expect(note.meta.served).toMatchObject({ kind: "note", capture_session: true });
+    expect(note.meta.policy).toEqual({ outcome: "not_consulted", bounded_by: ["capture_session", "command:note"] });
+    const fast = await consultRoute(input("/status", { captureSession: true }));
+    expect(fast.meta.served).toMatchObject({ kind: "fast_path", capture_session: true });
+    expect((fast.meta.policy as { bounded_by: string[] }).bounded_by[0]).toBe("capture_session");
+  });
+});

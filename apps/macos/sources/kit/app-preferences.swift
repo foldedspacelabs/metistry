@@ -16,6 +16,15 @@
 //                              bundled inside it (Advanced; see below)
 //   pinnedItems.<instance_id>  the sidebar's Pinned area, per instance
 //
+// and TWO settings that front no file, because none can exist — plan §2.2
+// makes both device-local, "no CLI and no API":
+//
+//   anyAppShortcuts            the switch and keys of Settings ▸ Keyboard's
+//                              shortcuts in any app (T6-16)
+//   captureBar                 the floating capture bar's switch, which edge it
+//                              sits on and which display (screen-11 §8, T6-15;
+//                              docs/ops/client-api.md, "Device-local")
+//
 // plus Sparkle's own preferences, which Sparkle owns and reads itself, and one
 // FILE, not a default (owner ruling 19, 2026-09-27 — see `AppFileStore`
 // below): the offline capture queue, because unsent work is not a setting.
@@ -43,9 +52,139 @@ public enum AppPreference: String, CaseIterable, Sendable {
     /// pointer rather than configuration — the pinned object lives where it
     /// always did, and losing the list costs one drag (pinned-items.swift).
     case pinnedItemsPrefix = "pinnedItems"
+    /// Settings ▸ Keyboard's switch and the five keys under it (T6-16,
+    /// hotkeys.swift). The one entry here that is configuration rather than a
+    /// pointer, and deliberately so: plan §2.2 lists global hot keys as
+    /// device-local, "no CLI and no API", so there is no file the CLI owns
+    /// for them to front. Written only when the owner changes one.
+    case anyAppShortcuts
+    /// The floating capture bar: on or off, which edge, which display
+    /// (`CaptureBarPreferences` below). Written only when the owner changes
+    /// one of the three, so an untouched app's domain never holds it.
+    case captureBar
 
     /// The scaffold's key, read once and removed (see the file header).
     public static let legacyProductDirectory = "productDirectory"
+
+    /// The keys that are POINTERS: they say where something lives and front a
+    /// file or object that exists without them. `pinnedItemsPrefix` is a
+    /// pointer too, but a prefix rather than a key, so `isListed(_:)` handles it.
+    public static let pointers: Set<AppPreference> = [
+        .activeInstance, .recentInstances, .developerProductDirectory, .pinnedItemsPrefix,
+    ]
+
+    /// The keys that are DEVICE-LOCAL configuration: plan §2.2 gives them no
+    /// CLI and no API, so no file the CLI owns exists for them to front. The
+    /// next one joins this set — and only this set — on purpose.
+    public static let deviceLocal: Set<AppPreference> = [.anyAppShortcuts, .captureBar]
+
+    /// Whether `key` is one this app is allowed to write: a pointer, a
+    /// device-local key, or `pinnedItems.<instance_id>`. Anything else is
+    /// state the app has no business keeping.
+    public static func isListed(_ key: String) -> Bool {
+        let listed = pointers.union(deviceLocal)
+        if listed.contains(where: { $0 != .pinnedItemsPrefix && $0.rawValue == key }) { return true }
+        return key.hasPrefix(pinnedItemsPrefix.rawValue + ".")
+    }
+
+    /// The keys in `keys` that are in neither set. A test holds the app's
+    /// defaults domain to this being empty.
+    public static func unlisted(in keys: some Sequence<String>) -> [String] {
+        keys.filter { !isListed($0) }.sorted()
+    }
+}
+
+// MARK: - The capture bar's placement (screen-11 §8, T6-15)
+
+/// Which edge the bar rests on. Top and bottom are not offered — the menu bar
+/// owns the top, the Dock and the system's own recording pill the bottom
+/// (screen-11 §8) — so the type cannot hold them.
+public enum CaptureBarEdge: String, Codable, CaseIterable, Sendable, Identifiable {
+    case left, right
+
+    public var id: String { rawValue }
+
+    /// Title Case — the control's spoken name.
+    public var title: String {
+        switch self {
+        case .left: return "Left edge"
+        case .right: return "Right edge"
+        }
+    }
+}
+
+/// What Settings ▸ Live Capture stores and the bar (T8-5) reads: whether the
+/// surface is on at all, which edge, which display. Nothing here is a
+/// recording setting — the recorder has none this app could hold.
+public struct CaptureBarPlacement: Equatable, Sendable {
+    /// The bar is drawn at all. Distinct from the bridge being absent, which
+    /// hides the bar whatever this says.
+    public var enabled: Bool
+    public var edge: CaptureBarEdge
+    /// `NSScreen`'s display id, as the platform hands it in; nil is the main
+    /// display — a display that is unplugged falls back to it.
+    public var displayID: Int?
+
+    public init(enabled: Bool = true, edge: CaptureBarEdge = .right, displayID: Int? = nil) {
+        self.enabled = enabled
+        self.edge = edge
+        self.displayID = displayID
+    }
+
+    static let enabledKey = "enabled", edgeKey = "edge", displayKey = "display_id"
+
+    /// The defaults dictionary, readable by hand: `{enabled, edge, display_id?}`.
+    var dictionary: [String: Any] {
+        var d: [String: Any] = [Self.enabledKey: enabled, Self.edgeKey: edge.rawValue]
+        if let displayID { d[Self.displayKey] = displayID }
+        return d
+    }
+
+    init?(dictionary: [String: Any]?) {
+        guard let dictionary else { return nil }
+        self.init(
+            enabled: dictionary[Self.enabledKey] as? Bool ?? true,
+            edge: (dictionary[Self.edgeKey] as? String).flatMap(CaptureBarEdge.init(rawValue:)) ?? .right,
+            displayID: dictionary[Self.displayKey] as? Int
+        )
+    }
+}
+
+/// The one defaults key the bar's placement lives under. Read at launch,
+/// written on change; a missing or unreadable value is the default placement,
+/// never a crash.
+@MainActor
+@Observable
+public final class CaptureBarPreferences {
+    private let defaults: UserDefaults
+    public private(set) var placement: CaptureBarPlacement
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        placement = CaptureBarPlacement(dictionary: defaults.dictionary(forKey: AppPreference.captureBar.rawValue)) ?? CaptureBarPlacement()
+    }
+
+    public func setEnabled(_ on: Bool) {
+        guard placement.enabled != on else { return }
+        placement.enabled = on
+        persist()
+    }
+
+    public func setEdge(_ edge: CaptureBarEdge) {
+        guard placement.edge != edge else { return }
+        placement.edge = edge
+        persist()
+    }
+
+    public func setDisplay(_ id: Int?) {
+        guard placement.displayID != id else { return }
+        placement.displayID = id
+        persist()
+    }
+
+    private func persist() {
+        defaults.set(placement.dictionary, forKey: AppPreference.captureBar.rawValue)
+    }
 }
 
 /// The one approved exception to the rule above (owner ruling 19,

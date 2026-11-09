@@ -215,46 +215,97 @@ provider call is refused** — including the seed's only cloud template,
    a minor bump); and confirm the coordinator's widened scope (above). Held
    open, unmerged; X-44 and X-45 follow it.
 
+   **Ruled 2026-09-30:** option 1 — mount `.metistry/secrets.yaml` read-only
+   into the assistant and console containers (policy only; mirrors launchd's
+   `CONFIG_SECRETS`). The sandbox `CONFIG_SECRETS` change and core's API break
+   (minor bump) are approved. X-44 and X-45 are unblocked.
+
+   **Ruled again 2026-10-04:** option 1, as above.
+
 #### Agents, crews and routines
 
 2. **T3-8 (#413):** a routine's task is not run through `checkBrief`, so
    owner-authored text reaches a crew with a widened read grant unscanned. Scan
    it, or treat the owner's text as trusted? And is "the actor must be a crew"
    right?
+
+   **Ruled 2026-10-04:** the owner's text is trusted — a routine's task, written by the owner,
+   is not run through `checkBrief` (as built; T3-8, plan). The second half (the
+   actor must be a crew) got no separate answer and stands as built.
 3. **T3-10 (#412):** assistant- and routine-tier chat turns pass no
    `data_policy` check; the Knowledge Fold has the same gap. Intended?
+
+   **Ruled 2026-10-04:** fine for now, as built — noted for re-review if it causes
+   issues. No ticket.
 4. **X-10 (#433):** the read-back returns the owner's Revise/Decline words to
    the agent that asked (the decision-block convention). Confirm?
+
+   **Ruled 2026-10-04:** yes — confirmed.
 5. **T3-11 (#422):** nothing raises a routine suggestion yet. A deterministic
    routine or a brain tool? The shipped scope is schedule / paused / every /
    raise only.
+
+   **Ruled 2026-10-04:** a brain tool ("Brain tool, I think") raises a routine
+   suggestion, not a deterministic routine. No ticket carries it yet (T3-11,
+   plan).
 6. **X-11 (#425):** the assistant may now create today's `Journal/Brief|Standup|Plan`
    file before the routine runs, and the routine then skips the day as
    `user_owned`. Accept the skip (and rename the outcome), or should the
    routine fill its slots in that file? → X-51.
+
+   **Ruled 2026-10-04:** fill in the slots — the routine fills its marked slots in the
+   file the assistant created rather than skipping the day (X-51, plan).
 
 #### Connections, secrets and calendar
 
 7. **T4-9 (#415):** `connection_call` is capped at `propose` with Ask First the
    default at every autonomy level, where the research doc said deny. Confirm?
    F-5's table stores the kind while §2.6 says `action` — which wins?
+
+   **Ruled 2026-10-04:** Ask First, "the safer option" — confirmed as built. The
+   F-5-versus-§2.6 kind question got no separate answer and stands as built.
 8. **T4-12 (#408):** a private ICS feed carries its secret **in the URL**, which
    T4-2 refuses (`secret_in_url`). Add a secret-as-URL door to T4-2, or leave
    private feeds to EventKit, CalDAV and Google? Built meanwhile: public feeds
    only.
+
+   **Ruled 2026-09-30:** Google Calendar gets its own OAuth door (T4-14); no
+   secret-in-URL door is added to T4-2; private ICS feeds stay out.
+
+   **Ruled 2026-10-04:** "Add the door." **This reads against the 2026-09-30 ruling
+   above**, which added no secret-in-URL door. Held for the owner: until they
+   say which stands, the 2026-09-30 ruling stands as built (private ICS feeds
+   stay out) and no ticket is filed for a secret-as-URL door in T4-2.
 9. **T2-13 (#421):** `github_write` has no grantee-kind check — an owner door is
    neither `connection:` nor `agent:`. Add an owner-door grantee kind? → X-42
    (X-41 refuses the wrong grantees either way).
+
+   **Ruled 2026-10-04:** yes — an owner door is a grantee kind (X-42, plan).
 10. **Carried from W2:** the live console still builds no `ConnectionPool`
     (`main.ts`, open since #374), so proxied tools answer `not_available`
     outside tests — X-8 did not change that. Which ticket wires it? And a
     secret's last-used is still not stamped for syncs (T4-24).
+
+    **Ruled 2026-09-30:** the console's `ConnectionPool` wiring (`apps/console/src/main.ts`)
+    is folded into T4-10 as its first task.
+
+    **Ruled 2026-10-04:** the coordinator's choice; the owner: "adding the connection
+    pool seems necessary" — T4-10 (#473) wired it
+    (`apps/console/src/connections-proxy.ts`). The syncs' last-used stamp
+    (T4-24) is left to the coordinator and is not scheduled.
 11. **T4-13 (#430):** an iCloud account's `pNN-caldav` host needs two owner
     commands after the first sync (X-56 automates it), and no console route
     calls CalDAV's own-event write yet (X-57). Schedule both with W4's
     calendar work?
+
+    **Ruled 2026-10-04:** yes. W4's calendar work has shipped, so X-56 and X-57 stay
+    candidates until the coordinator places them beside the next calendar
+    tickets; neither is in W5 as composed.
 12. **T2-12 (#407):** may the owner door move a meeting someone else
     organised? → X-55.
+
+    **Ruled 2026-10-04:** yes, if the attendee may edit the event — "some calendar
+    events cannot be edited by attendees" (X-55, plan).
 
 #### Mac screens
 
@@ -262,28 +313,58 @@ provider call is refused** — including the seed's only cloud template,
     Fold's"? Who raises `draft_settle` (nothing does)? The fold has no
     `prose_id` for thumbs. Should Needs You's `resolve_conflict` door use the
     held-Undo model?
+
+    **Ruled 2026-10-04:** "Yes." Read as yes to the last part — Needs You's
+    `resolve_conflict` uses the held-Undo model; the conflict word and who raises
+    `draft_settle` got no separate answer and stand as built. **To confirm** at
+    the next checkpoint.
 14. **T6-4 (#409):** `collector_health` is not served — which door serves it,
     and to whom? → X-65.
+
+    **Ruled 2026-10-04:** the coordinator picks a reasonable home (X-65, plan).
 15. **T6-5 (#418):** Esc keeps the draft (C136) where screen 7 discards it;
     ⌘S / ⌘⌫ stay unbound (ruling 24); trust and per-run cost are not served;
     Permissions Edit only for connected agents. Confirm each.
+
+    **Ruled 2026-10-04:** keep the draft; key bindings deferred (⌘S / ⌘⌫ stay
+    unbound); trust and per-run cost are served and drawn; Permissions Edit for
+    connected agents only is confirmed. No ticket carries trust and per-run cost
+    yet (T6-5, plan).
 16. **T6-6 (#410):** §10.2 makes a product routine's task, actor and name
     editable, but no door writes them — add one, or keep them read-only? Also:
     no `stopped` field on the wire; Week scale only.
+
+    **Ruled 2026-10-04:** add the door — a product routine's task, actor and name
+    become editable through one — and "adjust the doors to accommodate design".
+    No ticket carries it yet (T6-6, plan).
 17. **T6-7 (#420):** Delegate has no route; Today does not open the card popover
     (that is T6-1a's files); `[` / `]` are unbound (C119). Which wave takes
     each?
+
+    **Ruled 2026-10-04:** the coordinator schedules each.
 18. **T6-10 (#446):** screen 12 draws no Spoken table (C121 applied). Confirm?
+
+    **Ruled 2026-10-04:** yes — confirmed.
 19. **T10-7 (#441):** Restore works only under a page's current name; commits
     from before a rename are view-only. Allow restore across renames (a
     server-side T10-5/T10-6 follow-up)?
+
+    **Ruled 2026-10-04:** "hard choice" — commits from before a rename stay view-only;
+    restore across renames is not built (T10-7, plan).
 20. **X-14 (#436):** Slipping is "owed to or by" (review-01) or "owed to
     someone" (screen-05 §15.6)? Someday lines still appear in Slipping, against
     §15.5; "carried three times" is built as `carried_days >= 3`. The grammar
     has no brackets inside `or`.
+
+    **Ruled 2026-10-04:** Owed tracks both directions — what the owner owes others and
+    what others owe the owner — with how long each has waited or when it is
+    due; the design accommodates that (X-63, plan). The Someday, carry-count and
+    grammar points got no separate answer and stand as built.
 21. **T6-11 (#449):** Connections → **Account**, and the interim panes
     (Connections, Secrets, Variables, Live Capture, Sessions) until T6-13a,
     T6-14 and T6-15. Confirm the name.
+
+    **Ruled 2026-10-04:** the names are fine — **Account** stands.
 
 #### Offline and the PWA
 
@@ -291,28 +372,54 @@ provider call is refused** — including the seed's only cloud template,
     survive on a device revoked while it was offline until its next `401` —
     accept?
 
+    **Ruled 2026-10-04:** "Sure" — Defer queues offline like Tick, and cached reads on a
+    device revoked while offline are accepted until its next `401`. No ticket
+    carries the offline Defer yet (T7-4, plan).
+
 #### Compute and the private tier
 
 23. **T8-6 (#426):** "on-machine" is the provider's self-declared
     `locality: on_machine` (the intent tier's trust model). Derive it from a
     loopback `base_url` instead? And the private tier has no fallback — it
     refuses. Confirm.
+
+    **Ruled 2026-10-04:** "Yes." Read literally, yes to both: "on-machine" is derived
+    from a loopback `base_url` rather than self-declared, and the private tier
+    keeps refusing with no fallback. The first half changes T8-6's trust model,
+    so it is **to be confirmed** before a ticket is filed; the refusal is
+    confirmed as built.
 24. **T4-19 (#423):** an exhausted subscription plan window comes back as a
     provider `429` that is retried blindly, not reported. Report it? And
     confirm the instance limit counting subscription calls (above).
+
+    **Ruled 2026-10-04:** report it — an exhausted plan window is reported, not retried
+    blindly — and the instance limit counting subscription calls is confirmed.
+    No ticket carries the report yet (T4-19, plan).
 25. **T9-3 (#432):** confirm the eval's built calls (above): no tuning mode,
     the `d08: true` marker, below-threshold = `moderate`, the threshold
     precedence and the rescued-turn formula.
+
+    **Ruled 2026-10-04:** ok — the eval's built calls stand.
 26. **The brain's eager surface** is at 4,597 of 4,600 tokens and 28 of 28
     tools. Move tools behind lazy discovery, or raise the ceiling? → X-49.
+
+    **Ruled 2026-10-04:** lazy discovery (X-49, plan), with the Context Mode review's
+    caveat (CM-7): a client that already defers MCP tools must not pay two
+    discovery hops.
 27. **X-45:** a one-character secret collides with every model body. The
     proposal refuses secrets below a minimum length when they are stored,
     rather than letting the redactor skip short values. Agree?
+
+    **Ruled 2026-10-04:** no — short values, even empty ones, are allowed. The store
+    refuses none, and the redactor skips a value too short to match safely, the
+    question's other option (X-45, plan).
 
 #### The recorder
 
 28. **T8-2a (#411):** does #253's "no capture UI" hold cover the record sheet
     and whoever holds the control token? (T8-2b and T8-5 build the bar.)
+
+    **Ruled 2026-09-30:** the hold is **lifted**. T8-3 and T8-5 proceed in W4.
 29. **T8-2b (#448):** the recorder's socket is not namespaced per instance and
     `METISTRY_LC_SOCKET` defaults under `/tmp` (→ X-72); transcripts land in
     `Inbox/`, not `Journal/Transcripts/` (→ X-73); `meta.capture_session` stays
@@ -320,16 +427,25 @@ provider call is refused** — including the seed's only cloud template,
     real-recording checklist in #448's body (TCC grants for Metistry
     Recorder).
 
+    **Ruled 2026-09-30:** `Journal/Transcripts/`, not `Inbox/`. X-73 resolves
+    that way; T8-4 and T8-7 read from there.
+
 #### Linear and GitHub
 
 30. **T2-13 (#421):** GitHub refuses self-approval, so an agent's PR opened
     under the owner's account cannot be approved by the owner (`400`, GitHub's
     words kept). Accept, or give agents their own GitHub account?
+
+    **Ruled 2026-10-04:** lean accept — the owner rarely approves agent-authored PRs
+    today — but sanity-check first whether co-authored commits or a GitHub agent
+    account fits better. No ticket; a check for the coordinator (T2-13, plan).
 31. **T4-25, T4-26 (#444, #445):** Send to Linear and `complete_issue` carry no
     server-side confirm token (the frozen single-call contract): create is
     idempotent by task key, complete is gated by the tool mode. Confirm? Race
     safety rests on Linear rejecting a duplicate `issueCreate.input.id`,
     unverified against real Linear — check it on the second instance?
+
+    **Ruled 2026-10-04:** yes, confirmed.
 
 #### Fixtures and tests
 
@@ -338,6 +454,355 @@ provider call is refused** — including the seed's only cloud template,
     W4 dispatches, or inside W4? X-24 (plan-tomorrow, four occurrences), X-29
     (stale Mac fixtures) and X-32 (push carries message text) are the ones the
     coordinator would take first.
+
+    **Ruled 2026-10-04:** the coordinator's choice — taken in W4 (the flake batch went
+    first).
+
+## W4 — the fourth build wave
+
+**Rulings of 2026-09-30** answer questions 1, 8, 10, 28 and 29 above (recorded
+inline where each question is asked). Candidates promoted into W4 and
+dispatched first: X-24, X-29, X-31, X-32, X-41. The other 27 questions from
+the W3 checkpoint remain open for the W4 checkpoint.
+
+**Autonomy:** the owner, 2026-09-30 — "make sure you have the autonomy to
+fully execute W4 without waiting." W4 runs with the coordinator's full
+autonomy. Owner-hand credentials (the Google OAuth client, an IMAP app
+password, the recorder's TCC grants) are supplied at test time, after the
+tickets land.
+
+### Calls the coordinator made in flight
+
+Each is the coordinator's call; **the owner to confirm** or reverse. Twenty-two
+tickets merged (PRs #460–#482 plus X-7's #437; #466 T9-4 is held by its plan
+gate); the questions each call left are in the table that follows.
+
+| Date | Where | The call |
+| --- | --- | --- |
+| 2026-09-30 | T6-13b (#481) | No route listed the connection types and no verb set a manifest field, so `GET /api/connections` gains `types` (and `provider_unit.type`) — a widening, no new route — and `connections add\|set --config KEY=VALUE` is validated against the type's manifest: an unknown key or a bad shape is refused, and a `secret`-kind field is refused outright, naming `secrets set`. T4-11 had built a `--config` of its own in parallel; the two were folded into this one validated flag (question Q-h). |
+| 2026-09-30 | T4-10 (#473) | The console's `.env` holds every dialled connection's secrets — a broader posture than question 10 asked about, taken so one sync mechanism (`secrets sync --to env`) serves every connection rather than one per transport. |
+| 2026-09-30 | T8-4 (#474) | `recording_review` is unreachable by the assistant — it is a Mac door, not a tool — and transcripts land under `Journal/Transcripts/`, per the Q29 ruling. |
+| 2026-09-30 | T8-5 (#475) | The recorder's control token is read from the login Keychain only (`metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`), never written by the app, and the bar talks to the recorder pinned to `127.0.0.1:7815`. The console-only sign-in guard takes two named exceptions for that host, each held by its own test. |
+| 2026-09-30 | T8-7 (#476) | `group_id` is served on `GET /api/proposals` and on the restore and rollback answers — existing routes widened, no new route — so a meeting's rows are one card wherever they are read. |
+| 2026-09-30 | T4-17 (#478) | A message card is inferred from headers only — sender, subject, recipients, thread — and its copy says so. Reading the body waits on §4.12's on-device reduction (the PoC-13 bar); §2.12's "with an excerpt" is the goal, not what ships (question Q-a). |
+| 2026-09-30 | T4-14 (#479) | Metistry ships no Google client id yet: each owner brings their own through `--client-id-secret` until the maintainer's client exists, and the connection-type manifest schema refuses a `client_secret` field, so a client secret can never be a config value (question Q-e). |
+| 2026-09-30 | T4-11 (#480) | A one-release compatibility shim: `METISTRY_GITHUB_TOKEN` and `METISTRY_DEVIN_API_KEY` and the `targets/` manifests still load, but only when no connection of that name exists — a connection wins (D4). `local-crew` stays a target. `aws-costs` (SigV4) and `eventkit-calendar` (a bridge token) stay outside connections: neither is a bearer the egress guard can fill. |
+| 2026-09-30 | T6-16 (#477) | The any-app shortcuts are device-local: `anyAppShortcuts` in `UserDefaults`, the first configuration key in a store that until now held only three pointers. T6-15 put `captureBar` beside it (question Q-f). |
+| 2026-09-30 | T6-15 (#482) | Kept recordings are listed through `GET /api/knowledge/pages?prefix=Journal/Transcripts` plus one read per id — no list route was added — capped at 100. A route is candidate X-81. |
+| 2026-09-30 | T7-6 (#465) | Screen 18 says *Secrets: Mac-only* and §2.3 says a phone changes nothing that widens the boundary, so the phone reads secret **names** only — never a value, never a grant. |
+| 2026-09-30 | T6-14 (#467) | Screen 19 offers *rotate* only, and M7 says the app never mints: the pane has no Mint control. The wizard's example variables `standup_time` and `timezone` are refused by the key-shape check as ruling 2 requires — an example is not an exemption. |
+| 2026-09-30 | T6-12…T6-16, T7-6 | Merge order for the Settings panes: the first approved pane merges, every other rebases onto it. No pane waits for another's review. |
+| 2026-09-30 | W4 dispatch | The flake batch went first (X-24, X-29, X-31, X-32, X-41), answering W3 question 32, with X-29 before X-31 so the recorder's clock pin landed on fixtures that already matched main. |
+
+### Open for the owner at the W4 checkpoint
+
+Questions, not decisions: each says what is built meanwhile. A candidate that
+waits on one names it by letter.
+
+| # | The question | What is built meanwhile | Needed before |
+| --- | --- | --- | --- |
+| Q-a | §2.12 says a message card is "inferred with an excerpt", but T4-17 ships it header-only. Change the wording, or keep the excerpt as the goal behind §4.12's on-device reduction? **Ruled 2026-10-04:** keep the excerpt and build it (T4-17, plan). | Header-only inference; the card's copy says so. | The §2.12 wording, or the §4.12 reduction ticket |
+| Q-b | Screen 11 §4, "staying on this Mac": `POST /message` carries no session-turn marker, so an Ask-panel turn inside a capture session cannot be held to the private tier. Today the panel says so honestly rather than faking it. Add the field? **Ruled 2026-10-04:** add the field (X-84). | No marker; the Ask panel is not drawn as private. | X-84 |
+| Q-c | A pre-existing private-tier leak: `seed/queries/activity_feed.yaml`'s capture branch derives `subject` from the note's first line, so a transcript's first spoken line is servable through `queries_run` on any tier — unlike `recording_review`, which the assistant cannot reach. Gate the branch, or take the subject from the title only? **Ruled 2026-10-04:** "take it from the subject only" — "subject" read as the question's "title only" option; no gate (X-83). | The leak stands, documented. | X-83 |
+| Q-d | A capture proposal's payload carries the full note text (T8-2b), so a transcript's whole text sits on its request row. Acceptable under the private-tier rule, or must the row carry a reference only? **Ruled 2026-10-04:** a reference only (T8-2b, plan). | Full text on the row. | The T8-2b follow-up, if any |
+| Q-e | May Metistry ship a Desktop OAuth client secret for Google? Google may require it at token exchange even with PKCE. **Ruled 2026-10-04:** yes (T4-14, plan). | Owners bring their own client; the manifest schema refuses a `client_secret`. | The maintainer's Google client |
+| Q-f | Device-local preferences (`anyAppShortcuts`, `captureBar`) live in `UserDefaults`. Accept the store, or move them to a device-local file? **Ruled 2026-10-04:** the store is fine (X-91). | `UserDefaults`, tested to hold those two keys beside the three pointers. | X-91 |
+| Q-g | T9-4 (#466): run `metistry-eval complexity` and accept, or hold? **Ruled 2026-10-04:** run it, then accept (T9-4, plan). | Open, rebased, waiting on the eval's bar. | The W4 release |
+| Q-h | `--config`: T6-13b's manifest-validated flag replaced T4-11's. Confirm the one flag and its refusals (unknown key, bad shape, secret kind). **Ruled 2026-10-04:** confirmed. | The validated flag. | — |
+| Q-i | The connections `types` payload also carries `description`, `provides`, `capabilities`, `tools` and per-field help — more than the ruling's literal field list (no secrets). Accept? **Ruled 2026-10-04:** accepted. | The wider payload is served. | — |
+
+The owner answered these and the 27 carried W3 questions on 2026-10-04; each
+answer is recorded where its question is asked, and *Rulings made by the
+owner, recorded at W5 (2026-10-04)* below says what they change.
+
+## Ruled 2026-09-28 — the phone, from the website
+
+The metistry.ai Download page (`foldedspacelabs/metistry-website`) describes a
+phone setup the product did not have: Settings ▸ Devices ▸ Add a Phone, a QR code,
+a passkey removable from Devices, and a step for reaching the Mac from outside.
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 1 | Build the Download page's phone flow, or cut it from the site | **Build it.** Minting stays on the Mac (a CLI verb, M19), never an HTTP route; the QR is CoreImage's, no dependency; removing a device revokes its passkey. | §2.22; X-75…X-79 |
+| 2 | Reaching the Mac from outside the home (the site's step 1) | Research an **opt-in relay**: default-deny, signalling only (never pays for bandwidth), serverless preferred; Tailscale, port forwarding and commercial tunnels stay documented alternatives. | plan §5; `docs/research/2026-09-28-reaching-your-mac-remotely.md` — **superseded 2026-09-30**, below |
+
+**Still open** (§2.22): a terminal QR (an encoder dependency); whether the designer
+draws Settings ▸ Devices and the sheet before X-77; the site's step 1 and step 3–4
+wording (X-79).
+
+## Ruled 2026-09-30 — remote access is the owner's choice
+
+The owner read the 2026-09-28 research (Tailscale recommended; an opt-in FSL
+rendezvous relay designed) and ruled:
+
+> "I'm not sure I like any of the designs, to be honest. I don't want to pay to
+> host a service that scales up in cost as user counts grow when I'm not
+> charging anything for the app."
+>
+> "Maybe the better option is to just ask the user, at setup time, what they
+> prefer and then support a number of options they can configure easily. None
+> (local only, default option), Tailscale, Cloudflare tunnel, ngrok, and port
+> forwarding."
+>
+> "I'd want to make it as easy as possible to set these things up... like they
+> create an account with the service they want to use and then OAuth sign into
+> it from Metistry and it gets configured and exposed automatically."
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 1 | An FSL-run relay (rendezvous, SNI passthrough or TURN) | **Rejected:** an FSL-run service whose cost grows with users, for a free app. Recorded under *Considered and rejected*. | research §6 |
+| 2 | How the phone reaches the Mac | **The owner's choice**, asked in the setup wizard and changeable in Settings ▸ Remote Access: None (default), Tailscale, Cloudflare Tunnel, ngrok, port forwarding. Each as close to *sign in, authorize, done* as its provider allows; every app act has a `metistry remote` verb (M20). | plan §2.23; X-105…X-110 |
+| 3 | The two gaps the research found | **Fixed first, blocking every provider:** a proxy-only console listener where the local owner token is never honoured (X-103), and a per-request passkey rpID (X-104). A console reachable from the internet also gets rate limits and headers (X-111) before Cloudflare, ngrok or port forwarding ships. | plan §2.23; X-103, X-104, X-111 |
+| 4 | Order | Recommended, for the owner to confirm when scheduling: X-103, X-104 → None and Tailscale (X-105…X-107) → Cloudflare Tunnel, then ngrok (X-111, X-108, X-109) → port forwarding (X-110). | §3.2 *Candidates* |
+| 5 | Add a Phone's refusals | The loopback and "doesn't answer" refusals point at Settings ▸ Remote Access instead of the research file. | plan §2.22 |
+
+What the research found on "OAuth sign into it": only **Cloudflare** offers a
+third-party OAuth flow (self-managed OAuth clients with PKCE, June 2026) — to be
+proven hands-on (R-1). **Tailscale**'s sign-in is its own app's, which needs no
+credential in Metistry. **ngrok** has no OAuth or device flow: the owner pastes
+the authtoken. **Port forwarding** needs no account but a DDNS token.
+
+**Still open** after this ruling — see the follow-up ruling below, which
+answers the `cloudflared` question.
+
+### Follow-up, 2026-09-30 — Funnel recommended, zrok added, provider tools bundled
+
+The owner read the revision and asked for more: *"Yes, let's add those. If
+there are things we can do to make it easier on the user, let's do that as
+well. That includes bundling/installing the cloudflared, tailscale tunnel app,
+etc."*
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 6 | Tailscale Funnel | **Recommended.** A mode of the Tailscale provider — *Any browser (Funnel)*, the default when Tailscale is chosen, beside *Only my devices (tailnet)*. The phone needs no Tailscale app. Funnel is public, so it is held to the internet-facing rules: blocked by X-103 and X-111 like the tunnels. | plan §2.23; X-106 |
+| 7 | zrok | **Added** as a sixth choice (open source; free hosted plan; self-hostable). | plan §2.23; X-113 |
+| 8 | Provider tools | **Metistry may bundle or install them.** Answers the earlier open question on `cloudflared`. Each tool is pinned, checksummed and signed like the runtime pack, fetched when the owner picks that provider, and moved forward by `metistry update`. | plan §2.23; X-112 |
+| 9 | Order | Fixes → None and Tailscale (Funnel, tailnet) → Cloudflare Tunnel → zrok → ngrok → port forwarding. | §3.2 *Candidates* |
+| 10 | One guided flow | The wizard's *Set Up Remote Access* recommends Funnel, opens the provider's sign-up or sign-in, detects completion, proves the phone can reach the Mac, and only then offers Add a Phone. | plan §2.23; X-107, X-114 |
+
+**Still open** (plan §2.23): the Tailscale node — a bundled userspace
+`tailscaled` (recommended) or the owner's Tailscale app only; dependencies for
+port forwarding (NAT-PMP/PCP/UPnP and ACME — hand-roll, approve packages, or
+run Caddy); the ngrok route — the `@ngrok/ngrok` SDK (a dependency; ngrok's
+written consent may be needed) or the owner's own agent; registering FSL's public Cloudflare OAuth client (permanent, needs
+domain verification on `metistry.ai`); the free ngrok and zrok warning pages
+if they break a Home Screen app; and when to schedule X-103…X-114.
+
+### Second follow-up, 2026-09-30 — the Metistry Relay, opt-in and capped
+
+The owner asked for one FSL-hosted provider after Tailscale Funnel, for owners
+who will not make a Tailscale account. This **supersedes ruling 1 above only for
+this capped design**; the WebRTC rendezvous relay, an uncapped SNI relay and
+FSL-paid TURN stay rejected.
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 11 | An FSL-hosted relay | **Yes, opt-in and capped:** an SNI-routing TLS-passthrough relay (it never decrypts) on one Lightsail instance, the Mac dialling out and terminating TLS with its own certificate for `<id>.metistry.app`; a control plane (API Gateway + Lambda + DynamoDB, CDK) for registration, revocable tokens, usage and an ACME DNS-01 helper in the `metistry.app` Route 53 zone. | plan §2.24; X-115…X-117 |
+| 12 | Hosting | **AWS only** — no other hosting providers. | plan §2.24 |
+| 13 | Cost guard | **A per-host bandwidth limit** (default 5 GB relayed a month), a per-host throttle, a global cap at ~90% of the bundle (≈ 0.9 TB relayed on the $7/2 TB plan, since Lightsail counts both directions), a $10 budget alert and registration limits — the bill stays flat; growth is a deliberate step. | plan §2.24 |
+| 14 | Abuse and cookies | **Agreed:** `metistry.app` on the Public Suffix List, opt-in only, revocable tokens, a per-id kill switch, only registered and active names forwarded, an abuse contact; blocked by X-103 and X-111 like every public provider. | plan §2.24; X-118 |
+| 15 | Order | Fixes → None + Tailscale Funnel → **Metistry Relay** → Cloudflare Tunnel → zrok → ngrok → port forwarding. Funnel stays first: it costs FSL nothing and is end to end without an FSL service. | §3.2 *Candidates* |
+
+**Still open** (plan §2.24): where the CDK lives (ruled below, #24); the relay component (frp or HAProxy + a tunnel client — the PoC
+decides); the cap and throttle numbers after the PoC; when to file the PSL entry
+(permanent); and the ACME dependency question, which now gates both port
+forwarding and the relay.
+
+### Third follow-up, 2026-09-30 — relay sub-paths rejected; owner names under `u.`
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 16 | Relay sub-paths with one shared certificate (`metistry.app/user/<id>`) | **Rejected.** Routing by path means the relay decrypts, so FSL could read every owner's traffic; a shared certificate puts one private key on every Mac (any owner could impersonate the site, and a compromised key must be revoked within 24 hours under the CA/B Forum Baseline Requirements); one origin shares cookies, storage, service workers and the passkey rpID across owners. A wildcard certificate on the relay has the same decryption problem. | research §6; plan §2.24 |
+| 17 | Owner hostnames | **`<id>.u.metistry.app`** — wildcard `*.u.metistry.app` to the relay; the ACME helper writes only `_acme-challenge.<id>.u.metistry.app`. | plan §2.24; X-116 |
+| 18 | PSL entry | For **`u.metistry.app`**, not the apex: each `<id>.u.metistry.app` is its own registrable domain, which still gives each owner Let's Encrypt's 50-certificates-a-week limit. | X-118 |
+| 19 | Disclosure | A plain page at `metistry.app` (and `u.metistry.app`) says owner names are run by owners, not FSL, with an abuse link — replacing the apex's 301 to metistry.ai **when the relay ships**, as a metistry-website infra follow-up. No banner can be injected: the traffic is end-to-end encrypted, by design. | plan §2.24 |
+
+### Fourth follow-up, 2026-09-30 — keeping the relay Metistry-only
+
+The owner asked how to ensure only Metistry is served at `<id>.u.metistry.app`,
+accepted that it cannot be proven cryptographically (the traffic is end to end
+and the owner controls the Mac), and approved a layered design.
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 20 | Device-only addresses — the primary control | Each phone gets its own unguessable label, `<label>.<id>.u.metistry.app`, registered by the Mac; the relay forwards only registered labels and refuses the bare name; at most 10 per instance; Remove in Devices revokes it. One wildcard certificate per Mac; the passkey rpID is `<id>.u.metistry.app` for all labels (checked against HTML's registrable-suffix rule; needs the PSL rule to be plain `u.metistry.app`, never `*.u.metistry.app`); per-instance DNS records, because a global wildcard stops matching beside the ACME TXT record. | plan §2.24; X-119, X-116, X-117 |
+| 21 | Behaviour limits at the relay | Distinct client IPs per day, concurrent connections, the bandwidth allowance and a probation period for new instances — numbers from the PoC. | X-115 |
+| 22 | Genuine-app gate | The relay client is bundled and hard-wired to the proxy listener; App Attest at registration is an extra layer if it works for a Developer ID app (R-8), never a dependency; forks and source builds use the other providers. | X-117, X-120 |
+| 23 | Surface and detection | Through the proxy listener only the sign-in and enrolment bootstrap answers without a session; no public share links; CT monitoring, an abuse contact, terms of use (Metistry only), a per-instance kill switch, PSL isolation. | X-111, X-116 |
+
+### Fifth follow-up, 2026-09-30 — where the relay's code lives
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 24 | The relay's server-side code | A new **private** repository, `foldedspacelabs/metistry-relay`: the CDK (Lightsail, API Gateway, Lambda, DynamoDB, Route 53 under `metistry.app`), the control plane, and operations — abuse thresholds and detection, CT monitoring, budget alarms, runbooks — with its own deploy pipeline and OIDC role, so a website deploy can never touch the relay. Not `metistry` or `metistry-website`. | plan §2.24; X-115, X-116 |
+| 25 | What stays public | The relay **client and protocol** (in this repo; the client ships in the open-source app) and the relay's **forwarding configuration** (`ops/relay/` here — the SNI-routing, never-decrypting frp or HAProxy setup), deployed verbatim by the private repo, so owners can verify that FSL cannot read their traffic. | plan §2.24; X-115, X-117 |
+| 26 | The `metistry.app` zone | When the relay ships, `metistry-relay` owns every record under `metistry.app` (apex, `www`, `u.`) and serves the explanatory page; metistry-website drops its apex/`www` redirect distribution. Until then the website repo keeps the redirect. | plan §2.24 |
+
+## Rulings made by the owner, recorded at W5 (2026-10-04)
+
+The owner answered on 2026-10-04 and held W5 until their usage limit reset; the
+go came on 2026-10-18 ("kick off the next phase of development"). The
+checkpoint questions are answered inline above (W3 1–32, W4 Q-a…Q-i); this
+section records the rest, and what each answer changes.
+
+### Readings to confirm, and rulings no ticket carries yet
+
+- **Q8 conflicts.** "Add the door" (2026-10-04) reads against the 2026-09-30
+  ruling (no secret-in-URL door). The 2026-09-30 ruling stands as built until
+  the owner says which they meant.
+- **Q13 and Q23** were answered with a single "Yes" to a question with more than
+  one part; the reading recorded inline is the coordinator's, for the owner to
+  confirm. Q23's reading would change T8-6's trust model, so nothing is built
+  on it yet.
+- **Rulings with work and no ticket:** Q5 (T3-11), Q15 (T6-5), Q16 (T6-6), Q22
+  (T7-4), Q24 (T4-19), Q-a (T4-17), Q-d (T8-2b) and Q-e (T4-14). Each carries a
+  ruling paragraph in the plan under the ticket it amends; the tickets are
+  filed as candidates at the next housekeeping.
+
+### Research reviews
+
+| PR | Question | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| #400 call.md | 1. Does a live lookup leave the Mac? | **Allow the remote call.** "Staying on this Mac" is about the recording itself; Metistry may use what it has to answer. | LC-3 (proposed in the review; not in the plan) |
+| #400 | 2. Who may initiate a lookup? | **Both** the owner and the other side, **gated**: a card ("*name* asked about X — help?") the owner approves or ignores. | LC-2, LC-3 |
+| #400 | 3. Where do findings live? | The findings panel is **excluded from capture**; findings survive into the knowledge — the meeting notes and, possibly, the transcript. | LC-4, LC-5 |
+| #400 | The owner's idea | "What happened earlier in this meeting?" questions, as Gemini offers in Meet — complementary, and needs the meeting parsed as it happens. | recorded; no ticket |
+| #401 atomic.chat | 1. *Allow this exact call from now on*? | **Not the exact call** — arguments and times change between runs, so its hash rarely repeats. Allowing the same **shape** of call is the practical form. | no ticket yet |
+| #401 | 2. Prose streaming in v1? | **Leave it out.** | CH-2's stage line is the substitute |
+| #401 | 3. A named preset for a local OpenAI-compatible app? | **Yes**, a preset, to keep it easy for the owner. | no ticket yet |
+| #402 Structured | 1. Should a task ever reach the calendar? | An **opt-in owner feature** (by default nothing is added), **low priority, deferred**. | no ticket |
+| #402 | 2. A *won't do* in Close the Day? | **Yes** — a won't-do state, so the owner can clean up older lines. | no ticket yet |
+| #402 | 3. The unclosed day: a line or nothing? | **Add the line** (TD-2), **flagged for the owner's sanity-check of the UI** when it is built. | TD-2 (proposed) |
+| #485 Hindsight | The verbs | Retain, recall and reflect: the owner likes the simplicity for onboarding and education. | recorded |
+| #485 | 1. Push anything into an external agent's context? | **Evaluate a push** so agents get key information up front and discover less — overlapping the Context Mode review. | X-128, X-129 |
+| #485 | 2. How many agents should `connect` reach? | A **harness registry built for growth**; support the main ones now, grow it later. | X-133, X-129 |
+| #485 | 3. Reconnect after a revoke? | **Allow it** — easier on an owner who revoked by accident. | X-134 |
+| #489 Mods | 1. Terminal or the Desktop Code tab? | The coordinator runs mostly in the Desktop Code tab, and users will use the CLI too: the MD-3 pane is worth building. | MD-3, after MD-2 |
+| #489 | 2. Are `.claude/settings.json` and `ops/claude/` human-change paths? | **Yes** (invariant 2): agents never edit them, and a PR touching them stays open for the owner. The owner asked for the implications and agreed with the recommendation. | convention + review (the free tier has no code-owner rule) |
+| #489 | 3. The commit trailer: check or write? | A **`commit-msg` check now** (MD-1); writing it through `attribution.text` is a **spike** (MD-2). | MD-1, MD-2 |
+| #489 | 4. A Claude-Code-only, early-access surface in the product? | **Worth trying** — "being at the leading edge is a good thing". MD-4 and MD-6 stay, behind the MD-2 spike. | MD-4, MD-6 |
+| #489 | 5. Spike now? | **Yes.** | MD-2 |
+| #490 Context Mode | Mods instead of plugins? | **In addition**: the plugin's SessionStart hook delivers the briefing now; a mod is the display and live layer later; no Gateway. | X-129 |
+| #490 | 1. What may a briefing contain? | **Handles plus owner-written text**; anything the assistant wrote appears as a handle only. | X-128 |
+| #490 | 2. Default on, or opt-in? | **On by default** for every agent with a read grant, **opt-out per agent** — overriding the review's opt-in: "The value of Metistry is getting the right knowledge to the right place... if the user has to opt-in, that's a core feature missing." | X-129 |
+| #490 | 3. Captured sessions before approval? | **Before the fold, the same project only; after it, any agent** the grant allows. | X-131 |
+| #490 | 4. Fold what an upstream connection returns? | **Allow** (CM-6). | X-132 |
+| #492 Routr | — | **Open** — the owner is deciding on a broader routing refactor; routing tickets are not scheduled in W5. | stays an open research PR |
+
+### M7 reversed — a self-managing instance
+
+> "It's too much cognitive load for the user, so I'd prefer to improve the
+> overall secret and config handling stance for the app."
+>
+> "Let's fully manage and simplify the user experience. Reversing M7 is fine to
+> improve the UX."
+
+**M7's "the app never mints" is reversed** (it shaped T6-14's rotate-only pane,
+#467). The app may mint, and secrets and config are managed through the UI: the
+owner never mints, updates, merges or cleans up a secret, a Keychain item or
+`.env` by hand. The stance, for a design note in W5 — *a self-managing
+instance*, which the owner confirms: **configured means minted** (every
+install-local token generated by `up` or the app); **`.env` derived** from
+`.metistry/*.yaml` and the Keychain, never hand-edited; **one owner surface** in
+Settings, the app driving the CLI door through invariant 10's enumerated
+actions; doctor rows carry a **fix-it action** (generalising `open_secrets`);
+**migrations finish themselves** (`purge-shared` inside `update`). The design
+note rewrites §2.2's M7 row; until then the plan carries the ruling on T6-14
+and X-80 (widened: `up` mints all three recorder tokens), and X-124 is the
+derived `.env`.
+
+### `metistry doctor` repairs
+
+> "… regardless of the problems found, the user only needs to run
+> `metistry doctor` to fix it and get the instance working correctly."
+
+Doctor's core purpose is **repair**, not a status pane. The proposed contract,
+which the owner confirms in the same design note: every check is classified
+**fixable**, **your hand** or **informational**; plain `doctor` fixes by default
+and re-checks; `--check` is read-only, for `update`, CI and the checkpoint; a
+destructive fix previews and asks first; every fix is audited like `up`'s
+steps; one pass, no loop; the Status window gains **Fix All**, an invariant-10
+action. The false alarms of 2026-10-04 come first — the post-update doctor's 16
+schedule rows before the console's first tick, and the recorder socket raced at
+`up` (X-122) — with X-48, so no fix is applied to a false reading. Tickets:
+X-122 (W5), X-123 and X-125 (candidates, behind the design note).
+
+### W5's composition
+
+Assigned in `design-build-plan.md` §3.2 on the owner's go. **Tranche 1:** the
+remote-access fixes X-103, X-104, X-111; Add a Phone's X-75, X-76, X-78; and
+X-88, X-80, X-85, X-102, X-101, X-87. **Tranche 2:** X-105, X-112, X-106 (Tailscale),
+X-77, X-79, X-114 and the guided flow X-107. **The W4 follow-ups:** X-82, X-86,
+X-90…X-100, and X-83, X-84 (Q-c, Q-b). **Ruled 2026-10-04:** X-121 (the
+complexity fixtures, Q-g), X-122 (doctor's grace), X-126 (the policy-mirror
+flake), X-127 (the terminal readers). X-1 stays. **Not in W5:** the routing work
+(T9-4 keeps its eval gate; nothing from #492) and the Relay, Cloudflare Tunnel,
+zrok, ngrok and port-forwarding adapters.
+
+**Coordinator's calls (2026-10-18), the owner to confirm:** X-87 widened to M —
+every collector gains a cheap, local-first `check()`, merged into doctor's
+per-collector row, with one strict CI check. The second #456 flake (Linear's
+"closed or given to someone else") is X-26's, a candidate not in W5, so X-126
+takes the policy-mirror flake only. X-127 gives the hidden one-line reader to
+the token only: a request body and an agent prompt are neither secret nor one
+line, so in a terminal they prompt on stderr and keep the echo. **To confirm:**
+X-121 amends `docs/ops/dynamic-router.md` §7.2's "the owner's, never the
+product's" for generated fixtures — the coordinator's proposal, reading Q-g's
+"Run it and then accept" as covering it, not an owner approval of the
+amendment itself.
+
+## W5 — the fifth build wave
+
+The go came 2026-10-18; tranche 1, tranche 2 and the W4 follow-ups ran
+2026-10-18/19 (PRs #536–#555). What the builders and reviewers found outside
+their tickets is specified as candidates X-135…X-161 (plan §3.3, *Follow-ups
+found in W5*). What needs the owner's word is below.
+
+### Open for the owner at the W5 checkpoint
+
+Questions, not decisions: each names its two readings and says what is built
+meanwhile. Nothing here changes a ruling already recorded above. A candidate
+that waits on one names it by number.
+
+| # | The question | What is built meanwhile | Needed before |
+| --- | --- | --- | --- |
+| 1 | **X-134, a reconnect after a revoke.** The ticket says a reconnect mints a **new id** (`claude-code-2`; the revoked id is never minted again, so old proposals keep their provenance). #516 (HS-7, the 2026-10-04 "allow reconnect after an accidental revoke") **revives the same id in place**. Which? | #547 shipped the ruling-independent half (`--remove` takes only `connect`'s own entry, Cursor and OpenCode too); X-134 is `blocked`. X-147 assumes revive-in-place and closes with no change under new-id. | X-134's second half; X-147 |
+| 2 | **X-48, doctor's sandbox row.** The spec's "read the running argv" cannot work — `sandbox-exec` execs into its target (reproduced). Coordinator's call: the supervisor reports the **spawned profile** in its status (an additive `ChildStatus` field) and doctor reads it; S widened to M; design note #505's row-86 trigger changes. (a) **Confirm** the call; (b) another reading of the row. | #542 built the call. | The design note's row 86 |
+| 3 | **X-87 widened to M.** Every collector gained a cheap, local-first `check()`, merged into doctor's per-collector row, with one strict CI check — wider than "the calendar collectors". (a) **Confirm**; (b) narrow back to the calendar collectors and file the rest as a candidate. | #507 built the wide reading. | — |
+| 4 | **X-80, three recorder tokens.** Under M7-reversed, `up` and `secrets mint` mint all three recorder tokens (control, bridge, inbox owner token) when the live-capture bridge is configured and one is missing. (a) **Confirm**; (b) the control token only, the other two the owner's hand. | Built as (a). | — |
+| 5 | **The CLI writes `owner_tokens`.** X-80's inbox token lands as an `owner_tokens` row written by the CLI through core's `mintOwnerToken` (`registerCaptureOwnerToken`, `up`) — a CLI that opens a database session to write a credential row, beside invariant 3's "one read path". (a) **Accept**: mint in core, the CLI opens the session, the row is the only way to label a token; (b) route the mint through the console (a new owner-reach route, invariant 10). | (a), soft: a database that does not answer is a note and the next `up` records the row. | — |
+| 6 | **X-88, "isolation met, ten-green not met".** The workspace script isolates each package's database; its *ten consecutive green runs* bar was not met at merge (the cross-suite collisions were X-25's, which later reached ten green with default parallelism, #543). (a) **Accept** X-88 as merged on isolation; (b) hold the ticket open until the bar is met on `main`. | Merged. X-139, X-140 take the remaining shared-row suites. | — |
+| 7 | **X-121's pass rule.** The coordinator amended `docs/ops/dynamic-router.md` §7.2's "the owner's, never the product's" for **generated** fixtures, reading Q-g's "run it and then accept" as covering it. (a) **Confirm** the amendment; (b) the owner's fixtures only — the generated set is a dev aid, not the gate. | The amendment is in; the eval gate reads the generated set. | T9-4's acceptance |
+| 8 | **X-82, wiring in-PR.** Beyond decoding `group_id`, #504 wired `MeetingGroup.cards` into `NeedsYouModel` (a meeting is one card on screen) inside X-82's PR. (a) **Accept** the wider PR; (b) it should have been its own ticket — note it, nothing to undo. | Built. | — |
+| 9 | **CM-3/CM-4's exposure.** X-130/X-131 serve "last time in this repository" as a **named query** (`recent_sessions`), unfolded sessions to the same project only. The review asked for (a) a **console route** serving **folded sessions only**, or (b) the named query as built, same-project-before-the-fold per Context Mode Q3. Which surface, and does an unfolded session ever leave the query? | (b), per the 2026-10-04 Q3 ruling. | X-128's second release |
+| 10 | **HS-7, a revived connection's grants.** When a revoked id is revived in place (#516), (a) it comes back **default-deny** — its grants emptied until the owner re-approves — or (b) it comes back **with the grants it had**, the revoke having been accidental. | (b), as #516 built it. | X-134's second half |
+| 11 | **#519 (X-98), cancel reaches the process.** `ProcessCommandRunner` now terminates its child whenever the calling task is cancelled — every CLI verb the app runs, not only a download. (a) **Accept** for every verb; (b) **opt-in** per verb: only a download is cancellable, a load, an install or `up` runs to its end. | (a). | — |
+| 12 | **SE-0461.** Swift's "nonisolated async functions run on the caller's actor" changes where the Mac package's async helpers execute. (a) **Adopt** the upcoming-feature flag now in `apps/macos/Package.swift` and fix what it surfaces; (b) **wait** for the toolchain default and take it with the Xcode that carries it. | (b): no flag set. | The next Xcode major |
+| 13 | **X-84, what "open session" means.** The console learns of a capture session only at transcript delivery, so #525 defines an open session as **not seen ended** — fails safe; a positive start record would widen a route. (a) **Confirm**; (b) a start record (a new door) so the Ask panel can say "in a session" positively. | (a). | — |
+| 14 | **W3 Q8, held.** "Add the door" (2026-10-04) reads against the 2026-09-30 ruling (no secret-in-URL door; private ICS feeds carry the secret in the URL). (a) the **2026-09-30** ruling stands, private feeds wait on CalDAV/EventKit; (b) **add** a secret-as-URL door in T4-2 with its misuse tests. | (a), as built. | T4-12's private feeds |
+| 15 | **Q13 and Q23, the coordinator's readings.** Each was a single "Yes" to a multi-part question; the readings recorded inline are the coordinator's. Q23's reading would change T8-6's trust model. (a) **Confirm** both readings; (b) answer each part. | Nothing is built on Q23's reading. | T8-6's follow-up |
+| 16 | **X-105, a hand-set origin is dropped.** `remote: none` (the default) drops a hand-set `METISTRY_ORIGIN` at the next `up`. A second instance reached through a hand-run `tailscale serve` loses its origin, and its passkeys are stranded until X-106 (Tailscale as a provider) lands. (a) **Ship** as built with a release note; (b) `up` **carries** a hand-set origin until a provider owns it. | (a); X-106 is dispatched once #551 is in, so the window is about one release. | The next release's notes |
+| 17 | **X-124 (a): adopt-on-edit.** The next `up` after a hand edit writes an edited secret-shaped line **into the Keychain without asking** (design §2.2's "the file is derived"). (a) **Accept**: the hand edit is the owner's and the Keychain is where it belongs; (b) doctor's `env` row names it and only `secrets set` writes the Keychain. | #548 is held open with (a) built behind three safety fixes (tmp+rename, never clobber `.env.pre-render`, the passkey sentence). | X-124's merge |
+| 18 | **X-124 (b): the one-release inversion.** For one release `.env` is both read (the old file, kept as `.env.pre-render`) and derived. (a) **Accept** the inversion with the pre-render kept; (b) derive only, the old file discarded after adoption. | (a). | X-124's merge |
+| 19 | **X-124 (c): the carried section.** A line no `.metistry/*.yaml` key owns is carried by name in a third section of the render. (a) **Accept** the carried section as the home of such lines; (b) move them into `deployment.yaml`'s `env:` so every line has a yaml owner and the section disappears. | (a). | X-124's merge |
+| 20 | **X-123's deviations (a–e).** (a) doctor's `render` runs `up within:` and so never mints — a hand `metistry up` can clear rows doctor cannot; (b) M6 admits `doctor` by prefix (X-152); (c) rules 4/7/9 unbuilt (X-154); (d) the restart fixer passes no env file (X-153); (e) bare `doctor` without a terminal or with `--json` is `--check`, no `--plan`/`--only`, `render` always confirms, credential mints stay the owner's hand until X-124. **Accept** each as the shipped contract, or name the one to change. | #554 merged as described; X-152…X-154 filed. | X-125 |
+| 21 | **X-112, the release gate.** Release publish is now gated on the `remote-packs` job — a third-party Go build (Tailscale) on the critical path, pinned by `GOTOOLCHAIN`. (a) **Accept**; (b) decouple: packs publish on their own cadence and a release may ship without them. Also the owner's hand: **verify the Tailscale source-archive digest once** against upstream; `checksums.txt` is trusted through TLS only, as the runtime deps are, until X-106's second root (`codesign --verify -R` at first exec). | (a), as #551 built it. | The next release |
+| 22 | **X-131, the project slug.** `Projects/<Name>.md` maps to a project by **file name**; two pages whose names slug alike collide, and captures record the checkout **basename**, not the remote. (a) keep the file-name rule and refuse a collision at the reconciler; (b) an explicit **`project:` frontmatter** key on the page, the file name a fallback. | (a), with #541's fix tying a session to its remote so another checkout's unfolded sessions do not leak. | X-130's next change |
+| 23 | **X-77, the app-menu item.** Plan §2.22 names an app-menu "Set up…" item that does not exist in the app; #546 opened Add a Phone from the wizard's step 6 and Settings ▸ Devices instead. (a) **Amend §2.22** to what is built; (b) add the menu item. | (a) pending. | X-1's sweep |
+| 24 | **X-128, no per-bearer limit.** `GET /api/briefing` has no per-bearer rate limit and no cache (one `runs` row and four queries per call; X-129's once-per-session marker is the client's brake), and a task line's `source agent:` is self-declared — the write door (knowledge-write refuses a page without a source) is the control. (a) **Accept** as shipped, X-149 later; (b) X-149 before the briefing is on by default. | On by default, unbounded. | X-149's wave |
+| 25 | **X-129, OpenCode re-sends.** OpenCode's plugin delivers the briefing through the system-prompt transform, so ~1 200 tokens ride every turn (a stable prefix, cacheable upstream); Claude Code's hook delivers once. (a) **Accept**; (b) a once-per-session path for OpenCode when its plugin API has one. | (a). | — |
+| 26 | **MD-1, the coordinator's exemption.** Merging #508 blocks the coordinator's edits on the `main` checkout unless `METISTRY_GUARD_ALLOW=1` is set (settings.local.json). (a) **Grant** the exemption to the coordinator's own session; (b) the coordinator works from branches like every agent, no exemption. Also: run `pnpm hooks:install` after the merge; the guards do not cover `sed -i` or shell redirects. | #508 open for the owner (human-change paths). | #508's merge |
+| 27 | **X-97, dropped as under-specified.** Variables' *when it was set*, *the preview an agent sees* and *a key's expiry* were not built: the ticket did not say where the three facts come from. (a) **Re-specify** at the next housekeeping (which stores hold them); (b) drop. | Not built. | — |
+| 28 | **#466 T9-4, conflicts.** The held PR no longer rebases cleanly onto `main`. (a) rebase and run the eval under Q-g's "run it, then accept"; (b) hold until the routing decision (#492) is made and rebase once. | Held, conflicting. | The routing decision |
+
+**The owner's hand, noted in W5 (not questions):** `metistry-website` PR #11
+(the phone copy; the badge from *being designed* to *in development*; the
+`docs-manifest` publish flag for `docs/ops/phone.md`); the real-phone-on-cellular
+acceptance of X-114 (the sheet turns *Opened on your phone* before *Added*)
+needs a remote-access provider on the instance; the local full suite needs
+`TZ=UTC` for Node as well as the UTC database X-88 set; #549's capture race was
+a safety fix proven with numbers (142–381 of 1 000 iterations lost a file
+before, 0 after) and its product-record fragment is added at housekeeping.
 
 ## Rulings the owner must make
 

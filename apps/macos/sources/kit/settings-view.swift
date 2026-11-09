@@ -40,19 +40,25 @@ public struct SettingsActions {
     /// Help ▸ Keyboard Shortcuts (⌘/).
     public var showShortcuts: () -> Void
     public var openSystemSettings: () -> Void
+    /// The displays this Mac has, for the capture bar's placement (Live
+    /// Capture) — `NSScreen` is the app target's; the kit has no AppKit.
+    /// Empty: the main display alone.
+    public var displays: () -> [CaptureBarDisplay]
 
     public init(
         openInFinder: @escaping (URL) -> Void = { _ in },
         setUpAgain: @escaping () -> Void = {},
         openLog: @escaping (String) -> Void = { _ in },
         showShortcuts: @escaping () -> Void = {},
-        openSystemSettings: @escaping () -> Void = {}
+        openSystemSettings: @escaping () -> Void = {},
+        displays: @escaping () -> [CaptureBarDisplay] = { [] }
     ) {
         self.openInFinder = openInFinder
         self.setUpAgain = setUpAgain
         self.openLog = openLog
         self.showShortcuts = showShortcuts
         self.openSystemSettings = openSystemSettings
+        self.displays = displays
     }
 }
 
@@ -66,7 +72,8 @@ public struct SettingsView: View {
         onSetUpAgain: @escaping () -> Void,
         onOpenLog: @escaping (String) -> Void = { _ in },
         onShowShortcuts: @escaping () -> Void = {},
-        onOpenSystemSettings: @escaping () -> Void = {}
+        onOpenSystemSettings: @escaping () -> Void = {},
+        displays: @escaping () -> [CaptureBarDisplay] = { [] }
     ) {
         self.model = model
         self.actions = SettingsActions(
@@ -74,7 +81,8 @@ public struct SettingsView: View {
             setUpAgain: onSetUpAgain,
             openLog: onOpenLog,
             showShortcuts: onShowShortcuts,
-            openSystemSettings: onOpenSystemSettings
+            openSystemSettings: onOpenSystemSettings,
+            displays: displays
         )
     }
 
@@ -163,16 +171,20 @@ struct SettingsPaneContent: View {
             case .instance: InstancePane(model: model, actions: actions)
             case .services: ServicesPane(model: model, actions: actions)
             case .compute:
-                ComputePaneView(model: model.settings.computePane)
+                ComputePaneView(model: model.settings.computePane, assistantName: model.settings.identity?.assistantName, onReplaceKey: { model.settings.section = .secrets })
                     // Re-read on open and on every instance switch. There is no
                     // file watcher anywhere in this app, so this IS the refresh.
                     .task(id: model.instances.active) { await model.settings.computePane.refresh() }
             case .updates: UpdatesPane(model: model)
             case .account: AccountPane(model: model, actions: actions)
-            case .connections: ConnectionsPane(settings: model.settings)
-            case .secrets: SecretsPane(settings: model.settings)
-            case .variables, .liveCapture, .sessions: PendingPane(section: section)
-            case .keyboard: KeyboardPane(assistantName: model.settings.identity?.assistantName, actions: actions)
+            case .remoteAccess: RemoteAccessPane(model: model)
+            case .devices: DevicesPane(model: model)
+            case .connections: ConnectionsPane(model: model)
+            case .secrets: SecretsPaneView(model: model)
+            case .variables: VariablesPaneView(model: model)
+            case .liveCapture: LiveCapturePane(model: model, actions: actions)
+            case .sessions: SessionsPane(model: model)
+            case .keyboard: KeyboardPane(assistantName: model.settings.identity?.assistantName, actions: actions, shortcuts: model.hotKeys, isAnswered: model.shell.canPerform)
             case .advanced: AdvancedPane(model: model, actions: actions)
             }
         }
@@ -210,6 +222,46 @@ extension View {
             }
             .sheet(isPresented: Binding(get: { settings.linkOrigin != nil }, set: { if !$0 { settings.linkOrigin = nil } })) {
                 LinkInstanceView(settings: settings)
+            }
+            // Purge Now, twice over (C136): the confirm names the cost — the
+            // unfolded sessions with Fold First, or each recording whose audio goes.
+            .sheet(isPresented: Binding(get: { settings.sessionsPane.confirmation != nil }, set: { if !$0 { settings.sessionsPane.confirmation = nil } })) {
+                if let confirmation = settings.sessionsPane.confirmation {
+                    CostConfirmView(confirmation) { choice in Task { await settings.sessionsPane.choose(choice) } }
+                        .frame(width: 480)
+                }
+            }
+            .sheet(isPresented: Binding(get: { settings.liveCapturePane.confirmation != nil }, set: { if !$0 { settings.liveCapturePane.confirmation = nil } })) {
+                if let confirmation = settings.liveCapturePane.confirmation {
+                    CostConfirmView(confirmation) { choice in Task { await settings.liveCapturePane.choose(choice) } }
+                        .frame(width: 480)
+                }
+            }
+            // Remove and Sign Out Everywhere (X-77, C136): the confirm names the device, or every signed-in one.
+            .sheet(isPresented: Binding(get: { settings.devicesPane.confirmation != nil }, set: { if !$0 { Task { await settings.devicesPane.choose(.cancel) } } })) {
+                if let confirmation = settings.devicesPane.confirmation {
+                    CostConfirmView(confirmation) { choice in Task { await settings.devicesPane.choose(choice) } }
+                        .frame(width: 480)
+                }
+            }
+            // Add a Phone… (§2.22): dismissing it, however, cancels a live code.
+            .sheet(isPresented: Binding(get: { settings.devicesPane.addPhone != nil }, set: { if !$0 { settings.devicesPane.closeAddPhone() } })) {
+                if let addPhone = settings.devicesPane.addPhone {
+                    AddPhoneSheet(model: addPhone) { settings.devicesPane.closeAddPhone() }
+                }
+            }
+            // Turn Off (X-107, C136): the confirm names what the provider's revoke undoes and which phones stop signing in.
+            .sheet(isPresented: Binding(get: { settings.remoteAccessPane.confirmation != nil }, set: { if !$0 { Task { await settings.remoteAccessPane.choose(.cancel) } } })) {
+                if let confirmation = settings.remoteAccessPane.confirmation {
+                    CostConfirmView(confirmation) { choice in Task { await settings.remoteAccessPane.choose(choice) } }
+                        .frame(width: 480)
+                }
+            }
+            // Change… (§2.23): the guided flow; dismissing it cancels a running verb.
+            .sheet(isPresented: Binding(get: { settings.remoteAccessPane.flow != nil }, set: { if !$0 { settings.remoteAccessPane.closeChange() } })) {
+                if let flow = settings.remoteAccessPane.flow {
+                    RemoteAccessFlowSheet(model: flow) { settings.remoteAccessPane.closeChange() }
+                }
             }
     }
 }

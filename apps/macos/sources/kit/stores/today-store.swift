@@ -39,9 +39,9 @@ public protocol TodayStore: Sendable {
     /// route: POST /api/calendar/events/:id/move
     func moveEvent(_ eventID: String, _ move: EventMove) async -> Result<EventMoveResult, ConsoleError>
     /// route: POST /api/calendar/invitations/:id/respond
-    func respond(toInvitation eventID: String, _ response: InvitationResponse) async -> Result<InvitationResult, ConsoleError>
+    func respond(toInvitation eventID: String, _ response: InvitationResponse, confirmToken: String?) async -> Result<InvitationResult, ConsoleError>
     /// route: POST /api/mail/messages/:id/draft
-    func draftReply(toMessage messageID: String, body: String) async -> Result<MailDraftResult, ConsoleError>
+    func draftReply(toMessage messageRef: String, body: String, confirmToken: String?) async -> Result<MailDraftResult, ConsoleError>
     /// route: POST /api/trackers/:connection/issues
     func createIssue(connection: String, taskKey: String, title: String?) async -> Result<TrackerIssueResult, ConsoleError>
     /// route: POST /api/trackers/:connection/issues/:key/complete
@@ -71,9 +71,15 @@ public struct CloseDayResult: ConsoleBody { public let json: JSONValue; public i
 public struct MeetingNoteResult: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 /// `POST /api/calendar/events/:id/move` (T2-12): the preview and its single-use token, or the move done.
 public struct EventMoveResult: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
-/// `POST /api/calendar/invitations/:id/respond` (T4-17).
+/// `POST /api/calendar/invitations/:id/respond` (T4-17): without a token, the
+/// preview — the calendar that answers, the organizer, the owner's address —
+/// and its single-use `confirm_token`; with it, the answer sent. A `503` with
+/// `open_in_calendar: true` means no connection can answer: offer Open in Calendar.
 public struct InvitationResult: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 /// `POST /api/mail/messages/:id/draft` (T4-17): a draft, never a sent message.
+/// Without a token, the preview — to whom, the subject, the Drafts mailbox —
+/// and its single-use `confirm_token`; with it, the draft appended (`201`).
+/// The id is the message's reference, its request's `payload.ref`.
 public struct MailDraftResult: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 /// The tracker doors (T4-25, T4-26): the issue's ref and URL.
 public struct TrackerIssueResult: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
@@ -176,12 +182,12 @@ extension ConsoleStores: TodayStore {
         await perform("POST", "/api/calendar/events/\(Self.segment(eventID))/move", move.json)
     }
 
-    public func respond(toInvitation eventID: String, _ response: InvitationResponse) async -> Result<InvitationResult, ConsoleError> {
-        await perform("POST", "/api/calendar/invitations/\(Self.segment(eventID))/respond", .fields(["response": .string(response.rawValue)]))
+    public func respond(toInvitation eventID: String, _ response: InvitationResponse, confirmToken: String? = nil) async -> Result<InvitationResult, ConsoleError> {
+        await perform("POST", "/api/calendar/invitations/\(Self.segment(eventID))/respond", .fields(["response": .string(response.rawValue), "confirm_token": .text(confirmToken)]))
     }
 
-    public func draftReply(toMessage messageID: String, body: String) async -> Result<MailDraftResult, ConsoleError> {
-        await perform("POST", "/api/mail/messages/\(Self.segment(messageID))/draft", .fields(["body": .string(body)]))
+    public func draftReply(toMessage messageRef: String, body: String, confirmToken: String? = nil) async -> Result<MailDraftResult, ConsoleError> {
+        await perform("POST", "/api/mail/messages/\(Self.segment(messageRef))/draft", .fields(["body": .string(body), "confirm_token": .text(confirmToken)]))
     }
 
     public func createIssue(connection: String, taskKey: String, title: String?) async -> Result<TrackerIssueResult, ConsoleError> {

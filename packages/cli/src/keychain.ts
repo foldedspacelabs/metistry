@@ -160,9 +160,10 @@ export class Keychain {
 
   /**
    * Delete this account's `metistry:<name>`. True when an item went away,
-   * false when there was none. Only ever called for one instance's own
-   * account (`metistry secrets purge`) — the user-scoped items outlive any
-   * instance, and nothing here can reach them.
+   * false when there was none. Called for one instance's own account only
+   * (`metistry secrets purge`, and `metistry connect --remove` for a tool's
+   * bearer) — the user-scoped items outlive any instance, and nothing here
+   * can reach them.
    */
   async deleteSecret(name: string): Promise<boolean> {
     return this.items.delete(serviceFor(name), this.account);

@@ -31,9 +31,10 @@
 //     `HTTPS_PROXY`, and git/curl answers a `407` challenge.
 
 import { z } from "zod";
-import type { SecretRedactor } from "./redact.js";
+import { credentialEnvNames, credentialFromEnv, providerCredential, type Provider } from "./compute.js";
+import { SecretRedactor } from "./redact.js";
 import type { RunExecutor } from "./runs.js";
-import { SECRET_USE_META_KEY, fillSecretRefs, parseSecretGrantee, secretGrant, secretRefsIn, type SecretSource, type SecretsFile } from "./secrets.js";
+import { SECRET_GRANTEE_FORMS, SECRET_USE_META_KEY, fillSecretRefs, parseSecretGrantee, providerGrantee, secretGrant, secretRefsIn, type SecretSource, type SecretsFile, type SecretsPolicyRead } from "./secrets.js";
 
 /** `metistry up` allocates the proxy this port when the instance has no namespace — after llamaserver's 7813, continuing the loopback block. */
 export const EGRESS_PROXY_DEFAULT_PORT = 7814;
@@ -279,6 +280,7 @@ export const EGRESS_REFUSAL_CODES = [
   "missing_secret",
   "malformed_reference",
   "uninspectable_body",
+  "not_provider_host",
 ] as const;
 export type EgressRefusalCode = (typeof EGRESS_REFUSAL_CODES)[number];
 
@@ -311,7 +313,7 @@ export interface EgressCall {
 export interface SecretEgressRules {
   /** `.metistry/secrets.yaml`, parsed */
   secrets: SecretsFile;
-  /** who is calling: `connection:<name>` or `agent:<id>` — the grantee `secrets.yaml` grants to */
+  /** who is calling: `connection:<name>`, `agent:<id>` or `provider:<name>` — the grantee `secrets.yaml` grants to */
   grantee: string;
   purpose: SecretEgressPurpose;
   /** learns every value filled; redacts the way back. One per process that fills, shared by all its calls. */
@@ -373,13 +375,43 @@ export interface EgressPlan {
 }
 
 /**
+ * The three questions every secret a call carries must pass, wherever it goes
+ * — HTTP (`planEgress`) or a socket (`planSocketEgress`): is the destination
+ * on the secret's *Sent only to* list, is the channel encrypted, and did the
+ * owner grant it to this caller. Throws the refusal; returns nothing.
+ */
+function checkSecretDestination(names: readonly string[], destination: EgressDestination, rules: SecretEgressRules, channel: "http" | "socket" = "http"): void {
+  const dest = destination.entry;
+
+  // ---- only to listed hosts
+  const unlisted = names.filter((n) => {
+    const policy = Object.hasOwn(rules.secrets.secrets, n) ? rules.secrets.secrets[n] : undefined;
+    return !policy || !policy.hosts.includes(dest);
+  });
+  if (unlisted.length > 0) {
+    throw new EgressRefused("host_not_listed", unlisted, dest, `${unlisted.join(", ")} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts <name>\`)`);
+  }
+  if (destination.cleartext) {
+    const how = channel === "http" ? "over plain http — a secret goes off this machine over https only" : "without TLS — a secret goes off this machine over TLS only";
+    throw new EgressRefused("cleartext", names, dest, `${names.join(", ")} would go to ${dest} ${how}`);
+  }
+
+  // ---- who may use it
+  const approved = new Set(rules.approved ?? []);
+  const off = names.filter((n) => secretGrant(rules.secrets, n, rules.grantee) === "off");
+  if (off.length > 0) throw new EgressRefused("not_granted", off, dest, `${rules.grantee} is not granted ${off.join(", ")} (\`metistry secrets grant <name> ${rules.grantee} on|ask\`)`);
+  const ask = names.filter((n) => secretGrant(rules.secrets, n, rules.grantee) === "ask" && !approved.has(n));
+  if (ask.length > 0) throw new EgressRefused("needs_approval", ask, dest, `${rules.grantee} may use ${ask.join(", ")} only with the owner's approval of this call`);
+}
+
+/**
  * Every check, and no value read: the refusal a call would get, or the plan
  * of what it would send. `guardedFetch` runs exactly this before it fills;
  * an Ask preview (T4-8b) can run it to say "sends github_write to
  * api.github.com" without touching the Keychain.
  */
 export function planEgress(call: EgressCall, rules: SecretEgressRules): EgressPlan {
-  if (!parseSecretGrantee(rules.grantee)) throw new Error(`${JSON.stringify(rules.grantee)} is not a grantee — connection:<name> or agent:<id>`);
+  if (!parseSecretGrantee(rules.grantee)) throw new Error(`${JSON.stringify(rules.grantee)} is not a grantee — ${SECRET_GRANTEE_FORMS}`);
   const destination = egressDestination(call.url);
   if (!destination) throw new EgressRefused("bad_url", [], null, `${JSON.stringify(call.url.slice(0, 200))} is not an http(s) URL`);
   const dest = destination.entry;
@@ -420,26 +452,43 @@ export function planEgress(call: EgressCall, rules: SecretEgressRules): EgressPl
   const names = unionSorted(refs, bodyLiteral, headerLiteral);
   if (names.length === 0) return { destination, refs, names };
 
-  // ---- only to listed hosts
-  const unlisted = names.filter((n) => {
-    const policy = Object.hasOwn(rules.secrets.secrets, n) ? rules.secrets.secrets[n] : undefined;
-    return !policy || !policy.hosts.includes(dest);
-  });
-  if (unlisted.length > 0) {
-    throw new EgressRefused("host_not_listed", unlisted, dest, `${unlisted.join(", ")} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts <name>\`)`);
-  }
-  if (destination.cleartext) {
-    throw new EgressRefused("cleartext", names, dest, `${names.join(", ")} would go to ${dest} over plain http — a secret goes off this machine over https only`);
-  }
-
-  // ---- who may use it
-  const approved = new Set(rules.approved ?? []);
-  const off = names.filter((n) => secretGrant(rules.secrets, n, rules.grantee) === "off");
-  if (off.length > 0) throw new EgressRefused("not_granted", off, dest, `${rules.grantee} is not granted ${off.join(", ")} (\`metistry secrets grant <name> ${rules.grantee} on|ask\`)`);
-  const ask = names.filter((n) => secretGrant(rules.secrets, n, rules.grantee) === "ask" && !approved.has(n));
-  if (ask.length > 0) throw new EgressRefused("needs_approval", ask, dest, `${rules.grantee} may use ${ask.join(", ")} only with the owner's approval of this call`);
-
+  checkSecretDestination(names, destination, rules);
   return { destination, refs, names };
+}
+
+/**
+ * Where a socket goes (an IMAP server, T4-15), spelled as a *Sent only to* entry.
+ * `tls: false` to anything but loopback is cleartext.
+ *
+ * The entry always carries its port. Dropping `:443` is an HTTPS convention (a
+ * bare allowlist entry means 443 over https); a socket on 443 that is not HTTPS
+ * must not read as the bare host, or it would match the entry that admits HTTPS.
+ */
+export function socketDestination(host: string, port: number, tls: boolean): EgressDestination {
+  const h = host.toLowerCase();
+  return { entry: `${h}:${port}`, host: h, port, cleartext: !tls && !isLoopbackHost(h) };
+}
+
+/**
+ * **The host guard for a connection that is not HTTP** — IMAP (T4-15). A
+ * socket has no URL, header or body for `planEgress` to read: the caller
+ * names the secrets it will send and where the socket goes, and gets the
+ * same three refusals HTTP gets, before it dials — `host_not_listed` (the
+ * exact `host:port` must be on each secret's *Sent only to* list),
+ * `cleartext` (TLS, except to loopback) and `not_granted` / `needs_approval`
+ * (the owner's grant to this caller). The caller fills the value only after
+ * this returns, learns it into the redactor, and never writes it anywhere
+ * but the socket.
+ */
+export function planSocketEgress(to: { host: string; port: number; tls: boolean }, names: readonly string[], rules: SecretEgressRules): EgressPlan {
+  if (!parseSecretGrantee(rules.grantee)) throw new Error(`${JSON.stringify(rules.grantee)} is not a grantee — connection:<name> or agent:<id>`);
+  if (!/^[A-Za-z0-9.-]+$/.test(to.host) || !Number.isInteger(to.port) || to.port < 1 || to.port > 65535) {
+    throw new EgressRefused("bad_url", [], null, `${JSON.stringify(`${to.host}:${to.port}`.slice(0, 200))} is not a host and port`);
+  }
+  const destination = socketDestination(to.host, to.port, to.tls);
+  const sorted = unionSorted(names);
+  if (sorted.length > 0) checkSecretDestination(sorted, destination, rules, "socket");
+  return { destination, refs: sorted, names: sorted };
 }
 
 /** Text of a request body the door can inspect; undefined when it cannot. */
@@ -477,15 +526,18 @@ function redactingStream(redactor: SecretRedactor): TransformStream<string, stri
   });
 }
 
-function redactResponse(res: Response, redactor: SecretRedactor): Response {
+async function redactResponse(res: Response, redactor: SecretRedactor): Promise<Response> {
   const headers = new Headers();
-  res.headers.forEach((value, key) => {
+  res.headers?.forEach((value, key) => {
     // the body changes length when a value is redacted
     if (key === "content-length" || key === "content-encoding") return;
     headers.append(key, redactor.redactText(value));
   });
-  const init = { status: res.status, statusText: redactor.redactText(res.statusText), headers };
+  const init = { status: res.status, statusText: redactor.redactText(res.statusText ?? ""), headers };
   if (NULL_BODY_STATUS.has(res.status) || res.body === null) return new Response(null, init);
+  // A fetch seam that answers with a Response-LIKE (a test's fake, a
+  // caller's own client) has no stream to pipe: read it whole, then redact.
+  if (res.body === undefined) return new Response(redactor.redactText(await res.text()), init);
   const body = res.body.pipeThrough(new TextDecoderStream()).pipeThrough(redactingStream(redactor)).pipeThrough(new TextEncoderStream());
   return new Response(body, init);
 }
@@ -557,7 +609,7 @@ export function guardedFetch(policy: SecretEgressPolicy, fetchFn: typeof fetch =
       throw redactor.redactError(err);
     }
     if (plan.names.length > 0) await policy.onUse?.({ names: plan.names, destination: dest });
-    return redactResponse(res, redactor);
+    return await redactResponse(res, redactor);
   };
 }
 
@@ -579,4 +631,161 @@ export async function recordSecretUse(db: RunExecutor, runId: number, names: rea
      WHERE id = $1`,
     [runId, JSON.stringify([...names]), SECRET_USE_META_KEY],
   );
+}
+
+// =====================================================================================
+// Compute through the door (ruling 2 of the W2 checkpoint, 2026-09-27; X-7).
+// =====================================================================================
+//
+// A model call is an egress like any other, and its credential is a secret
+// like any other. Before this, the engine, the collectors' `completeJson`,
+// the router's `scoreChoice` and the embedder each built their own
+// `Authorization: Bearer <key>` and dialled whatever URL they had — the
+// provider's key was held by the caller, and nothing but the caller's own
+// care kept it off another host.
+//
+// `computeFetch` is the one `fetch` every compute call now goes through. The
+// caller never holds the key: it hands over its request with NO credential,
+// and the door adds it. What the door makes impossible, each a refusal
+// (`EgressRefused`) before a byte is sent:
+//
+//   * **A call to a host that is not the provider's.** Every request must go
+//     to the destination `base_url` names — the same host AND port. The key
+//     is only ever attached to a request that passed that check, so it
+//     cannot reach anything else, whatever URL a caller builds.
+//     `not_provider_host`.
+//   * **A provider key without its grant.** A `{{ secret.x }}` credential is
+//     filled only when `secrets.yaml` grants `x` to `provider:<name>` (On —
+//     Ask has no one to ask on a model call, so it refuses as
+//     `needs_approval`), and only when `x`'s *Sent only to* lists the
+//     provider's host: exactly `guardedFetch`'s rules, with the provider as
+//     the grantee and `purpose: "model"`. A `secrets.yaml` that cannot be
+//     read is no grant. `not_granted`, `host_not_listed`.
+//   * **The key in the model's body**, as for every model call
+//     (`secret_in_model_body`).
+//
+// An `env:NAME` credential (an install variable — a bridge bearer this
+// install minted) has no line in `secrets.yaml` to grant it, so it is bound
+// by the host rule alone: attached only to a call to the provider's own
+// destination. Every credential is learned by the redactor, and the
+// response and any error come back with it redacted.
+
+/** Where a compute call's credential and policy come from. */
+export interface ComputeEgressOptions {
+  /** the provider's name in `compute.yaml` — its grantee is `provider:<name>` */
+  providerName: string;
+  provider: Provider;
+  /** where the credential was delivered: this process's environment (`credentialEnvNames`). Never the Keychain. */
+  env: NodeJS.ProcessEnv;
+  /**
+   * The owner's `secrets.yaml`, read at EACH call so a revoked grant takes
+   * effect on the next request without a restart. Needed only for a
+   * `{{ secret.x }}` credential; absent, such a credential is refused.
+   */
+  policy?: (() => SecretsPolicyRead | Promise<SecretsPolicyRead>) | undefined;
+  /** learns the credential; redacts the way back. Default: one per door. */
+  redactor?: SecretRedactor | undefined;
+}
+
+/** The destination a provider's calls may go to: its `base_url`'s host, and port when not 443. */
+export function providerDestination(provider: Pick<Provider, "base_url">): EgressDestination | undefined {
+  return egressDestination(provider.base_url);
+}
+
+/**
+ * The host rule on its own: `url` must go to `baseUrl`'s destination (host,
+ * and port when not 443), or it is refused as `not_provider_host` before
+ * anything is sent. `who` names the caller in the refusal.
+ */
+export function requireProviderHost(baseUrl: string, who: string, url: string): EgressDestination {
+  const home = egressDestination(baseUrl);
+  const dest = egressDestination(url);
+  if (!dest) throw new EgressRefused("bad_url", [], null, `${JSON.stringify(url.slice(0, 200))} is not an http(s) URL`);
+  if (!home || dest.entry !== home.entry) {
+    throw new EgressRefused("not_provider_host", [], dest.entry, `${who} calls go to ${home?.entry ?? "(a base_url that is not an http(s) URL)"} only — ${dest.entry} is not its host, so nothing was sent`);
+  }
+  return dest;
+}
+
+/**
+ * A fetch-shaped function that dials `baseUrl`'s destination and nothing
+ * else — the door for a compute call that carries NO credential (the
+ * embedder). A call with a credential goes through `computeFetch`, which
+ * applies the same rule first.
+ */
+export function hostBoundFetch<F extends (input: string, init: never) => Promise<unknown>>(baseUrl: string, who: string, fetchFn: F): F {
+  return ((input: string, init: never) => {
+    requireProviderHost(baseUrl, who, input);
+    return fetchFn(input, init);
+  }) as F;
+}
+
+function requestUrl(input: Parameters<typeof fetch>[0]): string {
+  return input instanceof Request ? input.url : input instanceof URL ? input.href : String(input);
+}
+
+/** A redactor name for an environment variable: `METISTRY_BRIDGE_TOKEN_APPLE_FM` → `metistry_bridge_token_apple_fm`. */
+function envRedactName(name: string): string {
+  const n = name.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^[^a-z]+/, "");
+  return /^[a-z][a-z0-9_]{0,63}$/.test(n) ? n : "provider_credential";
+}
+
+/**
+ * **The door for a compute call** — a `fetch` bound to ONE provider.
+ *
+ * Every call is checked against the provider's own destination, then its
+ * credential (if the provider has one) is attached by the door itself —
+ * through `guardedFetch` with `provider:<name>` as the grantee for an
+ * instance secret — and the response comes back redacted. The caller passes
+ * no `authorization` header; one it passes is replaced, never trusted.
+ */
+export function computeFetch(opts: ComputeEgressOptions, fetchFn: typeof fetch = (u, i) => fetch(u, i)): typeof fetch {
+  const grantee = providerGrantee(opts.providerName);
+  const redactor = opts.redactor ?? new SecretRedactor();
+  const cred = providerCredential(opts.provider);
+  return async (input, init = {}) => {
+    const url = requestUrl(input);
+    const dest = requireProviderHost(opts.provider.base_url, grantee, url);
+    const headers = new Headers(input instanceof Request ? input.headers : undefined);
+    new Headers(init.headers).forEach((v, k) => headers.set(k, v));
+    headers.delete("authorization");
+    const plain: Record<string, string> = {};
+    headers.forEach((v, k) => (plain[k] = v));
+
+    if (!cred) return fetchFn(url, { ...init, headers: plain });
+
+    if (cred.kind === "env") {
+      const value = credentialFromEnv(cred, opts.env);
+      if (!value) throw new EgressRefused("missing_secret", [], dest.entry, `${cred.name} is unset in this process's environment — nothing was sent`);
+      if (dest.cleartext) throw new EgressRefused("cleartext", [], dest.entry, `${cred.name} would go to ${dest.entry} over plain http — a credential goes off this machine over https only`);
+      const name = envRedactName(cred.name);
+      redactor.learn(name, value);
+      const body = typeof init.body === "string" ? init.body : "";
+      if (redactor.find(body).length > 0) throw new EgressRefused("secret_in_model_body", [name], dest.entry, `${cred.name} in a model request body — a model never receives a credential`);
+      let res: Response;
+      try {
+        res = await fetchFn(url, { ...init, headers: { ...plain, authorization: `Bearer ${value}` }, redirect: "manual" });
+      } catch (err) {
+        throw redactor.redactError(err);
+      }
+      return await redactResponse(res, redactor);
+    }
+
+    // `{{ secret.x }}`: the owner's grant to THIS provider, or nothing is sent
+    const read = opts.policy ? await opts.policy() : undefined;
+    if (!read || !read.ok) {
+      const why = !read ? "this process was handed no secrets.yaml to read the grant from — METISTRY_INSTANCE_DIR is unset or unreadable here" : read.why;
+      throw new EgressRefused("not_granted", [cred.name], dest.entry, `${grantee} may not use ${cred.name}: its grant cannot be checked (${why}) — a provider key is sent only on a grant the owner wrote (\`metistry secrets grant ${cred.name} ${grantee} on\`)`);
+    }
+    const source: SecretSource = { value: async (n) => (n === cred.name ? credentialFromEnv(cred, opts.env) : undefined) };
+    const door = guardedFetch({ secrets: read.file, grantee, purpose: "model", redactor, source }, async (u, i) => fetchFn(u, i));
+    try {
+      return await door(url, { ...init, headers: { ...plain, authorization: `Bearer {{ secret.${cred.name} }}` } });
+    } catch (err) {
+      if (err instanceof EgressRefused && err.code === "missing_secret") {
+        throw new EgressRefused("missing_secret", [cred.name], dest.entry, `{{ secret.${cred.name} }} has not reached this process (${credentialEnvNames(cred).join(" or ")} is unset) — \`metistry secrets sync --to env\`; nothing was sent`);
+      }
+      throw err;
+    }
+  };
 }

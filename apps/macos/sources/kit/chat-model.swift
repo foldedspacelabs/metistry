@@ -297,6 +297,10 @@ public struct ChatLocalTurn: Sendable, Equatable, Identifiable {
     public let id: UUID
     public let text: String
     public let tier: String?
+    /// The session-turn marker the turn was sent with (X-84): the recording
+    /// it was asked inside, so a Retry resends the turn exactly as written —
+    /// held to this Mac or refused, never quietly routed elsewhere.
+    public let captureSession: String?
     public let sentAt: Date
     public var state: State
 
@@ -819,10 +823,15 @@ public final class ChatModel {
     /// Sends the draft. The owner's turn is on screen before the request
     /// leaves; the draft is emptied into it, so nothing typed is ever lost —
     /// a turn that is not sent keeps its words and offers Retry.
-    public func send() async {
+    ///
+    /// `captureSession` is the session-turn marker (X-84): the capture bar
+    /// passes the running recording's id, so the console holds the turn to the
+    /// private tier (screen 11 §4, *staying on this Mac*); the window passes
+    /// nothing and its turns are routed as they always were.
+    public func send(captureSession: String? = nil) async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, allowsSending else { return }
-        let turn = ChatLocalTurn(id: UUID(), text: text, tier: pin?.tier, sentAt: now(), state: .sending)
+        let turn = ChatLocalTurn(id: UUID(), text: text, tier: pin?.tier, captureSession: captureSession, sentAt: now(), state: .sending)
         draft = ""
         if pin?.scope == .turn { pin = nil }
         localTurns.append(turn)
@@ -841,7 +850,7 @@ public final class ChatModel {
     private func deliver(_ id: UUID) async {
         guard let session, let turn = localTurns.first(where: { $0.id == id }) else { return }
         let generation = session.generation
-        let result = await session.stores.send(turn.text, threadID: nil, tier: turn.tier)
+        let result = await session.stores.send(turn.text, threadID: nil, tier: turn.tier, captureSession: turn.captureSession)
         guard session.generation == generation, let index = localTurns.firstIndex(where: { $0.id == id }) else { return }
         switch result {
         case .success(let accepted):

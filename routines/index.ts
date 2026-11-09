@@ -70,3 +70,6 @@ export type { BriefCtx, BriefVault } from "./morning-brief/run.js";
 // rather than a count (a Fold First over the sessions a purge would lose,
 // C136), and the subject each file's one waiting request is raised under.
 export { foldPass, foldSource, type FoldPass, type SessionFoldCtx } from "./session-fold/run.js";
+// Recording Retention (T8-4): the live-capture bridge the runner hands it —
+// its URL and the bridge token — for the ingestion report to the Mac.
+export type { LiveCaptureDoor, RetentionCtx, RetentionPass } from "./recording-retention/run.js";

@@ -22,6 +22,7 @@ import { connectionRows } from "../src/doctor.js";
 import type { Exec } from "../src/exec.js";
 import { main } from "../src/main.js";
 import { realExec } from "../src/exec.js";
+import { fakeImap, fixtureMailboxes } from "../../connections/test/imap-server.js";
 
 const ID = "11111111-2222-4333-8444-555555555555";
 const KEY = "gh" + "p_" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0";
@@ -166,11 +167,11 @@ describe("metistry connections add", () => {
     expect(again.err).toMatch(/already a connection named fake/);
   });
 
-  it("OAuth sign-in is refused as not built yet, naming T4-10", async () => {
+  it("OAuth sign-in on a custom connection needs its client — nothing supplies one (T4-10, C118; connections-p3.test.ts has the rest)", async () => {
     const dir = await instance("oauth");
     const r = await run(["connections", "add", "remote", "--type", "mcp", "--url", "https://x.example.com/mcp", "--auth", "oauth", "--no-discover", "--instance", dir]);
     expect(r.code).toBe(1);
-    expect(r.err).toMatch(/oauth sign-in arrives with T4-10/);
+    expect(r.err).toMatch(/a custom OAuth connection names its client/);
   });
 
   it("the iCloud recipe (docs/ops/connections.md) writes an ok CalDAV connection: basic sign-in, the username written, the app password by name only (T4-13)", async () => {
@@ -224,6 +225,69 @@ describe("metistry connections add", () => {
   });
 });
 
+describe("metistry connections add --imap (T4-15)", () => {
+  it("the Gmail recipe (docs/ops/connections.md) writes an ok mail connection: imap.gmail.com:993, the username written, the app password by name only — and dials nothing", async () => {
+    const dir = await instance("gmail");
+    const r = await run([
+      "connections", "add", "gmail", "--type", "mail", "--provider", "gmail-mail", "--imap", "imap.gmail.com:993",
+      "--username", "you@gmail.com", "--secret", "gmail_app_password", "--instance", dir,
+    ]);
+    expect(r.code, r.all).toBe(0);
+    expect(yamlOf(dir, "gmail")).toMatchObject({
+      type: "mail",
+      provider: "gmail-mail",
+      reach: { imap: { host: "imap.gmail.com", username: "you@gmail.com", secret: "gmail_app_password" } },
+      secrets: ["gmail_app_password"],
+      tools: {},
+    });
+    expect(yamlOf(dir, "gmail").reach.imap).not.toHaveProperty("port");
+    expect(r.all).toMatch(/a mailbox — `metistry connections test gmail` signs in/);
+    expect(r.all).toMatch(/list imap\.gmail\.com:993 \(`metistry secrets hosts <name> imap\.gmail\.com:993`\)/);
+    const list = await run(["connections", "list", "--instance", dir]);
+    expect(list.out).toMatch(/imaps:\/\/imap\.gmail\.com:993/);
+    expect(list.out).not.toContain("you@gmail.com");
+  });
+
+  it("**refused before anything is written**: Gmail anywhere else, a submission port, plain off this Mac, a type that is not reached by imap, a missing half", async () => {
+    const dir = await instance("imap-refusals");
+    const add = (name: string, ...rest: string[]) => run(["connections", "add", name, "--type", "mail", "--username", "you@gmail.com", "--secret", "pw", "--instance", dir, ...rest]);
+    expect((await add("a", "--provider", "gmail-mail", "--imap", "imap.example.com")).err).toMatch(/Gmail is imap\.gmail\.com:993 over TLS and nowhere else/);
+    expect((await add("b", "--provider", "imap", "--imap", "mail.example.com:587")).err).toMatch(/mail submission port/);
+    expect((await add("c", "--provider", "imap", "--imap", "mail.example.com:143", "--plain")).err).toMatch(/plain is for a server on this Mac only/);
+    expect((await add("d", "--provider", "imap", "--imap", "imaps://mail.example.com")).err).toMatch(/--imap takes host or host:port/);
+    expect((await add("e", "--provider", "imap", "--imap", "mail.example.com", "--auth", "bearer")).err).toMatch(/--auth takes nothing else/);
+    expect((await run(["connections", "add", "f", "--type", "mail", "--provider", "imap", "--imap", "mail.example.com", "--secret", "pw", "--instance", dir])).err).toMatch(/--imap needs --username/);
+    expect((await run(["connections", "add", "g", "--type", "calendar", "--provider", "caldav", "--imap", "mail.example.com", "--username", "u", "--secret", "pw", "--instance", dir])).err).toMatch(/caldav is reached by http, not imap/);
+    expect((await add("h", "--provider", "imap", "--url", "https://mail.example.com/", "--imap", "mail.example.com")).err).toMatch(/say how it is reached/);
+    expect((await add("i", "--provider", "imap", "--url", "https://mail.example.com/", "--plain")).err).toMatch(/--plain is for a connection reached by --imap/);
+    for (const n of ["a", "b", "c", "d", "e", "f", "g", "h", "i"]) expect(existsSync(file(dir, n)), n).toBe(false);
+  });
+
+  it("test signs in to the mailbox with the app password from this instance's Keychain, lists folders and finds Drafts — reading no message", async () => {
+    const PASSWORD = ["qzvt", "hmwk", "rbxe", "lpfa"].join("");
+    const s = await fakeImap({ username: "me@example.com", password: PASSWORD, mailboxes: fixtureMailboxes() });
+    try {
+      const dir = await instance("imap-test");
+      const kc = fakeSecurity({ [`${ID}/metistry:secret:mail_password`]: PASSWORD });
+      expect((await run(["connections", "add", "mail", "--type", "mail", "--provider", "imap", "--imap", `127.0.0.1:${s.port}`, "--plain", "--username", "me@example.com", "--secret", "mail_password", "--instance", dir], kc)).code).toBe(0);
+      // not yet on the secret's Sent only to list: refused before anything is dialled
+      await writeFile(join(dir, ".metistry/secrets.yaml"), `secrets:\n  mail_password:\n    grants: { "connection:mail": on }\n`);
+      const refused = await run(["connections", "test", "mail", "--json", "--instance", dir], kc);
+      expect(JSON.parse(refused.out)).toMatchObject({ status: "failed" });
+      expect(refused.out).toMatch(/host_not_listed/);
+      expect(s.connections).toBe(0);
+      await writeFile(join(dir, ".metistry/secrets.yaml"), `secrets:\n  mail_password:\n    hosts: ["127.0.0.1:${s.port}"]\n    grants: { "connection:mail": on }\n`);
+      const ok = await run(["connections", "test", "mail", "--json", "--instance", dir], kc);
+      expect(ok.code, ok.all).toBe(0);
+      expect(JSON.parse(ok.out)).toMatchObject({ status: "ok", meta: { mailboxes: 5, drafts: "[Gmail]/Drafts", inbox_messages: 3 } });
+      expect(ok.all).not.toContain(PASSWORD);
+      expect(s.commands.map((l) => l.split(" ")[1])).toEqual(["LOGIN", "LIST", "EXAMINE", "LOGOUT"]);
+    } finally {
+      await s.close();
+    }
+  });
+});
+
 describe("metistry connections policy, set, list, show, test, remove", () => {
   async function withFake(label: string): Promise<string> {
     const dir = await instance(label);
@@ -242,12 +306,17 @@ describe("metistry connections policy, set, list, show, test, remove", () => {
     const bad = await run(["connections", "policy", "fake", "echo", "sometimes", "--instance", dir]);
     expect(bad.code).toBe(1);
     expect((await run(["connections", "policy", "fake", "--offer", "on", "--instance", dir])).code).toBe(0);
+    // the fold switch (X-132): on unless the owner says off, and only on or off
+    expect((await run(["connections", "policy", "fake", "--fold", "sometimes", "--instance", dir])).code).toBe(1);
+    expect((await run(["connections", "policy", "fake", "--fold", "off", "--instance", dir])).code).toBe(0);
     const c = yamlOf(dir, "fake");
     expect(c.tools.search_issues).toEqual({ group: "reads", mode: "on" });
     expect(c.tools.delete_issue).toEqual({ group: "changes", mode: "off" });
     expect(c.offer_to_agents).toBe(true);
+    expect(c.fold).toBe(false);
 
     const shown = await run(["connections", "policy", "fake", "--instance", dir]);
+    expect(shown.out).toMatch(/fake: offer to agents on; fold large answers off/);
     expect(shown.out).toMatch(/Reads\n\s+search_issues\s+Allow/);
     expect(shown.out).toMatch(/delete_issue\s+Never/);
     expect(shown.out).toMatch(/echo\s+Ask First/);
@@ -278,6 +347,7 @@ describe("metistry connections policy, set, list, show, test, remove", () => {
     expect(connections[0].issues.join("\n")).toMatch(/does not grant env_key to connection:fake — `metistry secrets grant env_key connection:fake on`/);
     expect(connections[0].issues.join("\n")).toMatch(/secret env_key has no item in this instance's Keychain/);
 
+    expect(connections[0].last_checked).toBeNull();
     const shown = await run(["connections", "show", "fake", "--instance", dir]);
     expect(shown.code).toBe(0);
     expect(shown.out).toMatch(/env\s+FAKE_SECRET \(given to this command only; never written to disk\)/);
@@ -292,6 +362,10 @@ describe("metistry connections policy, set, list, show, test, remove", () => {
     const ok = await run(["connections", "test", "fake", "--json", "--instance", dir], kc);
     expect(ok.code, ok.all).toBe(0);
     expect(JSON.parse(ok.out)).toMatchObject({ name: "fake", status: "ok", meta: { tools_seen: 5, listed: 5, missing: [] } });
+    // X-96: a check stamps last_checked (time and verdict); until one has run it reads never
+    const stamped = JSON.parse((await run(["connections", "list", "--json", "--instance", dir])).out).connections[0];
+    expect(stamped.last_checked).toEqual({ at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/), status: "ok" });
+    expect((await run(["connections", "show", "fake", "--instance", dir])).out).toMatch(/checked {2}\d{4}-\d\d-\d\dT\S+ — ok/);
 
     await run(["connections", "set", "fake", "--env", "FAKE_TOOLS=echo,env", "--instance", dir]);
     const degraded = await run(["connections", "test", "fake", "--instance", dir], kc);

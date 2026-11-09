@@ -313,15 +313,26 @@ public final class ComputeStepModel {
         phase = .skipped
     }
 
-    public nonisolated static let skipNote =
-        "You can finish without one. With no `assignments.default` in compute.yaml there is no engine: `metistry up` does not start the assistant at all, "
-        + "`metistry doctor` reports `assistant: absent`, and captures, tasks, search and the console keep working — queued turns simply wait. "
-        + "Settings → Compute, or `metistry compute assign default <provider/model>`, adds one whenever you like."
+    public nonisolated static let skipNote = skipNote(assistantName: nil)
+
+    /// `doctor`'s `assistant: absent` is the CLI's own key, quoted as it
+    /// prints, so it stays as it is whatever the assistant is called.
+    public nonisolated static func skipNote(assistantName: String?) -> String {
+        let a = WizardCopy(name: assistantName)
+        return "You can finish without one. With no `assignments.default` in compute.yaml there is no engine: `metistry up` does not start \(a.subject) at all, "
+            + "`metistry doctor` reports `assistant: absent`, and captures, tasks, search and the console keep working — queued turns simply wait. "
+            + "Settings → Compute, or `metistry compute assign default <provider/model>`, adds one whenever you like."
+    }
+
+    /// The one-line status once the owner has chosen to finish without an engine.
+    public nonisolated static func skippedLine(assistantName: String?) -> String {
+        "no engine — \(WizardCopy(name: assistantName).subject) will not be started, and everything else will"
+    }
 
     public nonisolated static let keyNote =
         "The key goes to the command's standard input — never onto a command line, never into a file this app writes, never into a log. "
-        + "`metistry compute providers add` puts it in the login Keychain under your user account, where every instance on this Mac shares it, "
-        + "and everything the app knows about it afterwards is whether it is there."
+        + "`metistry compute providers add` stores it as one of this instance\u{2019}s own secrets in the login Keychain, granted to this provider (Settings → Secrets lists it); "
+        + "compute.yaml holds only a reference to it, and everything the app knows about it afterwards is whether it is there."
 
     private nonisolated static func reason(_ result: CommandResult, verb: String) -> String {
         "`metistry \(verb)` exited \(result.exitCode): \(CLIDegradation.refusalMessage(result, verb: verb))"

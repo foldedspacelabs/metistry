@@ -76,8 +76,11 @@ are no manifests to walk otherwise). Resolution order:
 
 1. `--product-dir <checkout>`
 2. `METISTRY_PRODUCT_DIR`
-3. the checkout this package is installed inside (a `pnpm` workspace)
-4. the current directory's enclosing checkout
+3. the release install this package runs from — the product dir holding
+   `releases/` and `current` — even when a development checkout encloses it
+   or the current directory is inside one
+4. the checkout this package is installed inside (a `pnpm` workspace)
+5. the current directory's enclosing checkout
 
 When none of those is a checkout, `init` falls back to the copy of `seed/`
 bundled into this package at build time (`files` in `package.json`), so
@@ -155,11 +158,13 @@ once every instance on the Mac has its copy.
 `--instance <dir>` says which instance; `--env-file` targets a `.env`
 other than `<instance>/state/.env`.
 
-## `metistry doctor [--json] [--product-dir <checkout>]`
+## `metistry doctor [--check | --fix [--yes]] [--json] [--product-dir <checkout>]`
 
 Generic over manifests (invariant 5). It walks `collectors/`, `routines/`,
 `packages/*/manifest.yaml`, `apps/*/manifest.yaml` and `targets/` in the
-checkout, validates each against `core`'s `validateManifest`, and:
+checkout (or, for a release install, in its `current`), validates each against
+`core`'s `validateManifest`, and says which of the two it read on the first line
+(`release 0.5.0 (read from …)` or `checkout`):
 
 | what | how it is probed |
 | --- | --- |
@@ -183,6 +188,13 @@ Output is a table — `name`, `kind`, `status` (`ok` | `degraded` | `failed` |
 **Exit code 0 when nothing is `failed`**; `degraded` and `absent` are
 informational (a bridge that is not configured degrades absent by design).
 `--json` prints `{ as_of, product_dir, ok, rows: CheckResult & { kind } }`.
+
+Doctor also **repairs**: in a terminal a bare `metistry doctor` applies every row's
+fix that is doctor's to make (asking once for a fix that moves files or restarts a
+running service) and re-checks once; `--check` is read-only; `--fix [--yes]` repairs
+without a terminal. A row says who puts it right — `fixable`, or `your hand` with the
+exact step — and `--json` adds `mode`, a `fix` class on every row and, in fix mode,
+`fixes[]`. The whole contract is in `docs/ops/cli.md` of the repository.
 
 ## `metistry up [--no-compose] [--no-launchd] [--dry-run] [--product-dir <checkout>]`
 

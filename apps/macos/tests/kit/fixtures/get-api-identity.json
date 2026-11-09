@@ -10,7 +10,7 @@
   },
   "status": 200,
   "body": {
-    "instance_id": "bf790c03-78f2-46ca-9655-a7d631c18d0f",
+    "instance_id": "9198ee4a-cbb7-426d-9897-be30bb3ab31b",
     "name": "Aide",
     "icon": "🦉",
     "capabilities": [
@@ -22,8 +22,8 @@
       "queries",
       "tasks"
     ],
-    "version": "0.11.0",
+    "version": "0.15.1",
     "api_version": 1,
-    "as_of": "2026-09-26T23:51:23.996Z"
+    "as_of": "2026-09-30T04:49:51.777Z"
   }
 }

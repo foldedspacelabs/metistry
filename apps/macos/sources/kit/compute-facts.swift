@@ -25,6 +25,17 @@ public struct ComputeProviderFacts: Sendable, Equatable, Identifiable {
     public let modelsAssigned: [String]
     /// `budgets.providers.<name>`, when this instance sets one.
     public let budget: ComputeBudgetFacts?
+    /// The switch (C130): off = not searched, not offered, and nothing may be
+    /// assigned to it. A report from before the switch existed has no key,
+    /// which is on — the CLI's own reading of an absent `enabled`.
+    public let enabled: Bool
+    /// The provider's one tag (C132), as the report states it — never derived
+    /// here when the report says.
+    public let tag: ComputeTag
+    /// The NAME of the instance secret the key is, when the reference is a
+    /// `{{ secret.<name> }}` — what the gear's key field shows and what
+    /// `providers set --secret` takes. Never a value.
+    public let secretName: String?
 
     public var id: String { name }
 
@@ -37,7 +48,10 @@ public struct ComputeProviderFacts: Sendable, Equatable, Identifiable {
         secret: String? = nil,
         secretPresent: Bool? = nil,
         modelsAssigned: [String] = [],
-        budget: ComputeBudgetFacts? = nil
+        budget: ComputeBudgetFacts? = nil,
+        enabled: Bool = true,
+        tag: ComputeTag? = nil,
+        secretName: String? = nil
     ) {
         self.name = name
         self.kind = kind
@@ -48,6 +62,9 @@ public struct ComputeProviderFacts: Sendable, Equatable, Identifiable {
         self.secretPresent = secretPresent
         self.modelsAssigned = modelsAssigned
         self.budget = budget
+        self.enabled = enabled
+        self.tag = tag ?? (locality == "on_machine" ? .local : .cloud)
+        self.secretName = secretName
     }
 
     public init?(json: JSONValue) {
@@ -61,7 +78,10 @@ public struct ComputeProviderFacts: Sendable, Equatable, Identifiable {
             secret: json.string("secret"),
             secretPresent: json.bool("secret_present", "secretPresent"),
             modelsAssigned: (json["models_assigned"]?.arrayValue ?? json["modelsAssigned"]?.arrayValue ?? []).compactMap(\.stringValue),
-            budget: json["budget"].flatMap(ComputeBudgetFacts.init(json:))
+            budget: json["budget"].flatMap(ComputeBudgetFacts.init(json:)),
+            enabled: json.bool("enabled") ?? true,
+            tag: json.string("tag").flatMap(ComputeTag.init(rawValue:)),
+            secretName: json.string("secret_name", "secretName")
         )
     }
 
@@ -180,6 +200,128 @@ public struct ComputeFacts: Sendable, Equatable {
             return "no engine — compute.yaml assigns no default, so the assistant is not started and queued turns wait"
         }
         return "\(row.ref) at \(row.effort) effort"
+    }
+}
+
+// MARK: - the one tag (C132)
+
+/// *Local* (free), *Cloud* (by the token), *Subscription* — a provider's one
+/// tag, as the console reports it (`tag` on `GET /api/compute` and on every
+/// catalogue place). There is no *By token* tag (screen-15 §5.3).
+public enum ComputeTag: String, CaseIterable, Sendable, Equatable {
+    case local
+    case cloud
+    case subscription
+
+    /// Title Case: a tag names a kind of thing (design-system P10).
+    public var label: String {
+        switch self {
+        case .local: return "Local"
+        case .cloud: return "Cloud"
+        case .subscription: return "Subscription"
+        }
+    }
+
+    /// Where the model runs, for the dropdown's and the list's two groups:
+    /// *On this Mac*, then *Cloud* — a subscription runs in the cloud.
+    public var runsOnThisMac: Bool { self == .local }
+
+    /// A tag the wire does not know yet reads as Cloud: off this Mac is the
+    /// cautious reading of an unknown place.
+    public init(wire: String?) {
+        self = wire.flatMap(ComputeTag.init(rawValue:)) ?? .cloud
+    }
+}
+
+// MARK: - spending limits (T4-19)
+
+/// `limits` on `GET /api/compute` (T4-19, `spendingLimits` in
+/// `packages/core/src/budget.ts`): every spending limit side by side — the
+/// instance's, each provider's, each project's daily budget. The pane renders
+/// this and computes none of it: a subscription is its plan's window because
+/// the SERVER says `kind: window`, not because the app read a tag.
+public struct ComputeLimits: Sendable, Equatable {
+    /// A limit in dollars: the instance's, or a provider's billed by the token.
+    public struct Dollar: Sendable, Equatable {
+        /// `instance` or `provider:<name>` — what `POST /api/compute/budget` takes.
+        public let scope: String
+        /// The dotted path in `compute.yaml` a refusal names.
+        public let field: String
+        public let dailyUSD: Double?
+        public let monthlyUSD: Double?
+        /// Nil = no limit is set here, so nothing happens.
+        public let action: ComputeBudgetAction?
+        /// Nil when the `spend` query is not loaded — never a guessed zero.
+        public let spentToday: Double?
+        public let spentThisMonth: Double?
+
+        init?(json: JSONValue) {
+            guard json.string("kind") == "usd", let scope = json.string("scope") else { return nil }
+            self.scope = scope
+            field = json.string("field") ?? scope
+            dailyUSD = json["daily_usd"]?.doubleValue
+            monthlyUSD = json["monthly_usd"]?.doubleValue
+            action = json.string("action").flatMap(ComputeBudgetAction.init(rawValue:))
+            spentToday = json["spent"]?["daily"]?.doubleValue
+            spentThisMonth = json["spent"]?["monthly"]?.doubleValue
+        }
+    }
+
+    /// A provider's line: the provider, then its limit — dollars, or its
+    /// plan's window when it is billed by subscription.
+    public struct Provider: Sendable, Equatable, Identifiable {
+        public let name: String
+        public let tag: ComputeTag
+        public let enabled: Bool
+        /// Nil for a subscription: its window is its limit (C133).
+        public let dollar: Dollar?
+        /// A subscription's calls in each window; nil when `spend` is not loaded.
+        public let callsToday: Int?
+        public let callsThisMonth: Int?
+
+        public var id: String { name }
+        public var isWindow: Bool { dollar == nil }
+
+        init?(json: JSONValue) {
+            guard let name = json.string("name") else { return nil }
+            self.name = name
+            tag = ComputeTag(wire: json.string("tag"))
+            enabled = json.bool("enabled") ?? true
+            dollar = Dollar(json: json)
+            callsToday = json["used"]?.int("calls_today")
+            callsThisMonth = json["used"]?.int("calls_this_month")
+        }
+    }
+
+    /// A project's daily budget — set by `PUT /api/projects/:slug`, and at
+    /// the limit an autonomous project switches to review, never a refusal.
+    public struct Project: Sendable, Equatable, Identifiable {
+        public let id: String
+        public let title: String?
+        public let dailyUSD: Double?
+        public let spentToday: Double?
+        public let mode: String
+
+        init?(json: JSONValue) {
+            guard let id = json.string("id") else { return nil }
+            self.id = id
+            title = json.string("title")
+            dailyUSD = json["daily_usd"]?.doubleValue
+            spentToday = json["spent"]?["daily"]?.doubleValue
+            mode = json.string("mode") ?? "autonomous"
+        }
+    }
+
+    public let instance: Dollar?
+    public let providers: [Provider]
+    /// Nil when `projects_rollup` is not loaded — never a guessed empty list.
+    public let projects: [Project]?
+
+    public init?(json: JSONValue) {
+        guard case .object = json else { return nil }
+        instance = json["instance"].flatMap(Dollar.init(json:))
+        providers = (json["providers"]?.arrayValue ?? []).compactMap(Provider.init(json:))
+        projects = json["projects"]?.arrayValue?.compactMap(Project.init(json:))
     }
 }
 

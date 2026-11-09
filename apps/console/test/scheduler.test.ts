@@ -109,7 +109,7 @@ describe("the default schedules fire once, at their time (T3-1's acceptance)", (
     const { routines, skipped } = await loadRoutines({ home: `${root}routines` });
     expect(skipped).toEqual([]);
     const loaded = await loadSchedules(routines.map((u) => ({ ...u, run: recorder(db, fired, u.name) })));
-    expect(loaded.map((r) => r.name).sort()).toEqual(["knowledge-fold", "morning-brief", "plan-tomorrow", "reply-review", "session-fold", "session-purge", "standup", "update-check", "weekly-review"]);
+    expect(loaded.map((r) => r.name).sort()).toEqual(["knowledge-fold", "morning-brief", "plan-tomorrow", "recording-retention", "reply-review", "session-fold", "session-purge", "standup", "update-check", "weekly-review"]);
 
     // Sunday 00:00 to Saturday 23:59, New York
     await runClock(db, loaded, { from: "2026-09-20T04:00:00Z", to: "2026-09-27T03:59:00Z" });
@@ -129,17 +129,20 @@ describe("the default schedules fire once, at their time (T3-1's acceptance)", (
 
     // T3-10's Session Fold is on an interval, not a slot: once an hour, the
     // first on the first tick (it has never run), and never twice in an hour
-    const hourly = fired["session-fold"] ?? [];
-    expect(hourly).toHaveLength(7 * 24);
-    for (let i = 1; i < hourly.length; i++) expect(Date.parse(hourly[i]!.at) - Date.parse(hourly[i - 1]!.at)).toBe(3_600_000);
-    for (const f of hourly) expect(f).toMatchObject({ scheduledFor: undefined, timeZone: undefined });
+    // — and so is T8-4's Recording Retention
+    for (const name of ["session-fold", "recording-retention"]) {
+      const hourly = fired[name] ?? [];
+      expect(hourly, name).toHaveLength(7 * 24);
+      for (let i = 1; i < hourly.length; i++) expect(Date.parse(hourly[i]!.at) - Date.parse(hourly[i - 1]!.at)).toBe(3_600_000);
+      for (const f of hourly) expect(f).toMatchObject({ scheduledFor: undefined, timeZone: undefined });
+    }
 
     // each slotted run is handed its slot and zone, and its row carries the slot
-    const slotted = Object.entries(fired).filter(([name]) => name !== "session-fold").flatMap(([, f]) => f);
+    const slotted = Object.entries(fired).filter(([name]) => name !== "session-fold" && name !== "recording-retention").flatMap(([, f]) => f);
     for (const f of slotted) expect(f).toMatchObject({ scheduledFor: f.at, timeZone: NY });
     const rows = db.runs.filter((r) => r.kind === "routine_run" && r.meta?.scheduled_for !== undefined);
     expect(rows).toHaveLength(5 + 5 + 7 + 5 + 7 + 1 + 7 + 7);
-    expect(db.runs.filter((r) => r.kind === "routine_run")).toHaveLength(5 + 5 + 7 + 5 + 7 + 1 + 7 + 7 + 7 * 24);
+    expect(db.runs.filter((r) => r.kind === "routine_run")).toHaveLength(5 + 5 + 7 + 5 + 7 + 1 + 7 + 7 + 2 * 7 * 24); // two hourly routines: the session fold and recording retention (T8-4)
     for (const r of rows) expect(r.meta).toMatchObject({ scheduled_for: r.ts.toISOString(), time_zone: NY, outcome: "silent" });
   }, 60_000); // ten thousand ticks: ~3 s alone, more beside every other suite
 });

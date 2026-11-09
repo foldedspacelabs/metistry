@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { GITHUB_WRITE_SECRET, KEEP_AWAKE_VALUES, instanceFile, loadCompute, parseKeepAwake, parsePullArg, parsePushArg, parseSecretsFile, providerSecretNames, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
+import { KEEP_AWAKE_VALUES, instanceFile, parseKeepAwake, parsePullArg, parsePushArg, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
 import {
   assign,
   cacheReport,
@@ -73,7 +73,6 @@ import {
   type ConnectionsOptions,
 } from "./connections.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
-import { consoleSecretNames, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { connect, connectList, connectRemove, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList, renderRemove } from "./connect.js";
@@ -120,9 +119,11 @@ import {
   secretsRemove,
   secretsReplace,
   secretsSet,
+  deliveredSecretNames,
   ensureSecret,
   syncSecrets,
   serviceAnswers,
+  type DeliveredSecrets,
   type TokenService,
   type NamedSecretsOptions,
   type SyncDirection,
@@ -1573,39 +1574,15 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         out(minted.detail);
         if (minted.id) instanceId = minted.id;
       }
-      // `--to env` delivers every named secret compute.yaml's providers
-      // reference (T4-18): the engine reads a key from its environment, never
-      // the Keychain. A compute.yaml that does not validate delivers nothing,
-      // and says so — the rest of the sync is unaffected.
-      let deliver: string[] = [];
+      // `--to env` delivers every owner-named secret a service reads — the
+      // engine's provider keys (T4-18), the connections' (T4-10, T4-24), the
+      // owner's github_write (T2-13) — as `METISTRY_SECRET_<NAME>`: the same
+      // answer `up`'s render uses (secrets.ts `deliveredSecretNames`). A
+      // source that does not read is a note; the rest of the sync is unaffected.
+      let deliver: DeliveredSecrets | undefined;
       if (loaded.instanceDir && positional[0] === "sync") {
-        try {
-          deliver = providerSecretNames((await loadCompute(instanceFile(loaded.instanceDir, "compute"))).compute);
-        } catch (e) {
-          out(`compute.yaml does not validate, so no provider key is delivered this run (${e instanceof Error ? e.message : String(e)})`);
-        }
-        // ...and every secret a connection the console reaches lists: a sync's
-        // (T4-24: the Linear key) and, since the console holds the pool the
-        // proxy dials through (T4-10), an MCP, API, feed or files
-        // connection's — an OAuth sign-in's refresh token and the owner's own
-        // client included. Each is filled at the egress door, for the secret's
-        // listed hosts only; the console never reads the Keychain
-        try {
-          const syncSecrets = consoleSecretNames(await loadInstanceCatalog({ instanceDir: loaded.instanceDir, seedDir: resolveSeedDir(productDir) }));
-          deliver = [...new Set([...deliver, ...syncSecrets])];
-        } catch (e) {
-          out(`the connection types could not be read, so no sync's secret is delivered this run (${e instanceof Error ? e.message : String(e)})`);
-        }
-        // ...and the owner's own github_write when secrets.yaml names it
-        // (T2-13): the console's pull request doors post with it, filled only
-        // while its *Sent only to* list names api.github.com. Named by the
-        // file, never assumed: an instance without it delivers nothing
-        const secretsPath = instanceFile(loaded.instanceDir, "secrets");
-        try {
-          if (existsSync(secretsPath) && Object.hasOwn(parseSecretsFile(await readFile(secretsPath, "utf8")).secrets, GITHUB_WRITE_SECRET)) deliver = [...new Set([...deliver, GITHUB_WRITE_SECRET])];
-        } catch (e) {
-          out(`secrets.yaml does not validate, so ${GITHUB_WRITE_SECRET} is not delivered this run (${e instanceof Error ? e.message : String(e)})`);
-        }
+        deliver = await deliveredSecretNames({ instanceDir: loaded.instanceDir, productDir });
+        for (const n of deliver.notes) out(n);
       }
       // an installed launchd shape (this instance's supervisor.json): the
       // verb re-renders the jobs from `.env` itself, below
@@ -1617,7 +1594,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         envTarget: paths.write,
         exampleFile: productDir ? join(productDir, ".env.example") : undefined,
         instanceId,
-        deliver,
+        deliver: deliver?.names ?? [],
+        deliverComplete: deliver?.complete ?? false,
         out,
         ...(io.exec ? { exec: io.exec } : {}),
         // the Keychain exists only on darwin; CI runs this suite on Linux, so tests pin the platform

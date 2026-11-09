@@ -80,9 +80,11 @@ import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_
 import { UNCONFINED_PROFILE_REL } from "./sandbox.js";
 import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
 import { defaultUi, padTo, statusName, visibleWidth, type Ui } from "./ui.js";
-import { envPaths, readInstanceId } from "./instance.js";
+import { envPaths, instanceEnvFile, readInstanceId } from "./instance.js";
 import { securityPresence } from "./keychain.js";
 import { driftedNames, launchdEnvDrift } from "./env-follow.js";
+import { describeLineDiff, diffAgainstRecord, inspectEnvText, parseRenderRecord, PRE_RENDER_FILENAME, renderRecordPath } from "./env-render.js";
+import { parseDotEnv } from "./env.js";
 import { MIGRATE_SCOPE_COMMAND, sharedScopeStatus } from "./secrets.js";
 import { appDmgAssetName, compareVersions, resolveAppPath } from "./mac-app.js";
 import { instanceLockPath, readLock } from "./lock.js";
@@ -713,6 +715,67 @@ export async function launchdEnvRow(o: { stateRoot: string; home: string | undef
     })),
   };
   return decorate(row, { action, repair });
+}
+
+// ---- the derived .env -------------------------------------------------------
+//
+// `.metistry/state/.env` is written by `metistry up` from `.metistry/*.yaml`
+// and the login Keychain, under a header carrying the sha256 of its body
+// (X-124; env-render.ts). This row reads the file and the render record and
+// never the Keychain: whether the file is the one `up` wrote (ok), was never
+// derived (`pre-render`: a hand-written file from before X-124), or was edited
+// since — in which case the edited lines are NAMED (changed, added, removed;
+// never a value) and `metistry up` is the one fix. A render that stopped
+// honouring a value the file had (`.metistry/*.yaml` now decides it) is also
+// said here, once, until the next render finds nothing to supersede.
+
+/** Doctor's `env` row for an instance: the state of its derived `.env`. */
+export async function envFileRow(instanceDir: string): Promise<DoctorRow> {
+  let action: DoctorAction | undefined;
+  const file = instanceEnvFile(instanceDir);
+  const derive = (label: string) => (action = runVerb(["metistry", "up"], label));
+  const row: DoctorRow = {
+    kind: "instance",
+    ...(await runCheck("env", `${file} is the file \`metistry up\` derived (its header's sha256 matches its body) and nothing else has written it since`, async () => {
+      const text = existsSync(file) ? await readFile(file, "utf8") : undefined;
+      const state = inspectEnvText(text);
+      const recordPath = renderRecordPath(dirname(file));
+      const record = parseRenderRecord(existsSync(recordPath) ? await readFile(recordPath, "utf8") : undefined);
+      const superseded = record ? Object.entries(record.superseded) : [];
+      const meta = { state: state.kind, ...(record ? { rendered: record.sections, superseded: superseded.map(([n]) => n) } : {}) };
+      switch (state.kind) {
+        case "absent":
+          derive("Derive .env");
+          return { status: "absent", remediation: `no ${file} — \`metistry up\` derives it from .metistry/*.yaml and the login Keychain`, meta };
+        case "pre-render":
+          derive("Derive .env");
+          return {
+            status: "degraded",
+            remediation: `${file} was written by hand, or by a release before .env was derived — \`metistry up\` derives it: every secret-shaped line is adopted into the login Keychain (never minted over), every other line is carried as written, and the file as it is now is kept beside it as ${PRE_RENDER_FILENAME}`,
+            meta,
+          };
+        case "hand-edited": {
+          const diff = record ? diffAgainstRecord(record, new Map(Object.entries(parseDotEnv(text ?? "")))) : undefined;
+          derive("Derive .env again");
+          return {
+            status: "degraded",
+            remediation: `${file} was edited since \`metistry up\` last derived it (${diff ? describeLineDiff(diff) : "which lines is not known: no render record beside it"}) — \`metistry up\` derives it again and names what it did with each edit: an edited secret goes into the Keychain, an edited configuration line is kept, a removed line a store still holds comes back. Change a secret with \`metistry secrets\` and configuration with the .metistry/*.yaml verb that owns it, not by editing the file`,
+            meta: { ...meta, ...(diff ? { diff } : {}) },
+          };
+        }
+        case "rendered":
+          if (superseded.length > 0) {
+            return {
+              status: "degraded",
+              remediation: `the last render stopped honouring a value the file had: ${superseded.map(([n, from]) => `${n} (now decided by ${from})`).join(", ")} — the previous line is in ${PRE_RENDER_FILENAME} (the first copy, never overwritten); set it where it now lives, and the next \`metistry up\` clears this row`,
+              meta,
+            };
+          }
+          return { meta };
+      }
+    })),
+  };
+  return action ? { ...row, action } : row;
 }
 
 // ---- instance layout --------------------------------------------------------
@@ -2341,7 +2404,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     started,
     nowMs: clock(),
   });
-  const [componentRows, registries, layout, inbox, profile, vaultCase, cli, app, dbAndSchedules, launchd, keepAwake, remote, supervisor, launchdEnv, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
+  const [componentRows, registries, layout, inbox, envFile, profile, vaultCase, cli, app, dbAndSchedules, launchd, keepAwake, remote, supervisor, launchdEnv, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
     (async () =>
       Promise.all(
         (await walkManifests(productDir)).map(async (m) => {
@@ -2360,6 +2423,10 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     registriesRow(productDir, env),
     layoutRow(instanceDir),
     inboxRow(instanceDir),
+    // the derived `.env` (X-124): the file `up` wrote, or a hand edit named
+    // line by line — an instance's file only; a checkout's `.env` is the
+    // deprecated environment, not the derived one
+    env.METISTRY_INSTANCE_DIR ? envFileRow(instanceDir) : Promise.resolve(undefined),
     profileRow(instanceDir),
     vaultCaseRow(instanceDir, env.METISTRY_SEED_DIR?.trim() || join(productDir, "seed")),
     // whether typing `metistry` finds this install's shim: a filesystem
@@ -2417,7 +2484,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   const targetKeys = retiredTargetKeysRow(env);
   // after every reader of it has finished: the pool the connection rows and the collectors' checks shared
   await checker?.close().catch(() => {});
-  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...remote, ...supervisor, ...(launchdEnv ? [launchdEnv] : []), ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), ...(targetKeys ? [targetKeys] : []), vaultSync, ...connections);
+  rows.push(...componentRows, registries, layout, inbox, ...(envFile ? [envFile] : []), ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...remote, ...supervisor, ...(launchdEnv ? [launchdEnv] : []), ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), ...(targetKeys ? [targetKeys] : []), vaultSync, ...connections);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, product, shape, ok: !rows.some((r) => r.status === "failed"), rows: classifyRows(rows) };
 }

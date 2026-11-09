@@ -1,0 +1,38 @@
+#!/bin/sh
+# Refuse a commit made inside an agent session unless its message carries the
+# agent brief's trailer (docs/ops/agent-brief.md, "How you finish"). Exact where
+# a Claude Code Bash-text check cannot be (heredocs, -F, editors): git hands this
+# hook the finished message file.
+#
+# Detection, honestly: Claude Code exports CLAUDECODE=1 into every shell it runs
+# for the model, subagents and `claude -p` children included; the owner's own
+# terminal does not have it. Anything can `unset CLAUDECODE` — this stops the
+# honest omission, it is not a lock. Merge commits are left alone (no author
+# wrote their message).
+#   Owner bypass, any commit:  METISTRY_ALLOW_NO_TRAILER=1 git commit …
+#   Require it from everyone:  METISTRY_REQUIRE_TRAILER=1
+#   A newer model version:     METISTRY_TRAILER='Co-Authored-By: … <noreply@anthropic.com>'
+set -eu
+
+[ "${METISTRY_ALLOW_NO_TRAILER:-0}" = "1" ] && exit 0
+if [ "${METISTRY_REQUIRE_TRAILER:-0}" != "1" ] && [ "${CLAUDECODE:-}" != "1" ]; then
+  exit 0
+fi
+
+# A merge in progress: git sets MERGE_HEAD.
+if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+  exit 0
+fi
+
+trailer=${METISTRY_TRAILER:-'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>'}
+msg=${1:?commit-msg: no message file}
+
+# Trailer keys are case-insensitive; ignore comment lines and CRs.
+if grep -v '^#' "$msg" | tr -d '\r' | grep -iqxF -- "$trailer"; then
+  exit 0
+fi
+
+echo "commit-msg: refused — this commit is from an agent session and its message lacks the trailer:" >&2
+echo "    $trailer" >&2
+echo "commit-msg: add it as the last line (docs/ops/agent-brief.md). Owner bypass: METISTRY_ALLOW_NO_TRAILER=1" >&2
+exit 1

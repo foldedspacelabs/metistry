@@ -33,6 +33,7 @@ import {
   mintToken,
   parseCompute,
   parseOperation,
+  PRIVATE_TIER,
   resolveAssignment,
   resolveTier,
   type Compute,
@@ -247,7 +248,7 @@ interface Door {
   pool: pg.Pool;
   bases: Record<string, string>;
   run: string;
-  post(base: string, thread: string, m: { text: string; tier?: string }): Promise<{ status: number; body: { message_id: number | string; reply?: string } }>;
+  post(base: string, thread: string, m: { text: string; tier?: string; capture_session?: string }): Promise<{ status: number; body: { message_id: number | string; reply?: string } }>;
   servedFor(messageId: number | string, body: unknown): Promise<unknown>;
   routeRow(messageId: number | string): Promise<Record<string, any>>;
   close(): Promise<void>;
@@ -303,7 +304,7 @@ sql: SELECT 'the one open thing' AS title, (:limit)::int AS n
       const r = await fetch(`${base}/message`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ thread_id: thread, text: m.text, ...(m.tier ? { tier: m.tier } : {}) }),
+        body: JSON.stringify({ thread_id: thread, text: m.text, ...(m.tier ? { tier: m.tier } : {}), ...(m.capture_session ? { capture_session: m.capture_session } : {}) }),
       });
       return { status: r.status, body: (await r.json()) as { message_id: number | string; reply?: string } };
     },
@@ -624,6 +625,33 @@ budgets:
       table.push(await servedFor(b.body.message_id, b.body));
     }
     expect(table).toEqual(none);
+  });
+
+  it.skipIf(!hasDb)("at the door: a turn marked with a capture session is pinned to the private tier before any choice — the serving table is not asked, not waited for, and the message is served exactly as by a console with no policy", async () => {
+    const { post, servedFor, routeRow, bases, run, pool } = await door();
+    // a recording in progress: one the console holds no `capture_sessions` row for (X-84 — `POST /capture` writes it at the recording's end)
+    const live = `inv4-${run.toLowerCase().replace(/[^a-z0-9]/g, "a")}-live`;
+    // the fall-through the table serves to `deep` without the marker (the test above)
+    const m = { text: "weigh the two offers for the flat against each other", capture_session: live };
+    const a = await post(bases.none!, `inv4-${run}-pinned-none`, m);
+    const b = await post(bases.table!, `inv4-${run}-pinned-table`, m);
+    expect(a.status).toBe(202);
+    expect(b.status).toBe(202);
+    expect(await servedFor(b.body.message_id, b.body)).toEqual(await servedFor(a.body.message_id, a.body));
+    const { rows } = await pool.query(`SELECT meta FROM inbound_messages WHERE id = $1`, [b.body.message_id]);
+    expect(rows[0].meta).toMatchObject({ capture_session: live, route: { kind: "model", tier: "default", routed_by: "rule" } });
+    // the record says so: consulted after the 202 as every ruled turn is, and bounded by the marker — the tier named is the one the turn runs on
+    const row = await routeRow(b.body.message_id);
+    expect(row).toMatchObject({
+      tool: "default",
+      ok: true,
+      meta: {
+        phase: "serve",
+        rules: { served: "default" },
+        served: { kind: "model", tier: PRIVATE_TIER, routed_by: "rule", capture_session: true },
+        policy: { outcome: "not_consulted", bounded_by: ["capture_session"] },
+      },
+    });
   });
 });
 

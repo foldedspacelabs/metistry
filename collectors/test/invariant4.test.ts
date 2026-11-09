@@ -1,7 +1,7 @@
 // Invariant 4, as a test rather than a promise: **no model decides which
 // model to use** (PoC-20 phase 1; research §3.2).
 //
-// Three properties, each checked a different way, because a comment saying
+// Properties, each checked a different way, because a comment saying
 // "the classifier only supplies a fact" is not a control:
 //
 //   1. BEHAVIOURAL — for every intent in the enum, the set of models the drain
@@ -11,10 +11,12 @@
 //      and `run.ts` consumes only what that module's rule functions return.
 //      A new consumer of `.intent` in the drain fails this, loudly, with the
 //      line that added it.
-//   3. SOURCE — the router does not know the intent tier exists. The composer
-//      door is PoC-20 phase 2 and it needs the owner's ruling on invariant 4's
-//      wording first (§6 question 1); wiring it early would be the implicit
-//      amendment PoC-15/16's process exists to prevent.
+//
+// A third block held that the router did not know the intent tier existed —
+// "the composer door is not wired" — until the owner ruled on invariant 4's
+// wording. The owner ratified it on 2026-09-26 (plan §4 Q1), and T9-4 wired
+// the composer, so that block retired by ruling: the composer door's own
+// invariant tests are apps/console/test/invariant4.test.ts, one per clause.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { INTENT_NAMES, codesFor, intentRulesSchema, parseCompute, type Compute, type Intent } from "@foldedspacelabs/metistry-core";
@@ -151,23 +153,5 @@ describe("the classifier adds no surface (invariants 9 and 10)", () => {
     // 28 since T4-8b's connections lazy pair (the approved spec §2.6, Q5) — a
     // proxy door with its own gate, not a classifier surface.
     expect(TOOL_NAMES.filter((n) => n !== "propose_action").length).toBeLessThanOrEqual(28);
-  });
-});
-
-describe("the composer door is not wired (PoC-20 phase 2 needs a ruling)", () => {
-  const router = read("../../apps/console/src/router.ts");
-
-  it("the router validates the thresholds and reads nothing", () => {
-    // It imports the schema — that is what makes a bad threshold a startup
-    // failure — and `route()` must not mention the block at all.
-    expect(router).toContain("intentRulesSchema");
-    const routeFn = router.slice(router.indexOf("export function route("));
-    expect(routeFn).not.toMatch(/intent/i);
-  });
-
-  it("Route still has exactly the three kinds it had before a classifier existed", () => {
-    const union = router.slice(router.indexOf("export type Route"), router.indexOf("export function loadRules"));
-    expect(union.match(/kind: "/g)).toHaveLength(3);
-    expect(union).not.toMatch(/confidence|intent/i);
   });
 });

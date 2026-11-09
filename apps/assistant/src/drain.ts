@@ -6,11 +6,11 @@
 // Phase 3+ when brain-query exists — for now continuity is the SDK
 // transcript, per §4.17 rule 6's fast-path).
 
-import { DEFAULT_CACHING, emptyCompute, finishRun, parseDecisionBlock, PRIVATE_TIER, PrivateTierUnavailable, rollSession, startRun, v1Options, type Compute, type TierMap } from "@foldedspacelabs/metistry-core";
+import { DEFAULT_CACHING, emptyCompute, finishRun, parseDecisionBlock, parseOperation, PRIVATE_TIER, PrivateTierUnavailable, rollSession, startRun, v1Options, type Compute, type RouteOperation, type TierMap } from "@foldedspacelabs/metistry-core";
 import { isBudgetRefusal, offerBudgetWindow, BudgetRefusal } from "./budgets.js";
 import { recordShadow } from "./shadow.js";
-import { captureSessionInScope, resolveTurnFor, type ResolvedTurn } from "./tiers.js";
-import type { Engine } from "./engine.js";
+import { captureSessionInScope, resolveTurnFor, type PolicyCaps, type ResolvedTurn } from "./tiers.js";
+import type { Engine, TurnSpec } from "./engine.js";
 import { newTurnId } from "./brain.js";
 import { deferredCalls, skippedMeta, skippedReport } from "./deferred.js";
 import { holdTurn, pausedFor, probeDue, providerRecovered, providerRefusal, raiseRefusal, releaseHeld } from "./provider-refusal.js";
@@ -54,6 +54,49 @@ export interface DrainOptions {
   compute?: (() => Compute) | undefined;
   /** Test seam: how long a paused provider waits between probes (default `PROVIDER_PROBE_MS`). */
   probeMs?: number | undefined;
+  /**
+   * `rules.yaml` `policy.caps` from THIS process's copy of the file (tiers.ts
+   * `loadTiers`). A turn the router's policy served is built from its route
+   * and bound by these; absent = no policy block here, and such a turn takes
+   * the rules' default (docs/ops/dynamic-router.md §6).
+   */
+  policyCaps?: PolicyCaps | undefined;
+}
+
+/** What a policy-served turn runs as, on top of its tier: the operation and all four limits the engine enforces (docs/ops/dynamic-router.md §1, §3). */
+export interface PolicyTurn {
+  operation: RouteOperation;
+  maxToolCalls: number;
+  maxTokens: number;
+  maxCostUsd: number;
+  row?: string;
+}
+
+/**
+ * A row's route → the turn the policy chose, or why it cannot be served as
+ * one (docs/ops/dynamic-router.md §6, §7.3). `null` = the rules routed this
+ * message, and it runs as it always has.
+ *
+ * The OPERATION and the row's `tool_calls` come from the route; the CAPS come
+ * from this process's own `rules.yaml`, and the turn takes the smaller of the
+ * row's `tool_calls` and the file's — a row cannot grant itself more than the
+ * owner's file allows. A route this cannot read (no caps here, an operation
+ * outside the vocabulary, a fast path that reached the drain) is not guessed
+ * at: it is the rules' default, and the reason is recorded.
+ */
+export function policyTurnOf(route: any, caps: PolicyCaps | undefined): PolicyTurn | { fallback: "no_caps" | "operation" } | null {
+  if (route?.kind !== "model" || route?.routed_by !== "policy") return null;
+  if (!caps) return { fallback: "no_caps" };
+  const op = parseOperation(route.operation);
+  if (!op || op.form === "fast_path:<query>") return { fallback: "operation" };
+  const asked = typeof route.tool_calls === "number" && Number.isInteger(route.tool_calls) && route.tool_calls >= 0 ? route.tool_calls : caps.tool_calls;
+  return {
+    operation: route.operation as RouteOperation,
+    maxToolCalls: op.form === "answer" ? 0 : Math.min(asked, caps.tool_calls),
+    maxTokens: caps.tokens,
+    maxCostUsd: caps.cost_usd,
+    ...(typeof route.policy_row === "string" ? { row: route.policy_row } : {}),
+  };
 }
 
 /**
@@ -96,9 +139,16 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
   // on this Mac or not at all. With nowhere private to run it, the turn is
   // REFUSED — recorded and said — never answered on another tier.
   const captureSession = captureSessionInScope(msg.meta);
+  // A turn the router's policy served (T9-4) carries its operation on the
+  // route; one this process cannot build from it takes the rules' default
+  // tier and today's turn, and says why on its row.
+  const policyRead = policyTurnOf(routeMeta, opts.policyCaps);
+  let policy: PolicyTurn | null = policyRead !== null && "operation" in policyRead ? policyRead : null;
+  let routeFallback: { from: string; reason: string } | undefined =
+    policyRead !== null && "fallback" in policyRead ? { from: String(routeMeta.tier), reason: policyRead.fallback } : undefined;
   let turn: ResolvedTurn;
   try {
-    turn = resolveTurnFor(compute, tiers, routeMeta.kind === "model" ? routeMeta.tier : msg.meta?.tier, { captureSession });
+    turn = resolveTurnFor(compute, tiers, routeFallback ? undefined : routeMeta.kind === "model" ? routeMeta.tier : msg.meta?.tier, { captureSession });
   } catch (err) {
     if (!(err instanceof PrivateTierUnavailable)) throw err;
     const runId = await startRun(db, {
@@ -111,7 +161,7 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
     await db.query(`INSERT INTO outbound_messages (thread, text, in_reply_to, kind) VALUES ($1, $2, $3, 'alert')`, [msg.thread, `not answered: ${err.message}`, msg.id]);
     return true;
   }
-  const { tier, model, effort, assignment } = turn;
+  let { tier, model, effort, assignment } = turn;
 
   // A provider that refused the account (402 out of credits, 401/403 a key
   // it does not accept) is PAUSED while its report waits: the turn is held,
@@ -167,18 +217,61 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
       ...(assignment ? { engine: assignment.config.kind, model_ref: assignment.ref, caching: assignment.config.caching ?? DEFAULT_CACHING } : {}),
       ...(fresh ? { fresh_session: true } : {}),
       ...(interactive ? {} : { unattended: true }),
+      // a policy-served turn: what it was built from (docs/ops/dynamic-router.md §6)
+      ...(policy ? { operation: policy.operation, tool_calls: policy.maxToolCalls, ...(policy.row ? { policy_row: policy.row } : {}) } : {}),
+      ...(routeFallback ? { route_fallback: routeFallback } : {}),
     },
   });
   try {
+    // The spec for one attempt: the tier's model and effort, and — for a
+    // policy-served turn — its operation and the four caps the engine enforces.
+    const specFor = (p: PolicyTurn | null): TurnSpec => ({
+      model,
+      effort,
+      assignment,
+      thread: msg.thread,
+      tier,
+      turnId,
+      interactive,
+      ...(p ? { operation: p.operation, maxToolCalls: p.maxToolCalls, maxTokens: p.maxTokens, maxCostUsd: p.maxCostUsd } : {}),
+    });
+    const attempt = async (p: PolicyTurn | null) => {
+      try {
+        return await engine(prompt, { ...specFor(p), resume });
+      } catch (err) {
+        // A budget refusal is not a stale session: retrying it would only spend
+        // the check again and land in the same place. Nor is a provider
+        // refusing the account — a 402 retried is the same 402.
+        if (!resume || isBudgetRefusal(err) || providerRefusal(err)) throw err;
+        return await engine(prompt, specFor(p)); // stale session: fresh start
+      }
+    };
     let result;
     try {
-      result = await engine(prompt, { model, effort, resume, assignment, thread: msg.thread, tier, turnId, interactive });
+      result = await attempt(policy);
     } catch (err) {
-      // A budget refusal is not a stale session: retrying it would only spend
-      // the check again and land in the same place. Nor is a provider
-      // refusing the account — a 402 retried is the same 402.
-      if (!resume || isBudgetRefusal(err) || providerRefusal(err)) throw err;
-      result = await engine(prompt, { model, effort, assignment, thread: msg.thread, tier, turnId, interactive }); // stale session: fresh start
+      // THE BUDGET FALLBACK (docs/ops/dynamic-router.md §5): the guard ran on
+      // the tier the POLICY chose and refused it. The turn is re-resolved
+      // ONCE to the rules' default — today's route, today's turn — and asked
+      // again, so under `critical_only` the owner's message is answered
+      // exactly as it would have been with no policy. Never twice: a refusal
+      // of the default is the refusal, handled below as it always was.
+      if (!policy || !isBudgetRefusal(err)) throw err;
+      routeFallback = { from: tier, reason: "budget" };
+      policy = null;
+      ({ tier, model, effort, assignment } = resolveTurnFor(compute, tiers, undefined, { captureSession }));
+      await db.query(`UPDATE runs SET provider = $2, model = $3, meta = meta || $4::jsonb WHERE id = $1`, [
+        runId,
+        assignment?.provider ?? null,
+        model,
+        JSON.stringify({
+          tier,
+          effort,
+          route_fallback: routeFallback,
+          ...(assignment ? { engine: assignment.config.kind, model_ref: assignment.ref, caching: assignment.config.caching ?? DEFAULT_CACHING } : {}),
+        }),
+      ]);
+      result = await attempt(null);
     }
     const upsert = await db.query(
       `INSERT INTO sessions (id, thread, turns) VALUES ($1, $2, 1)

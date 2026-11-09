@@ -73,9 +73,12 @@ commands:
 # an operation and a tier from lists YOU wrote, inside the caps YOU set. Every
 # choice is recorded (`metistry compute route-report`), with no message text.
 #
-# It runs in SHADOW: it records what it would have chosen and serves nothing.
-# `mode: serve` is refused until the confirmatory eval clears the bar you
-# accepted — two weeks of shadow first, then the eval.
+# `mode: shadow` (the default) records what it would have chosen and serves
+# nothing. `mode: serve` makes its choice the route — for the rules'
+# fall-through only; commands, the picker and budgets still win, and anything
+# that fails takes today's route. Write `serve` only once the confirmatory eval
+# (`metistry-eval complexity`) clears the bar you accepted — two weeks of
+# shadow first, then the eval.
 #
 # `tiers:` is the allow-list, cheapest first, each a key of the `tiers:` block
 # above. The table names tiers, never models. First matching row wins; a

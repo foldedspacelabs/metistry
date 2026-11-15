@@ -27,7 +27,7 @@
     "@metistry-apps/routines": "workspace:*",
     "chokidar": "^6.0.0",
     "@simplewebauthn/browser": "^14.0.0",
-    "@simplewebauthn/server": "^14.0.3",
+    "@simplewebauthn/server": "^14.1.0",
     "pg": "^8.23.1",
     "web-push": "^3.6.7",
     "yaml": "^2.9.1",
